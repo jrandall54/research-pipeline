@@ -1,0 +1,68 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/G2D7qjZIRGqasmEO+rWG3wUVRQM</id>
+  <title>arXiv Query: search_query=cat:cs.CR&amp;id_list=&amp;start=0&amp;max_results=3</title>
+  <updated>2026-11-21T18:42:19Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:cs.CR&amp;start=0&amp;max_results=3&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>3</opensearch:itemsPerPage>
+  <opensearch:totalResults>54694</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2611.26601v1</id>
+    <title>SoK: Assessing the Evolution of LLM Capability in
+  Software Vulnerability Research</title>
+    <updated>2026-11-19T18:54:19Z</updated>
+    <link href="https://arxiv.org/abs/2611.26601v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2611.26601v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>LLM-based agents are becoming increasingly capable at discovering,
+  validating and patching vulnerabilities in real software.
+  We introduce a framework that rates these capabilities on an autonomy scale.</summary>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-11-19T18:54:19Z</published>
+    <arxiv:primary_category term="cs.CR"/>
+    <author>
+      <name>Amine Lbath</name>
+    </author>
+    <author>
+      <name>Manan Suri</name>
+    </author>
+    <author>
+      <name>Dinesh Manocha</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2501.01234v2</id>
+    <title>Classical Oracle Separation of QMA from the QCMA Hierarchy</title>
+    <updated>2026-11-19T18:40:14Z</updated>
+    <link href="https://arxiv.org/abs/2501.01234v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2501.01234v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We introduce a new problem called Codeword-Hash pairs in Noise and prove that, in the query complexity model, it is in QMA but hard for the QCMA hierarchy.</summary>
+    <category term="quant-ph" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-01-02T18:40:14Z</published>
+    <arxiv:comment>In submission</arxiv:comment>
+    <arxiv:primary_category term="quant-ph"/>
+    <author>
+      <name>Alper Cakan</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2611.26569v1</id>
+    <title>Text-Aware, Vision-Blind: How Multimodal Image Editing Systems Handle Unsafe Inputs</title>
+    <updated>2026-11-19T18:36:19Z</updated>
+    <link href="https://arxiv.org/abs/2611.26569v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2611.26569v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary></summary>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-11-19T18:36:19Z</published>
+    <arxiv:primary_category term="cs.CR"/>
+    <author>
+      <name>Ziqing Yang</name>
+    </author>
+    <author>
+      <name>Michael Backes</name>
+    </author>
+  </entry>
+</feed>

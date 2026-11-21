@@ -21,3 +21,9 @@
 **Idempotent** — safe to run repeatedly: running `init` twice gives the same result as once and never destroys your edits.
 
 **Package data** — non-code files (here the default YAML templates) shipped inside the installed Python package and read with `importlib.resources`.
+
+**Atom feed** — a standard XML format for lists of items. arXiv's API answers queries with an Atom feed: one `<entry>` per paper with title, summary, authors and dates. See `sources.md`.
+
+**Rate limit** — a cap on how often you may call a service. arXiv asks for at most one API request per 3 seconds; the arXiv source enforces that gap itself. See `sources.md`.
+
+**Pagination** — fetching a long result list in fixed-size chunks (pages) using an offset, instead of in one huge response. See `sources.md`.

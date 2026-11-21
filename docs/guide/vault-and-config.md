@@ -47,7 +47,7 @@ Seed ids may be written with or without quotes (`2301.10000` or `"2301.10000"`);
 
 ### What `init` does, step by step
 
-1. Resolve the vault path: `--vault`, else env `RESEARCH_VAULT`, else `~/research-vault`.
+1. Resolve the vault path: `--vault`, else env `RESEARCH_VAULT`, else `~/research-vault`. `~` is expanded and relative paths are made absolute, so `config.yaml` always records the absolute path.
 2. If stdin is a terminal, ask for topics (comma-separated) and arXiv categories (default shown). When piped or run from a script it asks nothing and uses the defaults.
 3. Create the folders above (existing ones are left alone).
 4. Write `profile.yaml` and `config.yaml` from the packaged templates **only if they do not exist yet**.

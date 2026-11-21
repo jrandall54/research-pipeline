@@ -25,11 +25,11 @@ class ConfigError(Exception):
 
 
 def resolve_vault(path: Path | None) -> Path:
-    """Explicit path, else $RESEARCH_VAULT, else ~/research-vault."""
-    if path is not None:
-        return path
-    env = os.environ.get("RESEARCH_VAULT")
-    return Path(env) if env else Path.home() / "research-vault"
+    """Absolute, ~-expanded vault path: explicit path, else $RESEARCH_VAULT, else ~/research-vault."""
+    if path is None:
+        env = os.environ.get("RESEARCH_VAULT")
+        path = Path(env) if env else Path.home() / "research-vault"
+    return path.expanduser().resolve()
 
 
 def _default_text(name: str) -> str:
@@ -43,6 +43,7 @@ def init_vault(
     categories: list[str] | None = None,
 ) -> None:
     """Create the vault layout. Idempotent; never overwrites config.yaml or profile.yaml."""
+    path = resolve_vault(path)
     path.mkdir(parents=True, exist_ok=True)
     for name in FOLDERS:
         (path / name).mkdir(exist_ok=True)

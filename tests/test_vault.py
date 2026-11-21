@@ -113,3 +113,27 @@ def test_load_profile_unquoted_short_id(tmp_path):
     p = tmp_path / "profile.yaml"
     p.write_text("topics: [a]\nseeds: [2301.1234]\n")
     assert load_profile(p).seeds == ["2301.1234"]
+
+
+def test_relative_vault_gives_absolute_vault_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, ["init", "--vault", "foo"])
+    assert result.exit_code == 0, result.output
+    cfg = load_config(tmp_path / "foo" / "config.yaml")
+    assert cfg.vault_path == (tmp_path / "foo").resolve()
+    assert cfg.vault_path.is_absolute()
+
+
+def test_tilde_env_vault_expanded(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("RESEARCH_VAULT", "~/v")
+    assert resolve_vault(None) == (tmp_path / "v").resolve()
+    result = CliRunner().invoke(app, ["init"])
+    assert result.exit_code == 0, result.output
+    assert load_config(tmp_path / "v" / "config.yaml").vault_path == (tmp_path / "v").resolve()
+
+
+def test_init_vault_direct_relative_path_normalized(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    init_vault(Path("rel"))
+    assert load_config(tmp_path / "rel" / "config.yaml").vault_path == (tmp_path / "rel").resolve()

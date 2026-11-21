@@ -257,3 +257,23 @@ def set_llm_model(vault: Path, name: str) -> None:
         return True
 
     _edit(_config_path(vault), Config, change)
+
+
+def set_llm_url(vault: Path, url: str) -> None:
+    url = url.strip()
+    if not re.match(r"^https?://\S+$", url):
+        raise ValueError(f"{url!r} is not a server address: it must start with http:// or https://")
+
+    def change(data) -> bool:
+        data["llm_url"] = url
+        return True
+
+    _edit(_config_path(vault), Config, change)
+
+
+def set_llm_num_ctx(vault: Path, n: int) -> None:
+    def change(data) -> bool:
+        data["llm_num_ctx"] = n
+        return True
+
+    _edit(_config_path(vault), Config, change)

@@ -167,3 +167,11 @@ def test_same_day_rerun_keeps_summary(conn, tmp_path):
     write_digest(conn, tmp_path, DAY, HEALTH)
     text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
     assert "A classifier for X." in text
+
+
+def test_cited_section_names_cannot_break_digest_structure(tmp_path):
+    from research_pipeline.digest import _claim
+    from research_pipeline.summarize import Claim
+
+    line = _claim(Claim(text="t", sections=["Intro\n## Injected", "2 Method"]), [])
+    assert "\n" not in line and line.endswith("[§ Intro ## Injected, 2 Method]")

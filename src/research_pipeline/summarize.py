@@ -11,7 +11,7 @@ from typing import Literal, TypeVar
 
 from pydantic import BaseModel, Field
 
-from research_pipeline.fulltext import FullTextUnavailable
+from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.llm import LLM, LlmError
 from research_pipeline.models import Section, Status
 from research_pipeline.sources.base import SourceError
@@ -162,7 +162,7 @@ def run_summarize(
             sections = get_fulltext(conn, pid)
             if sections is None:
                 try:
-                    sections = fetch(pid)
+                    sections = ensure_usable(fetch(pid))
                     save_fulltext(conn, pid, sections)
                 except FullTextUnavailable:
                     sections = None

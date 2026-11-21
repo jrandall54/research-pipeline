@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from research_pipeline.fulltext import FullTextUnavailable
+from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.gold import GoldPaper, load_gold
 from research_pipeline.llm import LLM
 from research_pipeline.models import Section
@@ -162,7 +162,7 @@ def run_eval(
     for g in gold:
         try:
             try:
-                sections: list[Section] | None = fetch(g.paper_id)
+                sections: list[Section] | None = ensure_usable(fetch(g.paper_id))
             except FullTextUnavailable:
                 sections = None
             abstract = ""

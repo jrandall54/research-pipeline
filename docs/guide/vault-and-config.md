@@ -23,7 +23,7 @@ research-vault/
   eval/            one .json and .md per `rpipe eval run`, created on first use (see evaluation.md)
 ```
 
-The pipeline currently writes `vault.sqlite` (which also holds full texts and summaries), `digests/`, `cache/`, `gold/` (when you use `rpipe gold`) and `eval/` (created by `rpipe eval run`, not at `init`), plus the two YAML files. `raw/`, `markdown/`, `summaries/` and `my_work/` are created now but nothing writes to them yet; they are reserved so the layout never changes later.
+The pipeline currently writes `vault.sqlite` (which also holds full texts and summaries), `digests/`, `cache/`, `gold/` (created by `init`, filled by `rpipe gold`) and `eval/` (the only one created later, by `rpipe eval run`), plus the two YAML files. `raw/`, `markdown/`, `summaries/` and `my_work/` are created now but nothing writes to them yet; they are reserved so the layout never changes later.
 
 ### `config.yaml` fields
 
@@ -35,8 +35,8 @@ The pipeline currently writes `vault.sqlite` (which also holds full texts and su
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | Model that turns text into vectors for similarity (see `glossary.md`). |
 | `rss_feeds` | `[]` | Extra feed URLs (read but not used yet: RSS collection is a later phase). |
 | `llm_model` | `qwen3:14b` | Ollama model that writes summaries. Change with `rpipe model set NAME`. See `llm.md`. |
-| `llm_url` | `http://localhost:11434` | Where the Ollama server listens. |
-| `llm_num_ctx` | `32768` | Context window in tokens (at least 8192; smaller leaves no room for the paper): how much text the model reads at once. See `llm.md`. |
+| `llm_url` | `http://localhost:11434` | Where the Ollama server listens. Change with `rpipe model set-url URL`. |
+| `llm_num_ctx` | `32768` | Context window in tokens (at least 8192; smaller leaves no room for the paper): how much text the model reads at once. Change with `rpipe model set-context N`. See `llm.md`. |
 
 Both files reject unknown keys: a typo such as `keyword:` or `top-n:` stops the command with an error naming the file and the key, instead of being silently ignored.
 

@@ -27,7 +27,7 @@ Every point in both (a *claim*) names the paper section(s) it came from. Code th
 
 Step by step:
 
-1. **Pick the text.** With full text, the input is the stored sections and `basis` is `full_text`. Without it (`sections=None`), the abstract becomes one pseudo-section titled `Abstract` and `basis` is `abstract`.
+1. **Pick the text.** With full text, the input is the stored sections and `basis` is `full_text`. Without it (`sections=None`, which also happens when a page had less than 50 characters of section text, see `fulltext.md`), the abstract becomes one pseudo-section titled `Abstract` and `basis` is `abstract`.
 2. **Fit the budget** (`fit_to_budget`, below). If the paper is too long, back matter is dropped and the rest trimmed; `truncated` becomes `True`.
 3. **Build the prompt** (`build_summary_prompt`). The *system* prompt holds the rules. The *user* prompt holds a one-line task, a note on the basis, and the paper inside a single `<paper> ... </paper>` block, with each section introduced by a `## <title>` heading.
 4. **Ask the model** for JSON in the `Summary` schema ([llm.md](llm.md) handles invalid JSON with its own single retry).

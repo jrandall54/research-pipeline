@@ -40,6 +40,18 @@ class FullTextUnavailable(Exception):
     """The paper has no arXiv HTML version (or is not an arXiv paper)."""
 
 
+# Pages whose sections hold less text than this in total are treated as "no full text":
+# a page with no recognisable headings, or only headings, is not worth summarising.
+MIN_FULLTEXT_CHARS = 50
+
+
+def ensure_usable(sections: list[Section]) -> list[Section]:
+    """Return `sections`, or raise FullTextUnavailable if they hold almost no text."""
+    if sum(len(s.text.strip()) for s in sections) < MIN_FULLTEXT_CHARS:
+        raise FullTextUnavailable("page has no usable section text")
+    return sections
+
+
 def reset_spacing() -> None:
     """Forget the last request time (for tests)."""
     global _last_request

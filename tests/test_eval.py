@@ -170,3 +170,11 @@ def test_eval_report_without_eval_run_message(vault):
     res = erun(vault, "report")
     assert res.exit_code == 1
     assert "rpipe eval run" in res.output
+
+
+def test_run_eval_thin_page_falls_back_to_abstract(vault):
+    from research_pipeline.models import Section
+
+    add_papers(vault, 1)
+    run(vault, fetcher=lambda pid: [Section(title="Intro", text="x")], abstract_for=lambda pid: "We study X.")
+    assert load_eval(vault, DAY).entries[0].summary.basis == "abstract"

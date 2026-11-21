@@ -34,7 +34,7 @@ def _authors(raw: str) -> str:
 
 def _claim(c: Claim, unverified: list[str], label: str = "") -> str:
     flag = "⚠ unverified " if c.text in unverified else ""
-    cited = ", ".join(c.sections)
+    cited = ", ".join(_one_line(s) for s in c.sections)
     return f"- {label}{flag}{_one_line(c.text)} [§ {cited}]"
 
 

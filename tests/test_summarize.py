@@ -319,3 +319,19 @@ def test_paper_is_given_up_on_after_three_failures(conn):
     counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, today=TODAY)
     assert counts["summary_failed"] == 0 and llm.calls == []
     assert len(errors) == 1 and "gave up after 3 failed tries" in errors[0] and "boom 2" in errors[0]
+
+
+def test_run_summarize_empty_sections_use_abstract_and_are_not_cached(tmp_path):
+    from research_pipeline.db import get_fulltext, get_paper, open_db, upsert_paper
+    from research_pipeline.models import PaperMeta
+    from research_pipeline.summarize import run_summarize
+    from research_pipeline.db import set_status
+    from research_pipeline.models import Status
+    from conftest import AlwaysSummary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, PaperMeta(id="2401.00001", title="T", abstract="We study X.", source="arxiv", url="u"))
+    set_status(conn, "2401.00001", Status.triaged)
+    counts, errors = run_summarize(conn, AlwaysSummary([]), lambda pid: [], 32768)
+    assert counts["abstract_only"] == 1 and counts["fetched"] == 0 and not errors
+    assert get_fulltext(conn, "2401.00001") is None

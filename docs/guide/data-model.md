@@ -40,7 +40,7 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 | `arxiv_categories` | arXiv categories to collect. Default `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE`, or exactly `["all"]` for every computer-science category (`cs.*`). |
 | `embedding_model` | Model used to turn text into vectors. Default `BAAI/bge-small-en-v1.5`. |
 | `rss_feeds` | Extra RSS feed URLs; default none. |
-| `llm_model`, `llm_url`, `llm_num_ctx` | The local model for summaries (`llm.md`). `llm_num_ctx` defaults to 32768 and must be at least 8192. |
+| `llm_model`, `llm_url`, `llm_num_ctx` | The local model for summaries (`llm.md`). `llm_num_ctx` defaults to 32768 and must be at least 8192. Change them with `rpipe model set`, `rpipe model set-url` and `rpipe model set-context`. |
 
 `Profile` and `Config` reject unknown keys (`extra="forbid"`).
 
@@ -57,13 +57,13 @@ Defines the small set of typed objects every stage passes around, and the lifecy
   any stage --> failed
 ```
 
-In words: a paper starts `new`. Triage moves it to `triaged` (kept, top N) or `skipped` (below the cut). A kept paper is listed in a digest and becomes `in_digest`. The summarize stage then moves each `triaged` paper to `fetched` (its full text, or just its abstract if there is no HTML version, is stored) and then `summarized` (the model's summary and critique are stored). The digest lists `triaged`, `fetched` and `summarized` papers and marks them `in_digest`. A paper whose fetch or summary fails keeps its last status (`triaged` or `fetched`), gets `error` and `retry_count` updated, and the summarize stage offers it again on the next `rpipe summarize` or `rpipe run`, until it has failed 3 times. A paper already `in_digest` for *today* with no stored summary is also offered (its status does not change; only the summary is saved, and the digest rewrite shows it). Until then the digest lists the paper with its abstract only. Papers from an earlier day's digest are never summarised later (accepted limitation). If a higher version of a kept paper arrives, it goes back to `triaged` so it can be reconsidered. Any stage can end in `failed`.
+In words: a paper starts `new`. Triage moves it to `triaged` (kept, top N) or `skipped` (below the cut). A kept paper is listed in a digest and becomes `in_digest`. The summarize stage then moves each `triaged` paper to `fetched` (its full text is stored; a paper with no usable HTML version stores nothing in `fulltexts` and is summarised from its abstract) and then `summarized` (the model's summary and critique are stored). In `rpipe run` the summarize stage runs before the digest; the digest then lists `triaged`, `fetched` and `summarized` papers and marks them `in_digest`. A paper whose fetch or summary fails keeps its last status (`triaged` or `fetched`), gets `error` and `retry_count` updated, and the summarize stage offers it again on the next `rpipe summarize` or `rpipe run`, until it has failed 3 times. A paper already `in_digest` for *today* with no stored summary is also offered (its status does not change; only the summary is saved, and the digest rewrite shows it). Until then the digest lists the paper with its abstract only. Papers from an earlier day's digest are never summarised later (accepted limitation). If a higher version of a kept paper arrives, it goes back to `triaged` so it can be reconsidered. Any stage can end in `failed`.
 
 | Status | Meaning | Set by |
 | --- | --- | --- |
 | `new` | Collected, not yet scored. | collect |
 | `triaged` | Scored and kept in the top N. | triage |
-| `fetched` | Full text (or the abstract, when no HTML exists) stored; waiting for the model. | summarize |
+| `fetched` | Full text stored (nothing is stored for an abstract-only paper); waiting for the model. | summarize |
 | `summarized` | Summary and critique stored. | summarize |
 | `in_digest` | Listed in a digest. | digest |
 | `skipped` | Scored but below the cut; kept and searchable. | triage |
@@ -131,7 +131,7 @@ Created now so later phases need no migration. Phase 1 uses `runs` and `embeddin
 
 1. **Unknown id**: insert with status `new`, index title and abstract. Returns `inserted`.
 2. **Known id, same or lower version**: nothing about the paper's text or status changes. Only two things merge: `hf_upvotes` keeps the maximum, and `repos` becomes the union. If either grew, `updated`, otherwise `unchanged`.
-3. **Known id, higher version**: title, abstract, authors, url, version and published are replaced, upvotes and repos merge, and the search index entry is rewritten. Status: `in_digest`, `summarized`, `fetched` and `triaged` become `triaged`; `new` stays `new`; `skipped` stays `skipped`; `failed` is left as is. Returns `updated`.
+3. **Known id, higher version**: title, abstract, authors, url, version and published are replaced, upvotes and repos merge, and the search index entry is rewritten. Everything derived from the old text is thrown away: the stored `fulltexts` row and both `summaries` rows are deleted, and `retry_count` and `error` are reset to 0 and empty, so the new version is fetched and summarised afresh (and a paper that had given up on the old version gets its tries back). This applies whatever the status. Status: `in_digest`, `summarized`, `fetched` and `triaged` become `triaged`; `new` stays `new`; `skipped` stays `skipped`; `failed` is left as is. Returns `updated`.
 
 Worked example (paper `2401.00001`):
 
@@ -141,7 +141,7 @@ Worked example (paper `2401.00001`):
 | 2 | v1 again, 3 upvotes (next night) | nothing changes | `unchanged` |
 | 3 | v1, 10 upvotes | upvotes 10, status `new` | `updated` |
 | 4 | (triage keeps it, digest lists it) | status `in_digest` | n/a |
-| 5 | v2 arrives | new title/abstract, version 2, status `triaged` | `updated` |
+| 5 | v2 arrives | new title/abstract, version 2, status `triaged`; old full text, summaries and failure count cleared | `updated` |
 
 Now a different paper `2401.00002`, scored below the cut: status `skipped`. When v2 arrives its text is replaced and re-indexed, but the status stays `skipped`. Reason: the pipeline already decided you do not want this paper; a new version of it is not a reason to re-open that decision, and it stays searchable.
 

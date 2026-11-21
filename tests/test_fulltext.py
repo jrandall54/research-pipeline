@@ -141,3 +141,15 @@ def test_parse_sections_inline_markup_does_not_split_words():
         "<p>Next para.</p></body>"
     )
     assert parse_sections(html)[0].text == "foo, and Hello world. Next para."
+
+
+def test_ensure_usable_rejects_empty_and_thin_pages():
+    from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
+    from research_pipeline.models import Section
+
+    with pytest.raises(FullTextUnavailable):
+        ensure_usable([])
+    with pytest.raises(FullTextUnavailable):
+        ensure_usable([Section(title="1 Intro", text="  tiny ")])
+    ok = [Section(title="1 Intro", text="x" * 60)]
+    assert ensure_usable(ok) == ok

@@ -182,3 +182,29 @@ def test_summary_round_trip_and_absent(tmp_path):
     save_summary(conn, "2401.00001", result.model_copy(update={"unverified": []}), "m2")
     assert get_summary(conn, "2401.00001").unverified == []
     assert get_summary(conn, "nope") is None
+
+
+def test_version_bump_drops_stale_fulltext_summary_and_retries(tmp_path):
+    from research_pipeline.db import get_fulltext, get_summary, record_failure, save_fulltext, save_summary
+    from research_pipeline.models import Section
+    from research_pipeline.summarize import Claim, Critique, PaperSummary, Summary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    save_fulltext(conn, "2401.00001", [Section(title="Abstract", text="old")])
+    c = Claim(text="t", sections=["Abstract"])
+    save_summary(
+        conn, "2401.00001",
+        PaperSummary(
+            summary=Summary(one_line="o", problem=c, approach=c, results=c, limitations=c),
+            critique=Critique(strengths=[c], weaknesses=[], questions=[]),
+            basis="full_text", truncated=False, unverified=[],
+        ),
+        "m",
+    )
+    record_failure(conn, "2401.00001", "boom")
+    upsert_paper(conn, make(version=2, title="T2", abstract="A2"))
+    assert get_fulltext(conn, "2401.00001") is None
+    assert get_summary(conn, "2401.00001") is None
+    row = get_paper(conn, "2401.00001")
+    assert (row["retry_count"], row["error"]) == (0, None)

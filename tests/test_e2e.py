@@ -351,3 +351,29 @@ def test_summarize_command_reports_ollama_down(vault, monkeypatch):
     res = run_cli("summarize", "--vault", str(vault))
     assert res.exit_code == 1
     assert "cannot reach Ollama" in res.output
+
+
+def test_e2e_version_bump_resummarises_from_new_text(vault, monkeypatch):
+    import sqlite3
+    from research_pipeline.models import Section
+
+    install(monkeypatch)
+    assert run_cli("run", "--vault", str(vault)).exit_code == 0
+    conn = sqlite3.connect(vault / "vault.sqlite")
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT id, title, abstract FROM papers WHERE status='in_digest' LIMIT 1").fetchone()
+    pid = row["id"]
+    from research_pipeline.db import get_fulltext, get_summary, upsert_paper
+
+    assert get_summary(conn, pid) is not None
+    upsert_paper(conn, PaperMeta(id=pid, title=row["title"], abstract="new abstract", source="arxiv",
+                                 url=f"https://arxiv.org/abs/{pid}", version=2))
+    conn.commit()
+    assert get_summary(conn, pid) is None and get_fulltext(conn, pid) is None
+    new = [Section(title="Fresh", text="Entirely new text for version two of this paper, long enough.")]
+    monkeypatch.setattr(
+        cli, "build_pipeline",
+        lambda config: Pipeline([FixtureSource("arxiv", [])], FakeEmbedder, seed_fetcher, make_llm, lambda p: new),
+    )
+    assert run_cli("run", "--vault", str(vault)).exit_code == 0
+    assert [s.title for s in get_fulltext(conn, pid)] == ["Fresh"]

@@ -13,7 +13,7 @@ The gold set is a short list of papers you know well, each with a list of **key 
 
 Ids are compared without version suffixes, so `2307.15043v2` and `2307.15043` are the same paper.
 
-Worked example:
+Worked example (illustrative output; your numbers will differ):
 
 ```
 $ rpipe gold add 2307.15043
@@ -57,7 +57,7 @@ One idea per fact, so a summary can be marked as having it or missing it.
 - **Facts are collected before anything is written**: an interrupt never leaves a paper with no facts. Rejected: saving the paper first and the facts after.
 - **Atomic writes** (temp file then rename), as for the seed cache, so a crash never leaves a half-written file.
 - **A broken file is an error, not an empty set**: an unreadable `gold.json` raises a `ConfigError` naming the file; silently treating it as empty would let the next `add` overwrite your work.
-- **Created lazily**: `gold/` already exists in a new vault, and the code creates it if an older vault lacks it.
+- **Created lazily**: `gold/` already exists in a new vault (`init` creates it), and the code creates it if an older vault lacks it. Only `eval/` is first created by `rpipe eval run`.
 
 ## How to run / check it
 
@@ -99,7 +99,7 @@ rpipe eval report            counts, PASS or FAIL, and which papers failed and w
 
 Re-running `rpipe eval run` on the same day replaces that day's file and **clears that day's grades** (the summaries changed, so the old grades no longer apply). The command says so. A run on a later day makes a new file and keeps the old ones.
 
-Sample report:
+Sample report (illustrative output; your numbers will differ):
 
 ```
 Eval 2026-11-21
@@ -127,7 +127,7 @@ Change one thing at a time, then run `rpipe eval run` again and grade again:
 
 - **Model**: try a bigger one with `rpipe model set NAME` (see `llm.md`).
 - **Prompt**: the instructions live in `src/research_pipeline/prompts.py`; failures that repeat across papers (for example always dropping numbers) point to a prompt change.
-- **`llm_num_ctx`**: if failures say "truncated", the paper did not fit; raise the context window (see `llm.md`) if your memory allows.
+- **`llm_num_ctx`**: if failures say "truncated", the paper did not fit; raise the context window with `rpipe model set-context N` (see `llm.md`) if your memory allows.
 
 ## Why it's built this way
 

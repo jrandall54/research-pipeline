@@ -140,6 +140,10 @@ def upsert_paper(
         status = row["status"]
         if Status(status) in _RETRIAGE:
             status = Status.triaged.value
+        # A new version invalidates everything derived from the old text.
+        conn.execute("DELETE FROM fulltexts WHERE paper_id = ?", (p.id,))
+        conn.execute("DELETE FROM summaries WHERE paper_id = ?", (p.id,))
+        conn.execute("UPDATE papers SET retry_count = 0, error = NULL WHERE id = ?", (p.id,))
         conn.execute(
             "UPDATE papers SET title=?, abstract=?, authors=?, url=?, version=?,"
             " hf_upvotes=?, repos=?, published=?, status=?, updated_at=? WHERE id=?",

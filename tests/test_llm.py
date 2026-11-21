@@ -163,3 +163,46 @@ def test_model_check_cli(vault, monkeypatch):
     monkeypatch.setattr(cli, "build_llm", lambda cfg: Bad())
     res = model(vault, "check")
     assert res.exit_code == 1 and "ollama serve" in res.output
+
+
+@respx.mock
+def test_check_matches_untagged_name_against_latest():
+    respx.get(f"{URL}/api/tags").mock(
+        return_value=httpx.Response(200, json={"models": [{"name": "llama3.2:latest"}]})
+    )
+    assert "llama3.2" in OllamaClient(URL, "llama3.2", 32768).check()
+
+
+@respx.mock
+def test_check_uses_short_timeout():
+    route = respx.get(f"{URL}/api/tags").mock(
+        return_value=httpx.Response(200, json={"models": [{"name": "qwen3:14b"}]})
+    )
+    client().check()
+    assert route.calls[0].request.extensions["timeout"]["read"] == 10.0
+
+
+def test_model_set_url_and_context(vault):
+    cfg = vault / "config.yaml"
+    assert model(vault, "set-url", "http://gpu-box:11434").exit_code == 0
+    assert model(vault, "set-context", "16384").exit_code == 0
+    loaded = load_config(cfg)
+    assert (loaded.llm_url, loaded.llm_num_ctx) == ("http://gpu-box:11434", 16384)
+    out = model(vault, "show").output
+    assert "gpu-box" in out and "16384" in out and "model:" in out
+
+
+def test_model_set_url_and_context_reject_bad_values(vault):
+    cfg = vault / "config.yaml"
+    before = cfg.read_text()
+    for args in (("set-url", "gpu-box:11434"), ("set-url", "  "), ("set-context", "100")):
+        res = model(vault, *args)
+        assert res.exit_code == 1 and "Traceback" not in res.output
+        assert res.output.strip()
+        assert cfg.read_text() == before
+
+
+def test_connect_error_message_names_set_url():
+    from research_pipeline.llm import SERVE_HINT
+
+    assert "rpipe model set-url" in SERVE_HINT

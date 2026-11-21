@@ -156,3 +156,5 @@ Tests: `uv run pytest -q tests/test_digest.py tests/test_db.py` (offline; they u
 - `src/research_pipeline/digest.py`: `write_digest` and the markdown rendering (including the summary block).
 - `src/research_pipeline/db.py`: `mark_in_digest`.
 - `tests/test_digest.py`, `tests/test_db.py`.
+
+Cited section names come from the model, so they pass through the same one-line cleaning as other model text (whitespace and newlines collapse to single spaces): a section name containing a newline or `##` cannot start a new heading or break the digest layout.

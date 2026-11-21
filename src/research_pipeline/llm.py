@@ -7,7 +7,16 @@ from pydantic import BaseModel, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
 
-SERVE_HINT = "start it with `ollama serve` (and check llm_url with `rpipe model show`)"
+SERVE_HINT = "start it with `ollama serve` (and check the server address with `rpipe model show`; change it with `rpipe model set-url URL`)"
+
+
+CHECK_TIMEOUT = 10.0  # seconds; listing models is quick, unlike generating
+
+
+def _with_tag(name: str) -> str:
+    """Ollama lists `llama3.2` as `llama3.2:latest`; compare names with the tag spelled out."""
+    last = name.rsplit("/", 1)[-1]
+    return name if ":" in last else f"{name}:latest"
 
 
 class LlmError(Exception):
@@ -34,13 +43,16 @@ class OllamaClient:
     def _pull_hint(self) -> str:
         return f"model {self.model_name!r} is not installed: run `ollama pull {self.model_name}`"
 
-    def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
+    def _request(
+        self, method: str, path: str, timeout: float | None = None, **kwargs
+    ) -> httpx.Response:
+        timeout = self.timeout if timeout is None else timeout
         try:
-            resp = httpx.request(method, f"{self.url}{path}", timeout=self.timeout, **kwargs)
+            resp = httpx.request(method, f"{self.url}{path}", timeout=timeout, **kwargs)
         except httpx.ConnectError as e:
             raise LlmError(f"cannot reach Ollama at {self.url}: {SERVE_HINT}") from e
         except httpx.TimeoutException as e:
-            raise LlmError(f"Ollama at {self.url} timed out after {self.timeout:g}s") from e
+            raise LlmError(f"Ollama at {self.url} timed out after {timeout:g}s") from e
         except httpx.HTTPError as e:
             raise LlmError(f"Ollama request failed: {e}") from e
         if resp.status_code == 404:
@@ -79,11 +91,11 @@ class OllamaClient:
 
     def check(self) -> str:
         """Status line if the server is up and the model installed; LlmError with a fix otherwise."""
-        resp = self._request("GET", "/api/tags")
+        resp = self._request("GET", "/api/tags", timeout=CHECK_TIMEOUT)
         try:
             names = [m["name"] for m in resp.json().get("models", [])]
         except (ValueError, KeyError, TypeError, AttributeError) as e:
             raise LlmError(f"unexpected reply from Ollama at {self.url}: {e}") from e
-        if self.model_name not in names:
+        if _with_tag(self.model_name) not in {_with_tag(n) for n in names}:
             raise LlmError(self._pull_hint())
         return f"Ollama is running at {self.url} and model {self.model_name} is installed."

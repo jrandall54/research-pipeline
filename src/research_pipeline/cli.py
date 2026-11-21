@@ -734,6 +734,30 @@ def model_set(
     typer.echo(f"model is now {name.strip()}. Check it works with `rpipe model check`.")
 
 
+@model_app.command("set-url")
+def model_set_url(
+    url: Annotated[str, typer.Argument(help="Ollama server address, e.g. http://localhost:11434.")],
+    vault: VaultOption = None,
+) -> None:
+    """Point the pipeline at a different Ollama server (must start with http:// or https://)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_llm_url(ctx.vault, url)
+    typer.echo(f"server is now {url.strip()}. Check it works with `rpipe model check`.")
+
+
+@model_app.command("set-context")
+def model_set_context(
+    n: Annotated[int, typer.Argument(help="Context window in tokens, at least 8192.")],
+    vault: VaultOption = None,
+) -> None:
+    """Set how much text (in tokens) the model can read at once; larger needs more memory."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_llm_num_ctx(ctx.vault, n)
+    typer.echo(f"context window is now {n} tokens.")
+
+
 @model_app.command("check")
 def model_check(vault: VaultOption = None) -> None:
     """Check that Ollama is running and the configured model is installed."""

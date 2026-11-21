@@ -2,7 +2,7 @@
 
 ## What it does
 
-For a paper that has an arXiv HTML version, the pipeline downloads that page, removes everything a human reader could not see, and splits what is left into titled sections (`Abstract`, `1 Introduction`, `2 Method`, ...). The sections are stored in the `fulltexts` table so later stages (summaries, critiques) can read the paper and cite sections by title. Papers without an HTML version are reported as unavailable and fall back to their abstract.
+For a paper that has an arXiv HTML version, the pipeline downloads that page, removes everything a human reader could not see, and splits what is left into titled sections (`Abstract`, `1 Introduction`, `2 Method`, ...). The sections are stored in the `fulltexts` table so later stages (summaries, critiques) can read the paper and cite sections by title. Papers without an HTML version, or whose page yields almost no section text, are reported as unavailable and fall back to their abstract.
 
 ## How it works
 
@@ -17,6 +17,8 @@ For a paper that has an arXiv HTML version, the pipeline downloads that page, re
 3. **Download** `https://arxiv.org/html/<id>`. A 404 raises `FullTextUnavailable`; any other HTTP or network failure raises `SourceError`. The body is read in chunks and abandoned past 5 MB (`SourceError`), so a huge or hostile page cannot exhaust memory.
 4. **Strip hidden text** (`strip_hidden`, below).
 5. **Split into sections** (`parse_sections`). Every `h2`/`h3` heading starts a section, and so does the abstract title (arXiv's LaTeXML marks it as an `h6` with class `ltx_title_abstract`, so we recognise that or any heading reading "Abstract"); text before the first heading (the paper title) is dropped; whitespace is collapsed to single spaces. Text is joined as written: inline tags such as `<em>` or `<span>` add no space (`<em>foo</em>,` stays `foo,`), while block elements (paragraphs, list items, ...) are separated by a space.
+
+6. **Reject empty results.** After parsing, callers pass the sections through `ensure_usable`: if the sections hold less than `MIN_FULLTEXT_CHARS` (50) characters of text in total (a page with no recognisable headings gives no sections at all), it raises `FullTextUnavailable`. The summarize stage and `rpipe eval run` then use the abstract instead, and nothing is stored in `fulltexts`, so the empty page is not cached or counted as fetched. Without this, the model would be asked to summarise a paper from its title alone while the result was labelled `full_text`.
 
 Worked example. A page contains:
 
@@ -39,6 +41,8 @@ Worked example. A page contains:
 | Off-screen | inline `left`, `top` or `text-indent` of -1000px or further (very large negative `em`/`rem` too) |
 | Invisible characters | zero-width characters (U+200B to U+200F, U+2060, U+FEFF) and the Unicode tag block (U+E0000 to U+E007F), deleted from all text |
 
+**Known gaps.** The stripping is a first layer, not a guarantee. It does not handle: `height:0` with `overflow:hidden`, `clip` rules, `transform:scale(0)`, near-white colours (`#fefefe`), percentage font sizes, bidirectional override characters (U+202A to U+202E, which can reorder text on screen), or anything done by external CSS classes (we never load stylesheets). The second layer is in the prompts: the paper is wrapped in `<paper>` tags and the model is told to treat it as data only, and code checks every citation against the real section titles (see [summaries.md](summaries.md)).
+
 Removing an element removes everything inside it. Only inline styles are checked; arXiv's own pages do not hide content through external stylesheets, and we do not load those.
 
 ## Why it's built this way
@@ -60,7 +64,7 @@ The test fixture `tests/fixtures/arxiv_paper.html` is a small paper with twelve 
 
 ## Where the code is
 
-- `src/research_pipeline/fulltext.py`: `strip_hidden`, `parse_sections`, `fetch_fulltext`, `FullTextUnavailable`, `reset_spacing` (test helper)
+- `src/research_pipeline/fulltext.py`: `strip_hidden`, `parse_sections`, `ensure_usable`, `fetch_fulltext`, `FullTextUnavailable`, `reset_spacing` (test helper)
 - `src/research_pipeline/models.py`: `Section`
 - `src/research_pipeline/db.py`: `save_fulltext`, `get_fulltext`
 - `tests/test_fulltext.py`, `tests/fixtures/arxiv_paper.html`

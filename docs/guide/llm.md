@@ -4,7 +4,7 @@
 
 From Phase 2 the pipeline asks a language model to read papers and write summaries. The model runs on your own computer, served by **Ollama** (a program that downloads open models and answers requests on `http://localhost:11434`). `src/research_pipeline/llm.py` is the small client that talks to it. Its one job is `generate(system, user, schema)`: send instructions and text, get back an object that has already been checked against a schema. If anything goes wrong it raises `LlmError` with a hint on how to fix it.
 
-You manage it with three commands: `rpipe model show`, `rpipe model set NAME`, `rpipe model check`.
+You manage it with five commands: `rpipe model show`, `rpipe model set NAME`, `rpipe model set-url URL`, `rpipe model set-context N` and `rpipe model check`.
 
 ## How it works
 
@@ -35,9 +35,11 @@ ollama pull qwen3:14b
 rpipe model check       # "Ollama is running at ... and model qwen3:14b is installed."
 rpipe model show        # model, server, context window
 rpipe model set qwen3:8b   # smaller model for less memory
+rpipe model set-url http://gpu-box:11434   # a different Ollama server (must start with http:// or https://)
+rpipe model set-context 16384   # context window in tokens, at least 8192; invalid values are refused and the file is left alone
 ```
 
-`rpipe model check` exits 1 with a fix hint if the server is down or the model is missing. Tests use a fake client, so `uv run pytest -q` needs no Ollama.
+`rpipe model check` compares names with the tag spelled out, so `llama3.2` matches the `llama3.2:latest` that Ollama lists. It uses a 10-second timeout (generating has a much longer one), so a hung server fails fast. It exits 1 with a fix hint if the server is down or the model is missing. Tests use a fake client, so `uv run pytest -q` needs no Ollama.
 
 ## Where the code is
 

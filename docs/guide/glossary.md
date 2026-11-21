@@ -55,3 +55,7 @@
 **Run** — one execution of `rpipe run`, recorded as a row in the `runs` table with start/end times, counts and errors. See `running.md`.
 
 **rpipe** — the command-line tool (`rpipe init`, `rpipe run`, ...). `research-pipeline` is a long alias for the same program. See `running.md`, "The `rpipe` command".
+
+**Round-trip YAML** — loading a YAML file in a way that remembers comments, blank lines and layout, so saving it back keeps them. Plain YAML loaders discard comments. We use `ruamel.yaml` for edits. See `profile.md`.
+
+**Atomic write** — saving a file so it is either fully the old version or fully the new one, never half-written: write to a temporary file in the same folder, then rename it over the original in one step. See `profile.md`.

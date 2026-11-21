@@ -1,0 +1,226 @@
+"""Edit profile.yaml and config.yaml from code without losing the user's comments.
+
+Every public function reads the file, checks it is valid, changes one thing, checks the
+result is still valid, and writes it back atomically. A file that is already invalid, or
+a change that would make it invalid, raises ConfigError and leaves the file untouched.
+"""
+
+import os
+import re
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, ValidationError
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
+from ruamel.yaml.scalarstring import DoubleQuotedScalarString
+
+from research_pipeline.models import Config, Profile
+from research_pipeline.vault import ConfigError, load_config, load_profile
+
+CATEGORY_RE = re.compile(r"^[a-z-]+(\.[A-Z]{2})?$")
+_NEW_ID_RE = re.compile(r"^\d{4}\.\d{4,5}$")
+_OLD_ID_RE = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}$")
+
+
+def normalise_text(s: str) -> str:
+    """Strip and collapse runs of whitespace to single spaces."""
+    return " ".join(s.split())
+
+
+def _key(s: str) -> str:
+    return normalise_text(s).casefold()
+
+
+def normalise_arxiv_id(s: str) -> str:
+    """Bare arXiv id without a version suffix; ValueError if `s` is not an id."""
+    t = s.strip()
+    t = re.sub(r"^https?://arxiv\.org/(abs|pdf)/", "", t)
+    t = re.sub(r"^arxiv:", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\.pdf$", "", t)
+    t = re.sub(r"v\d+$", "", t)
+    if _NEW_ID_RE.match(t) or _OLD_ID_RE.match(t):
+        return t
+    raise ValueError(f"{s!r} is not an arXiv id (expected something like 2307.15043)")
+
+
+def _yaml() -> YAML:
+    y = YAML(typ="rt")
+    y.preserve_quotes = True
+    y.width = 4096  # never re-wrap the user's long lines
+    # Keep float-looking scalars (arXiv id 2301.10000) as text, like vault.load_profile.
+    resolver = type("NoFloatResolver", (y.Resolver,), {})
+    resolver.yaml_implicit_resolvers = {
+        ch: [(tag, rx) for tag, rx in rs if tag != "tag:yaml.org,2002:float"]
+        for ch, rs in y.Resolver.yaml_implicit_resolvers.items()
+    }
+    y.Resolver = resolver
+    return y
+
+
+def _plain(x: Any) -> Any:
+    if isinstance(x, dict):
+        return {str(k): _plain(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [_plain(v) for v in x]
+    if isinstance(x, bool) or x is None:
+        return x
+    if isinstance(x, int):
+        return int(x)
+    return str(x)
+
+
+def _validate(path: Path, data: Any, model: type[BaseModel]) -> None:
+    try:
+        model.model_validate(_plain(data) if data is not None else {})
+    except ValidationError as e:
+        raise ConfigError(f"{path}: invalid settings:\n{e}") from e
+
+
+def _read(path: Path, model: type[BaseModel]) -> Any:
+    """Load for editing, after the normal loader has confirmed the file is valid."""
+    (load_profile if model is Profile else load_config)(path)  # raises ConfigError
+    try:
+        data = _yaml().load(path.read_text(encoding="utf-8"))
+    except (OSError, YAMLError) as e:
+        raise ConfigError(f"{path}: cannot read file ({e})") from e
+    return data
+
+
+def _atomic_write(path: Path, data: Any) -> None:
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            _yaml().dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, path.stat().st_mode & 0o7777)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _edit(path: Path, model: type[BaseModel], change) -> bool:
+    data = _read(path, model)
+    if not change(data):
+        return False
+    _validate(path, data, model)
+    _atomic_write(path, data)
+    return True
+
+
+def _profile_path(vault: Path) -> Path:
+    return vault / "profile.yaml"
+
+
+def _config_path(vault: Path) -> Path:
+    return vault / "config.yaml"
+
+
+def _list(data: Any, field: str) -> list:
+    if data.get(field) is None:
+        data[field] = []
+    return data[field]
+
+
+def _add(vault: Path, field: str, value: str, wrap=lambda v: v) -> bool:
+    def change(data) -> bool:
+        items = _list(data, field)
+        if any(_key(str(i)) == _key(value) for i in items):
+            return False
+        items.append(wrap(value))
+        return True
+
+    return _edit(_profile_path(vault), Profile, change)
+
+
+def _remove(vault: Path, field: str, text_or_index: str, norm=_key) -> bool:
+    def change(data) -> bool:
+        items = _list(data, field)
+        ref = text_or_index.strip()
+        try:
+            wanted = norm(ref)
+        except ValueError:
+            wanted = None
+        for i, item in enumerate(items):
+            if wanted is not None and norm(str(item)) == wanted:
+                del items[i]
+                return True
+        if ref.isdigit():
+            n = int(ref)
+            if not 1 <= n <= len(items):
+                raise ValueError(f"no {field} entry numbered {n} (there are {len(items)})")
+            del items[n - 1]
+            return True
+        return False
+
+    return _edit(_profile_path(vault), Profile, change)
+
+
+def add_topic(vault: Path, text: str) -> bool:
+    text = normalise_text(text)
+    if not text:
+        raise ValueError("topic must not be empty")
+    return _add(vault, "topics", text)
+
+
+def remove_topic(vault: Path, text_or_index: str) -> bool:
+    return _remove(vault, "topics", text_or_index)
+
+
+def add_author(vault: Path, name: str) -> bool:
+    name = normalise_text(name)
+    if not name:
+        raise ValueError("author name must not be empty")
+    return _add(vault, "followed_authors", name)
+
+
+def remove_author(vault: Path, text_or_index: str) -> bool:
+    return _remove(vault, "followed_authors", text_or_index)
+
+
+def add_keyword(vault: Path, word: str) -> bool:
+    word = normalise_text(word)
+    if not word:
+        raise ValueError("keyword must not be empty")
+    return _add(vault, "keywords", word)
+
+
+def remove_keyword(vault: Path, text_or_index: str) -> bool:
+    return _remove(vault, "keywords", text_or_index)
+
+
+def add_seed_id(vault: Path, arxiv_id: str) -> bool:
+    # Quoted on write so the id is always read back as text, never as a number.
+    return _add(vault, "seeds", normalise_arxiv_id(arxiv_id), DoubleQuotedScalarString)
+
+
+def remove_seed(vault: Path, id_or_index: str) -> bool:
+    return _remove(vault, "seeds", id_or_index, norm=normalise_arxiv_id)
+
+
+def set_top_n(vault: Path, n: int) -> None:
+    def change(data) -> bool:
+        data["top_n"] = n
+        return True
+
+    _edit(_profile_path(vault), Profile, change)
+
+
+def set_categories(vault: Path, cats: list[str]) -> None:
+    path = _config_path(vault)
+    cleaned = [c.strip() for c in cats]
+    bad = [c for c in cleaned if not CATEGORY_RE.match(c)]
+    if bad or not cleaned:
+        raise ConfigError(
+            f"{path}: invalid arXiv categories {bad or cats!r}: "
+            "use names like cs.CR, stat.ML or hep-th, and give at least one"
+        )
+
+    def change(data) -> bool:
+        data["arxiv_categories"] = cleaned
+        return True
+
+    _edit(path, Config, change)

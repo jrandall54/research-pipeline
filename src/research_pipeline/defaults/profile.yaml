@@ -6,12 +6,8 @@
 topics: __TOPICS__
 
 # arXiv ids of 10-20 papers you really like. New papers are ranked by similarity
-# to these. The three below are PLACEHOLDERS: replace them with your own picks.
-# Use the bare id, e.g. 1706.03762 (not the URL). Quotes are optional.
-seeds:
-  - "0000.00001"  # PLACEHOLDER - replace with a paper you like
-  - "0000.00002"  # PLACEHOLDER - replace with a paper you like
-  - "0000.00003"  # PLACEHOLDER - replace with a paper you like
+# to these. Add one with: rpipe profile add-seed 1706.03762
+seeds: []
 
 # Authors whose new papers get a ranking boost (names as arXiv spells them).
 # followed_authors:

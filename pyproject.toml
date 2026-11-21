@@ -10,6 +10,7 @@ dependencies = [
     "typer",
     "httpx",
     "numpy",
+    "ruamel-yaml>=0.19.1",
 ]
 
 [project.optional-dependencies]

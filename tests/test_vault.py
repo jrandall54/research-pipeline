@@ -29,7 +29,7 @@ def test_init_creates_expected_layout(tmp_path):
     cfg = load_config(vault / "config.yaml")
     assert cfg.vault_path == vault
     profile = load_profile(vault / "profile.yaml")
-    assert len(profile.seeds) == 3
+    assert profile.seeds == []
     assert profile.topics
 
 

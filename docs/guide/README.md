@@ -38,10 +38,11 @@ New to the project? Read in this order:
 4. [triage.md](triage.md): how papers are scored and why
 5. [digest.md](digest.md): the digest format
 6. [running.md](running.md): installing, the commands, a full real run, troubleshooting
-7. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+7. [profile.md](profile.md): editing the profile through commands, safely
+8. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [vault-and-config.md](vault-and-config.md) for the profile.
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.

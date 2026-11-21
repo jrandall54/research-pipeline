@@ -8,7 +8,9 @@ A source is something that can list recent papers. Phase 1 has two: arXiv and Hu
 
 Asks arXiv's public API for the newest papers in your configured categories (default `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE`) and turns each result into a `PaperMeta` (see `data-model.md`). It can also look up specific papers by id, which is how your profile's seed papers are resolved.
 
-**Limitation:** the spec talks about arXiv's daily listings. Phase 1 approximates them by querying the API sorted by submission date, newest first, and taking the first `max_results` (default 300). If more than 300 papers arrive between two runs, the oldest are missed; raise `max_results` if that matters.
+**Limitation:** the spec talks about arXiv's daily listings. Phase 1 approximates them by querying the API sorted by submission date, newest first, and paging back until it reaches papers it already has. The setting `arxiv_max_results` in `config.yaml` (default 1000) is a safety cap on how far back one run will page. A normal weekday brings roughly 320 submissions in the default categories, so the cap is rarely reached after the first run.
+
+**Stopping at a known paper.** Before each run, `run_collect` gives the arXiv source a test, "is this id already in the database?" (`set_known_checker`). After every page, `fetch()` checks whether any paper on it is already stored; if so it stops, because everything older was collected on an earlier night. That last page is kept in full and `upsert_paper` dedupes it. If the cap is reached without ever seeing a known paper, `fetch()` sets `last_warning`, and the collect stage adds `arxiv: reached max_results (<n>) before already-seen papers; some may be missed` to the run's errors, so it shows in `runs.errors` and the health line. **On the very first run the database is empty, so this warning appears by design.** After a long gap (for example a week offline) it can appear again: raise `arxiv_max_results` or accept the gap.
 
 ### How it works
 
@@ -54,7 +56,7 @@ The requests also carry a generic `User-Agent` (`research-pipeline/0.1`) so arXi
 
 #### Pagination
 
-The API returns at most a page of results per call. We ask for pages of 100: `start=0`, `start=100`, ... Paging stops when either `max_results` papers have been collected (the last page is sized to fit) or a page comes back with fewer entries than requested, which means arXiv has no more. Example with `max_results=230`: three calls (100, 100, 30), two 3-second waits between them.
+The API returns at most a page of results per call. We ask for pages of 100: `start=0`, `start=100`, ... Paging stops when a page comes back with fewer entries than requested (arXiv has no more), when a page contains an already-stored id (see above), or when `max_results` papers have been collected (the last page is sized to fit). Example with `max_results=230`: three calls (100, 100, 30), two 3-second waits between them.
 
 #### Seed lookup by id
 
@@ -130,7 +132,7 @@ The reason to pull it in is the **upvote count**. arXiv gets hundreds of papers 
    | `paper.authors[].name` | `authors` | in payload order; entries without a name are skipped |
    | `paper.publishedAt` | `published` | date part only; missing or unparseable gives `None` |
    | `paper.upvotes` | `hf_upvotes` | missing gives `0` |
-   | `paper.githubRepo` | `repos` | a one-element list if set, else empty |
+   | `paper.githubRepo` | `repos` | a one-element list if set and it starts with `http://` or `https://`, else empty (other schemes such as `javascript:` are dropped) |
    | (constant) | `source` | always `"hf_daily"` |
    | derived | `url` | `https://arxiv.org/abs/<id>` |
 
@@ -182,8 +184,8 @@ The collect stage (`run_collect`) takes the list of sources, asks each one for i
 ### How it works
 
 1. **Order.** Sources run one after another, in the order they are given. The nightly run passes arXiv first, then Hugging Face Daily Papers. Order matters for one reason: the first source to see a paper creates its row (title, abstract, version, `source`), and later sources only merge into it.
-2. **One source at a time.** For each source: call `fetch()`, upsert every returned paper with `upsert_paper` (see `data-model.md`), then commit. Committing per source means that if the program dies during a later source, the earlier sources' papers are already saved.
-3. **Isolation.** Each source is wrapped in its own `try`. If `fetch()` raises (normally `SourceError`, but any exception is caught), the stage records `"<source name>: <message>"`, adds 1 to `source_errors`, rolls back anything half-written for that source, and carries on with the next one.
+2. **One source at a time.** For each source: call `fetch()`, upsert every returned paper with `upsert_paper` (see `data-model.md`), then commit. `upsert_paper` does not commit itself, so a source's papers are one transaction: they are saved together when the source finishes, and if the program dies during a later source, the earlier sources' papers are already saved. After a successful source the stage also reads its optional `last_warning` (arXiv sets one when it hits the cap) and adds it to the errors.
+3. **Isolation.** Each source is wrapped in its own `try`. If `fetch()` raises (normally `SourceError`, but any exception is caught), the stage records `"<source name>: <message>"`, adds 1 to `source_errors`, rolls back the transaction so that source leaves no rows at all (tested with a source that stores one paper and then fails), and carries on with the next one.
 4. **Result.** `(counts, errors)`. The stage does not close the `runs` row; the caller combines these with the counts from triage and digest and calls `finish_run` once.
 
 #### Example: one source fails
@@ -226,7 +228,8 @@ Errors are plain strings `"<source name>: <message>"` returned to the caller. Th
 ### Why it's built this way
 
 - **Catch everything per source, not just `SourceError`**: a parsing bug in one source should cost that source's papers, not the whole night's digest.
-- **Commit per source**: bounds the loss from a crash to one source.
+- **Commit per source, not per paper**: bounds the loss from a crash to one source, makes the rollback real (a half-stored source never remains), and is much faster than a commit per paper.
+- **Known-id checker injected by `run_collect`**: `build_pipeline` has no database connection, and the source should not own one. Rejected: giving the source a connection, or having the CLI reach into the source after opening the DB.
 - **Return errors instead of finishing the run**: the run row covers all stages, so only the caller can write it once with combined counts and errors. Rejected: having `run_collect` call `finish_run`, which would close the run before triage and digest.
 - **No merge logic here**: duplicates are the database's job (one rule, one place), so adding a third source needs no change to collect.
 - **`run_id` accepted but unused (and optional)**: the standalone `collect` command passes none, since only `run` writes a `runs` row; reserved for tagging papers with the run that found them, without changing the signature later.

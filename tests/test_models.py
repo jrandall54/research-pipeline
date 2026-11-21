@@ -35,3 +35,11 @@ def test_config_defaults():
     assert c.embedding_model == "BAAI/bge-small-en-v1.5"
     with pytest.raises(ValidationError):
         Config()
+
+
+def test_config_default_arxiv_max_results_and_floor():
+    from research_pipeline.models import Config
+
+    assert Config(vault_path="/v").arxiv_max_results == 1000
+    with pytest.raises(ValidationError):
+        Config(vault_path="/v", arxiv_max_results=0)

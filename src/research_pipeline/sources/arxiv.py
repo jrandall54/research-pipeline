@@ -61,13 +61,16 @@ class ArxivSource:
     def __init__(
         self,
         categories: list[str],
-        max_results: int = 300,
+        max_results: int = 1000,
+        is_known: Callable[[str], bool] | None = None,
         client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ):
         self.categories = categories
         self.max_results = max_results
+        self._is_known = is_known
+        self.last_warning: str | None = None
         self._client = client or httpx.Client(timeout=30, headers={"User-Agent": USER_AGENT})
         self._sleep = sleep
         self._clock = clock
@@ -94,8 +97,19 @@ class ArxivSource:
             self._last_call = self._clock()
         return parse_arxiv_atom(resp.text)
 
+    def set_known_checker(self, is_known: Callable[[str], bool]) -> None:
+        """Install the "is this id already stored?" test (the caller owns the DB)."""
+        self._is_known = is_known
+
     def fetch(self) -> list[PaperMeta]:
-        """Newest papers in the configured categories, up to max_results."""
+        """Newest papers in the configured categories.
+
+        Stops at the first of: a short page (arXiv has no more), a page that
+        contains an already-stored id (everything older was collected before; that
+        page is kept and upsert dedupes it), or ``max_results``. Hitting the cap
+        without seeing a known id sets ``last_warning``.
+        """
+        self.last_warning = None
         query = " OR ".join(f"cat:{c}" for c in self.categories)
         papers: list[PaperMeta] = []
         while len(papers) < self.max_results:
@@ -111,7 +125,13 @@ class ArxivSource:
             )
             papers.extend(page)
             if len(page) < size:
-                break
+                return papers
+            if self._is_known is not None and any(self._is_known(p.id) for p in page):
+                return papers
+        self.last_warning = (
+            f"arxiv: reached max_results ({self.max_results}) before already-seen papers;"
+            " some may be missed"
+        )
         return papers
 
     def fetch_by_ids(self, ids: list[str]) -> list[PaperMeta]:

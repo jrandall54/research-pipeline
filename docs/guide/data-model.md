@@ -35,10 +35,13 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 
 | Field | Meaning |
 | --- | --- |
-| `vault_path` | Where your vault lives (required). |
+| `vault_path` | Informational (required): the vault used is set by `--vault` / `$RESEARCH_VAULT` / the default, not by this field. |
+| `arxiv_max_results` | Cap on arXiv papers fetched per run. Default 1000, at least 1. |
 | `arxiv_categories` | arXiv categories to collect. Default `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE`. |
 | `embedding_model` | Model used to turn text into vectors. Default `BAAI/bge-small-en-v1.5`. |
 | `rss_feeds` | Extra RSS feed URLs; default none. |
+
+`Profile` and `Config` reject unknown keys (`extra="forbid"`).
 
 ### `Status` — the paper lifecycle
 

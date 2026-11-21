@@ -1,3 +1,4 @@
+from datetime import date
 import json
 from pathlib import Path
 
@@ -195,3 +196,48 @@ def test_single_stage_commands_leave_runs_empty(vault, monkeypatch, cmd):
     res = run_cli(cmd, "--vault", str(vault))
     assert res.exit_code == 0, res.output
     assert sqlite3.connect(vault / "vault.sqlite").execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
+
+
+def test_build_pipeline_passes_arxiv_max_results(vault):
+    (vault / "config.yaml").write_text(
+        (vault / "config.yaml").read_text() + "arxiv_max_results: 42\n"
+    )
+    pipeline = cli.build_pipeline(cli.load_config(vault / "config.yaml"))
+    assert pipeline.sources[0].max_results == 42
+
+
+def test_arxiv_cap_warning_reaches_health_line_and_runs_errors(vault, monkeypatch):
+    warning = "arxiv: reached max_results (5) before already-seen papers; some may be missed"
+
+    class CappedSource(FixtureSource):
+        last_warning = warning
+
+    arxiv = parse_arxiv_atom((FIXTURES / "arxiv_atom.xml").read_text())
+    install(monkeypatch, [CappedSource("arxiv", arxiv)])
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert f"errors: {warning}" in first
+    import sqlite3
+    errors = sqlite3.connect(vault / "vault.sqlite").execute("SELECT errors FROM runs").fetchone()[0]
+    assert json.loads(errors) == [warning]
+
+
+@pytest.mark.parametrize("exc", [OSError("download failed"), ValueError("bad torch")])
+def test_embedding_model_load_failure_is_a_clear_error(vault, monkeypatch, exc):
+    def make_embedder():
+        raise exc
+
+    monkeypatch.setattr(
+        cli, "build_pipeline",
+        lambda config: Pipeline([], make_embedder, seed_fetcher),
+    )
+    res = run_cli("triage", "--vault", str(vault))
+    assert res.exit_code == 1
+    assert f"could not load embedding model BAAI/bge-small-en-v1.5: {exc}" in res.output
+
+
+def test_health_line_collapses_whitespace_to_one_line():
+    line = cli.health_line(date(2026, 1, 2), {}, ["arxiv: boom\n  second\tline", "x\n\ny"])
+    assert "\n" not in line and "\t" not in line
+    assert "errors: arxiv: boom second line; x y" in line

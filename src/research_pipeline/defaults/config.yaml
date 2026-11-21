@@ -7,6 +7,11 @@ vault_path: __VAULT_PATH__
 # cs.LG machine learning, cs.CL language, cs.CR security, cs.OS operating systems, cs.SE software engineering.
 arxiv_categories: __CATEGORIES__
 
+# Most papers to fetch from arXiv per run. Paging stops earlier once it reaches a page
+# containing a paper already stored. The first run (empty database) always fetches up to this
+# many and will report "reached max_results"; that is expected.
+arxiv_max_results: 1000
+
 # Sentence-embedding model used to measure similarity between papers and your profile.
 # Downloaded from Hugging Face the first time triage runs.
 embedding_model: BAAI/bge-small-en-v1.5

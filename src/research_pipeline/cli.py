@@ -48,7 +48,7 @@ class Pipeline:
 
 def build_pipeline(config: Config) -> Pipeline:
     """Real sources, the real embedding model, and arXiv lookup for seed papers."""
-    arxiv = ArxivSource(config.arxiv_categories)
+    arxiv = ArxivSource(config.arxiv_categories, max_results=config.arxiv_max_results)
     return Pipeline(
         sources=[arxiv, HfDailySource()],
         make_embedder=lambda: SentenceTransformerEmbedder(config.embedding_model),
@@ -124,11 +124,13 @@ def _load_profile(ctx: _Context) -> Profile:
         raise _fail(str(exc)) from exc
 
 
-def _embedder(pipeline: Pipeline) -> Embedder:
+def _embedder(pipeline: Pipeline, model_name: str) -> Embedder:
     try:
         return pipeline.make_embedder()
-    except RuntimeError as exc:  # e.g. the `embed` extra is not installed
+    except RuntimeError as exc:  # e.g. the `embed` extra is not installed (message has the hint)
         raise _fail(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - failed download, broken torch install, ...
+        raise _fail(f"could not load embedding model {model_name}: {exc}") from exc
 
 
 def _seed_texts(
@@ -148,10 +150,11 @@ def _seed_texts(
 
 
 def health_line(day: date, counts: dict[str, int], errors: list[str]) -> str:
+    detail = "; ".join(" ".join(e.split()) for e in errors) or "none"
     return (
         f"Run {day.isoformat()}: collected {counts.get('inserted', 0)} new, "
         f"{counts.get('updated', 0)} updated · kept {counts.get('triaged', 0)} · "
-        f"skipped {counts.get('skipped', 0)} · errors: {'; '.join(errors) or 'none'}"
+        f"skipped {counts.get('skipped', 0)} · errors: {detail}"
     )
 
 
@@ -167,7 +170,7 @@ def run(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     profile = _load_profile(ctx)
     pipeline = build_pipeline(ctx.config)
-    embedder = _embedder(pipeline)
+    embedder = _embedder(pipeline, ctx.config.embedding_model)
     run_id = start_run(ctx.conn)
     counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
     seeds = _seed_texts(ctx, profile, pipeline, errors)
@@ -195,7 +198,7 @@ def triage(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     profile = _load_profile(ctx)
     pipeline = build_pipeline(ctx.config)
-    embedder = _embedder(pipeline)
+    embedder = _embedder(pipeline, ctx.config.embedding_model)
     errors: list[str] = []
     seeds = _seed_texts(ctx, profile, pipeline, errors)
     counts = run_triage(ctx.conn, embedder, profile, seeds)

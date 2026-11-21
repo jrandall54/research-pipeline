@@ -130,6 +130,9 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 | Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, usually the placeholders from `init`. Replace them in `profile.yaml`. Ranking continues using your topics and any seeds that did resolve. |
 | Health line says `seeds: could not fetch ...: <reason>` | The seed lookup failed (network). Ranking used the seeds it already had; it retries next run. |
 | Digest says "Nothing new matched your profile today." | No paper was `triaged`: either no new papers arrived since the last run (they are already in an earlier digest) or every source failed (check the health line). |
+| Health line says `arxiv: reached max_results (N) before already-seen papers; some may be missed` | arXiv paging hit `arxiv_max_results` without reaching a paper you already had. Expected on the first run (empty database). Otherwise you were away a long time: raise `arxiv_max_results` in `config.yaml`. |
+| Health line says `written from stored papers` | You re-ran `digest` on its own; it replaced that day's original health line. The original errors remain in the `runs` table. |
+| `could not load embedding model <name>: ...` (exit 1) | The model failed to download or load (offline, disk, broken torch install). Fix the cause and re-run. |
 | The digest has fewer papers than `top_n` | Fewer than `top_n` new papers arrived since the previous run. |
 | Ranking looks off | See `triage.md`: add representative seeds, make topics more specific, check `triage_score` / `triage_reasons` in the database. |
 

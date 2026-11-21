@@ -44,7 +44,7 @@ def _parse_item(item: dict) -> PaperMeta | None:
 
     repos: list[str] = []
     repo = _clean(paper.get("githubRepo"))
-    if repo:
+    if repo.startswith(("http://", "https://")):
         repos.append(repo)
 
     upvotes = paper.get("upvotes")

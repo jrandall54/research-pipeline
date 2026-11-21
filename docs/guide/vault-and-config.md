@@ -28,10 +28,13 @@ Phase 1 only writes `vault.sqlite`, `digests/` and `cache/` (plus the two YAML f
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `vault_path` | the vault's path (set by `init`) | Absolute path of the vault. Required. |
+| `vault_path` | the vault's path (set by `init`) | Informational only: the vault actually used is chosen by `--vault`, then `$RESEARCH_VAULT`, then `~/research-vault`; this field is never read back. Required. |
 | `arxiv_categories` | `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE` | arXiv categories collected each night. |
+| `arxiv_max_results` | `1000` | Safety cap on arXiv papers fetched per run (at least 1). Paging stops earlier at the first page with an already-stored paper; hitting the cap first adds a warning to the health line (expected on the first run). See `sources.md`. |
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | Model that turns text into vectors for similarity (see `glossary.md`). |
 | `rss_feeds` | `[]` | Extra feed URLs (read but not used yet: RSS collection is a later phase). |
+
+Both files reject unknown keys: a typo such as `keyword:` or `top-n:` stops the command with an error naming the file and the key, instead of being silently ignored.
 
 ### `profile.yaml` fields
 

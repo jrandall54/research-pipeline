@@ -4,7 +4,7 @@ from datetime import date
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Status(StrEnum):
@@ -37,6 +37,8 @@ class PaperMeta(BaseModel):
 class Profile(BaseModel):
     """What the user cares about; drives triage ranking."""
 
+    model_config = ConfigDict(extra="forbid")
+
     topics: list[str]
     seeds: list[str]
     followed_authors: list[str] = Field(default_factory=list)
@@ -47,9 +49,12 @@ class Profile(BaseModel):
 class Config(BaseModel):
     """Pipeline settings (config.yaml in the vault)."""
 
+    model_config = ConfigDict(extra="forbid")
+
     vault_path: Path
     arxiv_categories: list[str] = Field(
         default_factory=lambda: ["cs.LG", "cs.CL", "cs.CR", "cs.OS", "cs.SE"]
     )
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     rss_feeds: list[str] = Field(default_factory=list)
+    arxiv_max_results: int = Field(default=1000, ge=1)

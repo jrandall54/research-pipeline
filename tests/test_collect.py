@@ -73,3 +73,36 @@ def test_collect_version_bump_counts_as_updated(conn):
     )
     assert counts["updated"] == 1 and counts["inserted"] == 0
     assert get_paper(conn, "2501.00001")["version"] == 2
+
+
+class CheckerSource(StubSource):
+    last_warning = "arxiv: reached max_results (5) before already-seen papers; some may be missed"
+
+    def set_known_checker(self, fn):
+        self.checker = fn
+
+
+def test_collect_gives_sources_a_db_backed_known_checker_and_surfaces_warning(conn):
+    run_collect(conn, [StubSource("hf_daily", [paper("2501.00009")])], start_run(conn))
+    src = CheckerSource("arxiv", [paper()])
+    counts, errors = run_collect(conn, [src], start_run(conn))
+    assert src.checker("2501.00009") is True
+    assert src.checker("2501.99999") is False
+    assert errors == [CheckerSource.last_warning]
+    assert counts["source_errors"] == 0 and counts["inserted"] == 1
+
+
+def test_source_failing_midway_leaves_no_rows_from_that_source(conn):
+    good = StubSource("hf_daily", [paper("2501.00001", source="hf_daily")])
+    # second paper violates NOT NULL on insert, after the first was already upserted
+    bad_paper = PaperMeta.model_construct(
+        id="2501.00003", title=None, abstract="", authors=[], source="arxiv",
+        url="u", version=1, hf_upvotes=0, repos=[], published=None,
+    )
+    flaky = StubSource("arxiv", [paper("2501.00002"), bad_paper])
+    counts, errors = run_collect(conn, [good, flaky], start_run(conn))
+    assert len(errors) == 1 and errors[0].startswith("arxiv:")
+    assert counts["source_errors"] == 1
+    ids = {r[0] for r in conn.execute("SELECT id FROM papers")}
+    assert ids == {"2501.00001"}
+    assert conn.execute("SELECT COUNT(*) FROM papers_fts").fetchone()[0] == 1

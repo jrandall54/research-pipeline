@@ -105,7 +105,10 @@ def _index(conn: sqlite3.Connection, rowid: int, title: str, abstract: str) -> N
 def upsert_paper(
     conn: sqlite3.Connection, p: PaperMeta
 ) -> Literal["inserted", "updated", "unchanged"]:
-    """Insert a paper or merge it into the stored row; see docs/guide/data-model.md."""
+    """Insert a paper or merge it into the stored row; see docs/guide/data-model.md.
+
+    Does not commit: the caller owns the transaction (``run_collect`` commits per source).
+    """
     now = _now()
     row = conn.execute("SELECT * FROM papers WHERE id = ?", (p.id,)).fetchone()
     if row is None:
@@ -120,7 +123,6 @@ def upsert_paper(
             ),
         )
         _index(conn, cur.lastrowid, p.title, p.abstract)
-        conn.commit()
         return "inserted"
 
     upvotes = max(row["hf_upvotes"], p.hf_upvotes)
@@ -142,7 +144,6 @@ def upsert_paper(
             ),
         )
         _index(conn, row["rowid"], p.title, p.abstract)
-        conn.commit()
         return "updated"
 
     if upvotes == row["hf_upvotes"] and repos == stored_repos:
@@ -151,7 +152,6 @@ def upsert_paper(
         "UPDATE papers SET hf_upvotes=?, repos=?, updated_at=? WHERE id=?",
         (upvotes, json.dumps(repos), now, p.id),
     )
-    conn.commit()
     return "updated"
 
 

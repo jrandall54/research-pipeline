@@ -137,3 +137,25 @@ def test_init_vault_direct_relative_path_normalized(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     init_vault(Path("rel"))
     assert load_config(tmp_path / "rel" / "config.yaml").vault_path == (tmp_path / "rel").resolve()
+
+
+def test_unknown_keys_are_rejected_naming_the_file(tmp_path):
+    from research_pipeline.vault import ConfigError, load_config, load_profile
+
+    p = tmp_path / "profile.yaml"
+    p.write_text('topics: ["a"]\nseeds: []\nkeyword: ["x"]\n')
+    with pytest.raises(ConfigError, match="profile.yaml") as e:
+        load_profile(p)
+    assert "keyword" in str(e.value)
+    c = tmp_path / "config.yaml"
+    c.write_text("vault_path: /v\narxiv-categories: [cs.LG]\n")
+    with pytest.raises(ConfigError, match="config.yaml"):
+        load_config(c)
+
+
+def test_default_templates_still_load(tmp_path):
+    from research_pipeline.vault import init_vault, load_config, load_profile
+
+    init_vault(tmp_path / "v")
+    assert load_profile(tmp_path / "v" / "profile.yaml").topics
+    assert load_config(tmp_path / "v" / "config.yaml").arxiv_max_results == 1000

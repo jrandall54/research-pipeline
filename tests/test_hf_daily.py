@@ -84,3 +84,18 @@ def test_fetch_timeout_raises_source_error():
     respx.get(API_URL).mock(side_effect=httpx.ConnectTimeout("slow"))
     with pytest.raises(SourceError, match="failed"):
         HfDailySource().fetch()
+
+
+@pytest.mark.parametrize(
+    "repo,kept",
+    [
+        ("https://github.com/a/b", True),
+        ("http://github.com/a/b", True),
+        ("javascript:alert(1)", False),
+        ("ftp://x/y", False),
+        ("github.com/a/b", False),
+    ],
+)
+def test_parse_keeps_only_http_repo_urls(data, repo, kept):
+    data[0]["paper"]["githubRepo"] = repo
+    assert parse_hf_daily(data)[0].repos == ([repo] if kept else [])

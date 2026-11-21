@@ -170,3 +170,63 @@ def test_spacing_holds_across_fetch_and_fetch_by_ids():
 def test_fetch_by_ids_empty_makes_no_call():
     src = ArxivSource(["cs.LG"], sleep=lambda s: None)
     assert src.fetch_by_ids([]) == []
+
+
+def _known(ids):
+    return lambda pid: pid in ids
+
+
+@respx.mock
+def test_fetch_stops_after_page_containing_a_known_id_and_keeps_that_page():
+    route = respx.get(API).mock(
+        side_effect=[
+            httpx.Response(200, text=feed(100, 0)),
+            httpx.Response(200, text=feed(100, 100)),
+        ]
+    )
+    src = ArxivSource(["cs.LG"], max_results=1000, sleep=lambda s: None,
+                      is_known=_known({"2601.00150"}))
+    papers = src.fetch()
+    assert len(papers) == 200
+    assert route.call_count == 2
+    assert src.last_warning is None
+
+
+@respx.mock
+def test_fetch_warns_when_cap_hit_without_seeing_a_known_id():
+    respx.get(API).mock(
+        side_effect=[httpx.Response(200, text=feed(100, 0)), httpx.Response(200, text=feed(50, 100))]
+    )
+    src = ArxivSource(["cs.LG"], max_results=150, sleep=lambda s: None, is_known=_known(set()))
+    assert len(src.fetch()) == 150
+    assert src.last_warning == (
+        "arxiv: reached max_results (150) before already-seen papers; some may be missed"
+    )
+
+
+@respx.mock
+def test_fetch_no_warning_when_known_id_on_final_capped_page():
+    respx.get(API).mock(return_value=httpx.Response(200, text=feed(100, 0)))
+    src = ArxivSource(["cs.LG"], max_results=100, sleep=lambda s: None,
+                      is_known=_known({"2601.00099"}))
+    src.fetch()
+    assert src.last_warning is None
+
+
+@respx.mock
+def test_fetch_no_warning_on_short_page_and_warning_resets_each_fetch():
+    respx.get(API).mock(
+        side_effect=[httpx.Response(200, text=feed(10)), httpx.Response(200, text=feed(10))]
+    )
+    src = ArxivSource(["cs.LG"], max_results=10, sleep=lambda s: None)
+    src.fetch()
+    assert src.last_warning is not None  # cap hit, nothing known
+    src.max_results = 50
+    src.fetch()
+    assert src.last_warning is None  # short page: arXiv ran out
+
+
+def test_set_known_checker_installs_the_callable():
+    src = ArxivSource(["cs.LG"])
+    src.set_known_checker(lambda pid: True)
+    assert src._is_known("x") is True

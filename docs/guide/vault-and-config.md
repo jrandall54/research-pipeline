@@ -15,14 +15,15 @@ research-vault/
   vault.sqlite     all paper state, runs, search index  (Phase 1)
   digests/         one markdown digest per day  (Phase 1)
   cache/           small caches; seeds.json holds the text of your seed papers (Phase 1)
-  raw/             downloaded PDFs              (Phase 2)
-  markdown/        PDFs converted to markdown   (Phase 2)
-  summaries/       generated summaries          (Phase 2)
+  raw/             downloaded PDFs              (reserved, unused so far)
+  markdown/        PDFs converted to markdown   (reserved, unused so far)
+  summaries/       generated summaries          (reserved; summaries live in vault.sqlite)
   my_work/         your own writing, used to bias ranking (Phase 4)
-  gold/            gold.json: papers you know well plus the facts a summary must get right (Phase 2, see evaluation.md)
+  gold/            gold.json: papers you know well plus the facts a summary must get right (see evaluation.md)
+  eval/            one .json and .md per `rpipe eval run`, created on first use (see evaluation.md)
 ```
 
-Phase 1 only writes `vault.sqlite`, `digests/` and `cache/` (plus the two YAML files); the other folders are created now so the layout never changes later.
+The pipeline currently writes `vault.sqlite` (which also holds full texts and summaries), `digests/`, `cache/`, `gold/` (when you use `rpipe gold`) and `eval/` (created by `rpipe eval run`, not at `init`), plus the two YAML files. `raw/`, `markdown/`, `summaries/` and `my_work/` are created now but nothing writes to them yet; they are reserved so the layout never changes later.
 
 ### `config.yaml` fields
 

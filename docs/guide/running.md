@@ -61,11 +61,38 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 **Which papers the stage works on.** Papers that are `triaged` or `fetched`, plus papers already listed in *today's* digest that have no summary yet (they stay `in_digest`; the summary is just saved). A paper that has failed 3 times (`retry_count` 3) is skipped and the errors say `gave up after 3 failed tries (last error: ...)`. Papers from an *earlier* day's digest are never touched: if Ollama was down that night, those papers stay abstract-only (accepted limitation).
 
-`rpipe summarize` on its own prints "Nothing to summarize" and exits 0 when there is nothing of that kind; it exits 1 with the cause if Ollama is unavailable. The model setting `llm_num_ctx` must be at least 8192 (see `llm.md`).
+`rpipe summarize` on its own prints "Nothing to summarize" and exits 0 only when no paper is a candidate at all. A paper that has hit the 3-failure cap still counts as a candidate, so in that case the command does not print "Nothing to summarize": it checks Ollama, runs the stage, and the output lists `gave up after 3 failed tries (last error: ...)` for each such paper. It exits 1 with the cause if Ollama is unavailable. The model setting `llm_num_ctx` must be at least 8192 (see `llm.md`).
+
+```
+$ uv run rpipe summarize
+Summarized:
+  fetched=3, summarized=3, abstract_only=0, summary_failed=0
+```
 
 Model commands (`rpipe model show`, `rpipe model set NAME`, `rpipe model check`) view, change and test the local Ollama model used for summaries; see `llm.md`. `check` exits 1 with a fix hint if Ollama is not running or the model is not installed.
 
+```
+$ uv run rpipe model show
+$ uv run rpipe model set qwen3:8b
+$ uv run rpipe model check
+```
+
+Gold-set commands (`rpipe gold add`, `rpipe gold list`, `rpipe gold remove`, `rpipe gold add-fact`) build the answer key of papers and key facts that `rpipe eval` checks summaries against; see `evaluation.md`.
+
+```
+$ uv run rpipe gold add 2307.15043          # paste a link, id or title; then type key facts, one per line
+$ uv run rpipe gold list
+$ uv run rpipe gold add-fact 2307.15043 "Suffixes found on open models transfer to closed models"
+$ uv run rpipe gold remove 2307.15043
+```
+
 Evaluation commands (`rpipe eval run`, `rpipe eval grade`, `rpipe eval report`) check summary accuracy against your gold set; see `evaluation.md`. `eval run` exits 1 if the gold set is empty or the model is unavailable.
+
+```
+$ uv run rpipe eval run      # summarize every gold paper, write eval/<date>.md
+$ uv run rpipe eval grade    # answer y/n per paper; saved one by one
+$ uv run rpipe eval report   # accuracy against the 90% pass mark
+```
 
 Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
@@ -168,8 +195,9 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 
 ## Where the code is
 
-- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `summarize`, `digest`, `build_pipeline`, `health_line` (the `profile` commands are in `profile.md`)
+- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `summarize`, `digest`, `model`, `gold` and `eval` commands, `build_pipeline`, `health_line` (the `profile` commands are in `profile.md`)
 - `src/research_pipeline/seeds.py`: seed text lookup and cache
 - `src/research_pipeline/summarize.py`: `run_summarize` (the per-paper loop)
-- `src/research_pipeline/evaluate.py`: `rpipe eval` (see `evaluation.md`)
+- `src/research_pipeline/llm.py`, `fulltext.py`, `prompts.py`: model client, full-text fetching, prompts (see `llm.md`, `fulltext.md`, `summaries.md`)
+- `src/research_pipeline/gold.py`, `evaluate.py`: `rpipe gold` and `rpipe eval` (see `evaluation.md`)
 - `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`

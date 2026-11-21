@@ -21,7 +21,7 @@ Universal and Transferable Adversarial Attacks on Aligned Language Models (Andy 
 Add this paper? [Y/n]: y
 Fact 1: Finds adversarial suffixes automatically by greedy and gradient-based search
 Fact 2: The suffixes found on open models transfer to closed models such as ChatGPT
-Fact 3:
+Fact 3 (blank line to finish):
 Saved with 2 fact(s); 3 or more make a better test (rpipe gold add-fact).
 Added 2307.15043: Universal and Transferable Adversarial Attacks ...
 ```

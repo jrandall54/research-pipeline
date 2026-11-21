@@ -33,3 +33,13 @@
 **Hugging Face Daily Papers** — a community-curated daily list of notable (mostly arXiv) papers with upvotes and optional GitHub links. See `sources.md`.
 
 **Source isolation** — one source failing (network error, bad response) is logged and skipped while the other sources still run, so a single outage never empties the whole night's run. See `sources.md`.
+
+**Embedding** — a list of numbers produced by a model from a piece of text so that texts with similar meaning get similar numbers. We embed every paper, seed and topic. See `triage.md`.
+
+**Vector** — an ordered list of numbers, here an embedding (384 numbers for the default model). Think of it as an arrow in a many-dimensional space.
+
+**Cosine similarity** — how closely two vectors point the same way: 1 is identical direction, 0 unrelated, -1 opposite. For unit-length vectors it equals the dot product. See `triage.md` for a worked example.
+
+**L2 normalisation** — scaling a vector so its length is 1. Done to embeddings so cosine similarity reduces to a dot product and text length does not matter.
+
+**Top-N** — keeping only the N highest-scoring items (here `top_n`, default 15 papers per night); the rest are marked `skipped` but stay searchable.

@@ -83,7 +83,7 @@ A new version of a kept paper (`triaged`, `fetched`, `summarized`, `in_digest`) 
 
 ## Database tables
 
-All state lives in one SQLite file (`pipeline.db` in the vault), opened by `open_db()`. Opening creates every table if missing and switches the file to WAL mode. Timestamps are ISO-8601 UTC text. Lists (authors, repos, reasons) are stored as JSON text.
+All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `open_db()`. Opening creates every table if missing and switches the file to WAL mode. Timestamps are ISO-8601 UTC text. Lists (authors, repos, reasons) are stored as JSON text.
 
 ### `papers` — one row per paper
 

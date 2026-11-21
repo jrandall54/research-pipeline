@@ -30,7 +30,7 @@ The repo holds code and defaults only. Everything personal lives in the vault, s
 6. `running.md` — commands and a full run walkthrough
 7. `glossary.md` — plain-word definitions of terms
 
-Pages not yet written are added by later tasks.
+Pages not yet written are added by later tasks. Start `vault-and-config.md` first if you are setting up for the first time.
 
 ## Where the code is
 

@@ -15,3 +15,9 @@
 **WAL (write-ahead log)** — a SQLite journal mode where changes are appended to a log before being merged into the main file. Readers do not block the writer and crashes are safer.
 
 **Upsert** — "update or insert": add the record if it is new, otherwise merge it into the existing one. See `upsert_paper` in `data-model.md`.
+
+**Profile** — `profile.yaml` in the vault: your topics, seed papers, followed authors, keywords and `top_n`. It is what papers are ranked against. See `vault-and-config.md`.
+
+**Idempotent** — safe to run repeatedly: running `init` twice gives the same result as once and never destroys your edits.
+
+**Package data** — non-code files (here the default YAML templates) shipped inside the installed Python package and read with `importlib.resources`.

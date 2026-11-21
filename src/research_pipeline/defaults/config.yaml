@@ -1,0 +1,15 @@
+# Pipeline settings. Written once by `research-pipeline init`; never overwritten.
+
+# Absolute path of this vault folder (set by init).
+vault_path: __VAULT_PATH__
+
+# arXiv categories to collect from each night.
+# cs.LG machine learning, cs.CL language, cs.CR security, cs.OS operating systems, cs.SE software engineering.
+arxiv_categories: __CATEGORIES__
+
+# Sentence-embedding model used to measure similarity between papers and your profile.
+# Downloaded from Hugging Face the first time triage runs.
+embedding_model: BAAI/bge-small-en-v1.5
+
+# Extra RSS/Atom feed URLs to collect from (none in Phase 1).
+rss_feeds: []

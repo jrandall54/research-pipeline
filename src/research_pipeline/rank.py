@@ -13,12 +13,15 @@ from research_pipeline.models import Profile
 
 log = logging.getLogger(__name__)
 
-# Weights. Cosine similarity (roughly 0..1) is the main signal; boosts are nudges
-# small enough that they reorder close calls but cannot rescue an off-topic paper.
-HF_UPVOTE_WEIGHT = 0.05  # x log1p(upvotes): 1 vote ~0.035, 42 votes ~0.19; log stops viral papers dominating
-AUTHOR_BOOST = 0.1  # per followed author on the paper: a strong but not decisive signal
-KEYWORD_BOOST = 0.05  # per keyword found in title/abstract: weak, keywords are blunt
-KEYWORD_BOOST_CAP = 0.2  # many keywords must not swamp similarity
+# Weights. Cosine similarity is the main signal, but real embedding models squeeze it into a
+# narrow band: with bge-small on a night of ~340 papers it ran 0.57-0.85 with a standard
+# deviation of ~0.045 (smoke test, 2026-11-21). Boosts must be sized against that spread, not
+# against 0..1, or a popular off-topic paper outranks every on-topic one. They are nudges that
+# reorder close calls.
+HF_UPVOTE_WEIGHT = 0.01  # x log1p(upvotes): 1 vote ~0.007, 42 votes ~0.038 (about one std of similarity)
+AUTHOR_BOOST = 0.02  # per followed author on the paper: a clear nudge, about half a std
+KEYWORD_BOOST = 0.01  # per keyword found in title/abstract: weak, keywords are blunt
+KEYWORD_BOOST_CAP = 0.04  # many keywords must not swamp similarity
 MY_WORK_WEIGHT = 0.0  # TODO(phase4): similarity to the user's own notes in my_work/
 VOTE_PENALTY = 0.0  # TODO(phase3): penalty for topics the user has downvoted
 

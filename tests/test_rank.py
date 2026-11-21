@@ -60,7 +60,7 @@ def test_hf_upvotes_boost_breaks_tie(tmp_path, embedder):
     ranked = score(tmp_path, embedder, [a, b], profile)
     assert ranked[0].id == "2501.00002"
     assert "HF upvotes: 42" in ranked[0].reasons
-    assert ranked[0].score - ranked[1].score == pytest.approx(0.05 * np.log1p(42))
+    assert ranked[0].score - ranked[1].score == pytest.approx(0.01 * np.log1p(42))
 
 
 def test_followed_author_boost(tmp_path, embedder):
@@ -70,27 +70,27 @@ def test_followed_author_boost(tmp_path, embedder):
     ranked = score(tmp_path, embedder, [b, a], profile)
     assert ranked[0].id == "2501.00001"
     assert "followed author: Ada Lovelace" in ranked[0].reasons
-    assert ranked[0].score - ranked[1].score == pytest.approx(0.1)
+    assert ranked[0].score - ranked[1].score == pytest.approx(0.02)
 
 
 def test_followed_author_match_is_case_insensitive(tmp_path, embedder):
     profile = Profile(topics=[], seeds=[], followed_authors=["ada lovelace"])
     (s,) = score(tmp_path, embedder, [meta("2501.00001", "X", authors=["Ada Lovelace"])], profile)
-    assert s.score == pytest.approx(0.1)
+    assert s.score == pytest.approx(0.02)
 
 
 def test_keyword_boost_is_capped_and_counted_once(tmp_path, embedder):
     profile = Profile(topics=[], seeds=[], keywords=["alpha", "beta", "gamma", "delta", "eps"])
     p = meta("2501.00001", "Alpha alpha", "beta gamma delta eps")
     (s,) = score(tmp_path, embedder, [p], profile)
-    assert s.score == pytest.approx(0.2)
+    assert s.score == pytest.approx(0.04)
     assert sum(r.startswith("keyword:") for r in s.reasons) == 5
 
 
 def test_keyword_single_hit(tmp_path, embedder):
     profile = Profile(topics=[], seeds=[], keywords=["Fuzzing"])
     (s,) = score(tmp_path, embedder, [meta("2501.00001", "On fuzzing kernels")], profile)
-    assert s.score == pytest.approx(0.05)
+    assert s.score == pytest.approx(0.01)
     assert s.reasons == ["keyword: Fuzzing"]
 
 
@@ -144,3 +144,17 @@ def test_missing_sentence_transformers_gives_install_hint(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(RuntimeError, match="uv sync --extra embed"):
         SentenceTransformerEmbedder()
+
+
+def test_popular_paper_cannot_beat_a_clearly_closer_one_at_realistic_similarity_spread(tmp_path):
+    """Real models bunch cosine similarity in ~0.6-0.85; a 42-upvote boost must not bridge 0.1."""
+    topic = np.array([1.0, 0.0], dtype=np.float32)
+
+    def vec(cos):
+        return np.array([cos, np.sqrt(1 - cos**2)], dtype=np.float32)
+
+    profile = Profile(topics=["t"], seeds=[])
+    pv = ProfileVectors([], np.zeros((0, 0)), ["t"], topic[None, :])
+    rows = make_rows(tmp_path, [meta("2501.00001", "close"), meta("2501.00002", "viral", hf_upvotes=42)])
+    ranked = score_papers(rows, np.stack([vec(0.85), vec(0.75)]), profile, pv)
+    assert ranked[0].id == "2501.00001"

@@ -52,4 +52,6 @@
 
 **Pipeline stub (test double)** — a fake stand-in for a real part (a source, the embedding model) used in tests so they run offline. `build_pipeline` in `cli.py` is the one place the real parts are created; tests replace it. See `running.md`.
 
-**Run** — one execution of `research-pipeline run`, recorded as a row in the `runs` table with start/end times, counts and errors. See `running.md`.
+**Run** — one execution of `rpipe run`, recorded as a row in the `runs` table with start/end times, counts and errors. See `running.md`.
+
+**rpipe** — the command-line tool (`rpipe init`, `rpipe run`, ...). `research-pipeline` is a long alias for the same program. See `running.md`, "The `rpipe` command".

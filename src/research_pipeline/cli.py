@@ -109,7 +109,7 @@ def _fail(message: str) -> typer.Exit:
 def _open(vault: Path | None) -> _Context:
     path = resolve_vault(vault)
     if not (path / "config.yaml").exists():
-        raise _fail(f"No vault found at {path} (no config.yaml). Run `research-pipeline init` first.")
+        raise _fail(f"No vault found at {path} (no config.yaml). Run `rpipe init` first.")
     try:
         config = load_config(path / "config.yaml")
     except ConfigError as exc:

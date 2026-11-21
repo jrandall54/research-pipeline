@@ -1,4 +1,4 @@
-# Pipeline settings. Written once by `research-pipeline init`; never overwritten.
+# Pipeline settings. Written once by `rpipe init`; never overwritten.
 
 # Absolute path of this vault folder (set by init).
 vault_path: __VAULT_PATH__

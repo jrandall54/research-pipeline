@@ -1,4 +1,4 @@
-# Your research profile. Edit freely; `research-pipeline init` never overwrites this file.
+# Your research profile. Edit freely; `rpipe init` never overwrites this file.
 
 # What you care about, in plain words. Each topic is embedded and papers are
 # ranked by how close they are to these phrases. Specific phrases work better than

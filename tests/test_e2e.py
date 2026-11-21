@@ -106,7 +106,15 @@ def test_run_on_uninitialised_vault_exits_nonzero(tmp_path, monkeypatch):
     install(monkeypatch)
     res = run_cli("run", "--vault", str(tmp_path / "nope"))
     assert res.exit_code == 1
-    assert "research-pipeline init" in res.output
+    assert "rpipe init" in res.output
+
+
+def test_console_scripts_expose_short_name_and_long_alias():
+    import tomllib
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    scripts = tomllib.loads(pyproject.read_text())["project"]["scripts"]
+    assert scripts["rpipe"] == "research_pipeline.cli:app"
+    assert scripts["research-pipeline"] == "research_pipeline.cli:app"
 
 
 def test_failing_source_exits_zero_and_is_reported(vault, monkeypatch):

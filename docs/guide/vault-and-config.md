@@ -2,7 +2,7 @@
 
 ## What it does
 
-The **vault** is a folder (default `~/research-vault/`) that holds everything personal: your settings, your profile, the database, and every digest. The repo holds only code and defaults, so you can reinstall or share the engine without leaking anything. `research-pipeline init` builds the vault; `load_config` and `load_profile` read the two settings files back into validated objects.
+The **vault** is a folder (default `~/research-vault/`) that holds everything personal: your settings, your profile, the database, and every digest. The repo holds only code and defaults, so you can reinstall or share the engine without leaking anything. `rpipe init` builds the vault; `load_config` and `load_profile` read the two settings files back into validated objects.
 
 ## How it works
 
@@ -80,8 +80,8 @@ Choose 10-20 papers you would be glad to see more of: ones you have read and lea
 ## How to run / check it
 
 ```
-uv run research-pipeline init                 # prompts in a terminal
-uv run research-pipeline init --vault /tmp/v  # custom location
+uv run rpipe init                 # prompts in a terminal
+uv run rpipe init --vault /tmp/v  # custom location
 uv run pytest tests/test_vault.py -q
 ```
 

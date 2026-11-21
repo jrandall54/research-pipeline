@@ -2,7 +2,7 @@
 
 ## What it does
 
-`research-pipeline run` is the one command you run each night. It collects new papers, ranks them against your profile and writes a digest, then records how the run went. The same stages are also available one at a time (`collect`, `triage`, `digest`) for debugging.
+`rpipe run` is the one command you run each night. It collects new papers, ranks them against your profile and writes a digest, then records how the run went. The same stages are also available one at a time (`collect`, `triage`, `digest`) for debugging.
 
 ## How it works
 
@@ -14,10 +14,24 @@ uv sync --extra embed
 
 `uv sync` installs the pipeline. The `embed` extra adds `sentence-transformers` (and with it PyTorch), the library that runs the embedding model. It is an **optional extra** because it is large (gigabytes, mostly PyTorch) and the tests, and every part of the pipeline except triage, do not need it. Without it `run` and `triage` stop with a clear message (see Troubleshooting); `collect` and `digest` never load the model and work without it. On a machine with a GPU, PyTorch uses it automatically; a CPU is also fine for a few hundred papers a night. The first run downloads the embedding model (about 130 MB for the default) from Hugging Face and caches it.
 
+### The `rpipe` command
+
+The command is `rpipe` (short for "research pipeline"). `research-pipeline` still works as a long alias, so older notes and scripts keep working.
+
+Inside the repo you can always prefix it with `uv run` (`uv run rpipe run`). To type plain `rpipe` from any folder, install it once as a user tool:
+
+```
+uv tool install --editable '.[embed]'
+```
+
+`--editable` means the installed command runs the code in this checkout, so a `git pull` takes effect without reinstalling. Re-run the command only when dependencies change. The examples below use `uv run rpipe`, which works either way.
+
+**Why a short name:** a command people run every day should be quick to type and easy to remember. `rpipe` is short, says what it is, and does not clash with a common Unix tool. The Python package keeps its descriptive name (`research_pipeline`), because nobody types that.
+
 ### Create your vault
 
 ```
-uv run research-pipeline init
+uv run rpipe init
 ```
 
 In a terminal it asks for your topics and arXiv categories; it then creates the vault (default `~/research-vault`, or `--vault PATH`, or the `RESEARCH_VAULT` environment variable) with `config.yaml`, `profile.yaml`, `vault.sqlite` and the folders described in `vault-and-config.md`. It is safe to re-run.
@@ -50,7 +64,7 @@ Only `run` writes a row to `runs`; the single-stage commands print their counts 
 This is a real run on a clean vault (profile: LLM security topics, four well-known seed papers, `top_n` 15). Nothing personal appears here.
 
 ```
-$ uv run research-pipeline run
+$ uv run rpipe run
 Digest written to <vault>/digests/2026-11-21.md
   inserted=339, updated=11, unchanged=0, source_errors=0, triaged=15, skipped=324, embedded=339
 ```
@@ -99,7 +113,7 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 
 ### Running it nightly
 
-Phase 1 stops at the command; scheduling it (for example with a systemd timer or cron entry running `research-pipeline run`) is a later phase. Running twice on the same day is safe: no paper is stored twice and the day's digest is rewritten with everything from both runs (`digest.md`, "Same-day re-runs").
+Phase 1 stops at the command; scheduling it (for example with a systemd timer or cron entry running `rpipe run`) is a later phase. Running twice on the same day is safe: no paper is stored twice and the day's digest is rewritten with everything from both runs (`digest.md`, "Same-day re-runs").
 
 ## Why it's built this way
 
@@ -112,7 +126,7 @@ Phase 1 stops at the command; scheduling it (for example with a systemd timer or
 ## How to run / check it
 
 ```
-uv run research-pipeline run --vault /tmp/try-vault   # after init, on a scratch vault
+uv run rpipe run --vault /tmp/try-vault   # after init, on a scratch vault
 uv run pytest -q                                      # whole suite, offline
 uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 ```
@@ -123,7 +137,7 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `No vault found at ... (no config.yaml). Run research-pipeline init first.` (exit 1) | The vault does not exist yet, or you pointed `--vault` / `RESEARCH_VAULT` at the wrong folder. Run `init`, or fix the path. |
+| `No vault found at ... (no config.yaml). Run rpipe init first.` (exit 1) | The vault does not exist yet, or you pointed `--vault` / `RESEARCH_VAULT` at the wrong folder. Run `init`, or fix the path. |
 | `invalid settings` / `invalid YAML` naming a file (exit 1) | A typo in `config.yaml` or `profile.yaml`; the message starts with the file path and says which field. |
 | `sentence-transformers is not installed; run uv sync --extra embed` (exit 1) | Install the extra (see Install). |
 | Health line says `errors: arxiv: arXiv API returned HTTP 5xx` (or a timeout) | arXiv (or Hugging Face) was down. The digest was built from the other source. Re-run later: `run` is safe to repeat. |

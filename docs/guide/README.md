@@ -15,7 +15,7 @@ Every night the pipeline collects new computer-science, security and AI papers, 
                                      + seeds    + runs row (counts, errors)
 ```
 
-One command, `research-pipeline run`, executes the whole flow and records it. Each stage in a paragraph:
+One command, `rpipe run`, executes the whole flow and records it. Each stage in a paragraph:
 
 1. **Collect** ([sources.md](sources.md)). Asks arXiv (newest papers in your categories, politely, one request per 3 seconds) and Hugging Face Daily Papers (community-upvoted papers with code links) for recent papers and stores each as a row with status `new`. A paper seen before is not duplicated; a higher version updates it. If one source is down, the other still runs and the failure is recorded.
 2. **Triage** ([triage.md](triage.md)). Turns each new paper into an embedding (numbers capturing its meaning), compares it with your seed papers and topics, adds small boosts for upvotes, followed authors and keywords, keeps the top N as `triaged` and marks the rest `skipped` (still searchable). Every score comes with plain-language reasons.

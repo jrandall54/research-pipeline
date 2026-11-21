@@ -11,7 +11,12 @@ The owner does not write the code but must understand all of it and explain it t
 - Write for a technically literate reader who has not seen the code. Explain ML/IR terms in plain words and add them to `docs/guide/glossary.md`.
 - When behaviour changes, fix the docs that describe the old behaviour. Stale docs are bugs.
 
+## Users never hand-edit files
+
+The pipeline is for the owner and for others (AI club members) with different interests. Every setting a user needs (topics, seed papers, authors, keywords, categories, top-N) must be settable through `rpipe` commands or guided prompts that validate input. `profile.yaml` and `config.yaml` stay as the storage format and may be hand-edited by power users, but no documented workflow may require it. A feature that adds a user setting also adds the command to change it.
+
 ## Conventions
 
+- The CLI is `rpipe` (long alias `research-pipeline`). Use `rpipe` in docs, messages and examples.
 - Engine separate from data: nothing personal (profile, vault, notes) in the repo.
 - Tests run offline (fixtures + fake embedder). `uv run pytest -q`.

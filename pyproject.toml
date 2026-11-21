@@ -16,6 +16,7 @@ dependencies = [
 embed = ["sentence-transformers"]
 
 [project.scripts]
+rpipe = "research_pipeline.cli:app"
 research-pipeline = "research_pipeline.cli:app"
 
 [dependency-groups]

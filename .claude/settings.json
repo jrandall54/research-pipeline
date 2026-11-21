@@ -4,6 +4,8 @@
       "Bash(uv run pytest*)",
       "Bash(uv sync*)",
       "Bash(uv run research-pipeline*)",
+      "Bash(uv run rpipe*)",
+      "Bash(rpipe*)",
       "Bash(git add*)",
       "Bash(git commit*)",
       "Bash(git status*)",

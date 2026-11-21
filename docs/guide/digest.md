@@ -109,7 +109,7 @@ Example: the 08:00 run lists papers A and B. At 14:00 a re-run triages paper C. 
 
 ## How to run / check it
 
-Normally via the `run` command, which runs collect, triage, then digest (see `running.md`); `research-pipeline digest [--date YYYY-MM-DD]` rewrites just this stage. Open `<vault>/digests/<today>.md`. To inspect the effect in the database:
+Normally via the `run` command, which runs collect, triage, then digest (see `running.md`); `rpipe digest [--date YYYY-MM-DD]` rewrites just this stage. Open `<vault>/digests/<today>.md`. To inspect the effect in the database:
 
 ```
 sqlite3 <vault>/vault.sqlite "select id, status, digest_date from papers where digest_date is not null"

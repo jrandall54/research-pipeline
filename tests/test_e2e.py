@@ -377,3 +377,108 @@ def test_e2e_version_bump_resummarises_from_new_text(vault, monkeypatch):
     )
     assert run_cli("run", "--vault", str(vault)).exit_code == 0
     assert [s.title for s in get_fulltext(conn, pid)] == ["Fresh"]
+
+
+# ---------------------------------------------------------------- auto model and context
+
+import httpx
+import respx
+
+from test_ollama_fit import GB, URL as OLLAMA, FakeOllama
+
+
+def install_real_llm(monkeypatch, vault):
+    arxiv = parse_arxiv_atom((FIXTURES / "arxiv_atom.xml").read_text())
+    hf = parse_hf_daily(json.loads((FIXTURES / "hf_daily.json").read_text()))
+    srcs = [FixtureSource("arxiv", arxiv), FixtureSource("hf_daily", hf)]
+    monkeypatch.setattr(
+        cli, "build_pipeline",
+        lambda config: Pipeline(srcs, FakeEmbedder, seed_fetcher,
+                                lambda: cli.build_llm(config, vault), fetch_text),
+    )
+    assert run_cli("model", "set-url", OLLAMA, "--vault", str(vault)).exit_code == 0
+
+
+def two_model_fake() -> FakeOllama:
+    return FakeOllama({
+        "big": {"size": 30 * GB, "params": 30 * GB, "ctx": 40960},
+        "mid": {"size": 8 * GB, "params": 14 * GB, "ctx": 40960},
+    }, free=20 * GB, kv_per_token=100_000)
+
+
+def chat(request):
+    body = json.loads(request.content)
+    out = summary() if body["format"]["title"] == "Summary" else critique()
+    return httpx.Response(200, json={"message": {"role": "assistant", "content": out.model_dump_json()}})
+
+
+def test_e2e_default_vault_auto_picks_model_and_sends_resolved_values(vault, monkeypatch):
+    install_real_llm(monkeypatch, vault)
+    fake = two_model_fake()
+    with respx.mock(assert_all_called=False) as m:
+        fake.install(m)
+        route = m.post(f"{OLLAMA}/api/chat").mock(side_effect=chat)
+        res = run_cli("run", "--vault", str(vault))
+        assert res.exit_code == 0, res.output
+        assert route.call_count > 0
+        bodies = [json.loads(c.request.content) for c in route.calls]
+        assert {b["model"] for b in bodies} == {"mid"}
+        # mid fits until 8 GB + 100_000 * n <= 20 GB, i.e. n = 120000 -> 117 * 1024 = 119808, ceiling 40960
+        assert {b["options"]["num_ctx"] for b in bodies} == {40960}
+        assert "summarized 2" in next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+        probes_after_first = len(fake.probes())
+        assert probes_after_first > 0
+        assert (vault / "cache" / "llm_fit.json").exists()
+        res = run_cli("run", "--vault", str(vault))
+        assert res.exit_code == 0, res.output
+        assert len(fake.probes()) == probes_after_first
+
+
+def test_e2e_pinned_model_with_auto_context_probes_only_that_model(vault, monkeypatch):
+    install_real_llm(monkeypatch, vault)
+    assert run_cli("model", "set", "mid", "--vault", str(vault)).exit_code == 0
+    fake = two_model_fake()
+    with respx.mock(assert_all_called=False) as m:
+        fake.install(m)
+        m.post(f"{OLLAMA}/api/chat").mock(side_effect=chat)
+        res = run_cli("run", "--vault", str(vault))
+        assert res.exit_code == 0, res.output
+    assert fake.probes() and {p["model"] for p in fake.probes()} == {"mid"}
+
+
+def test_e2e_only_embedding_models_still_writes_digest_and_names_cause(vault, monkeypatch):
+    install_real_llm(monkeypatch, vault)
+    fake = FakeOllama({"emb": {"size": 1, "params": 1000, "ctx": None, "caps": ["embedding"]}})
+    with respx.mock(assert_all_called=False) as m:
+        fake.install(m)
+        res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert "ollama pull" in first and "summar" in first
+
+
+def test_model_fit_prints_choice_and_writes_cache_and_show_reports_it(vault):
+    assert run_cli("model", "set-url", OLLAMA, "--vault", str(vault)).exit_code == 0
+    before = run_cli("model", "show", "--vault", str(vault)).output
+    assert "not probed yet" in before and "rpipe model fit" in before
+    fake = two_model_fake()
+    with respx.mock(assert_all_called=False) as m:
+        fake.install(m)
+        res = run_cli("model", "fit", "--vault", str(vault))
+        assert res.exit_code == 0, res.output
+        assert "Using model mid with a context of 40960 tokens" in res.output
+        assert "big" in res.output  # what was tried
+        n = len(fake.probes())
+        run_cli("model", "fit", "--vault", str(vault))
+        assert len(fake.probes()) > n  # fit always re-probes
+    assert (vault / "cache" / "llm_fit.json").exists()
+    after = run_cli("model", "show", "--vault", str(vault)).output
+    assert "mid" in after and "40960" in after and "not probed yet" not in after
+
+
+def test_model_fit_with_no_models_exits_1_with_pull_hint(vault):
+    assert run_cli("model", "set-url", OLLAMA, "--vault", str(vault)).exit_code == 0
+    with respx.mock(assert_all_called=False) as m:
+        FakeOllama({}).install(m)
+        res = run_cli("model", "fit", "--vault", str(vault))
+    assert res.exit_code == 1 and "ollama pull" in res.output and "Traceback" not in res.output

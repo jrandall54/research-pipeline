@@ -50,25 +50,33 @@ def _request(method: str, url: str, path: str, timeout: float = 30.0, **kwargs) 
     return resp
 
 
-def list_models(url: str) -> list[ModelInfo]:
-    """Installed models with parameter count, trained context and capabilities."""
+def list_models(url: str, log: Callable[[str], None] = lambda s: None) -> list[ModelInfo]:
+    """Installed models with parameter count, trained context and capabilities.
+
+    A model whose `/api/show` answer is broken is skipped with a note, so one bad
+    entry cannot stop discovery of the others.
+    """
     tags = _request("GET", url, "/api/tags").json().get("models", [])
     out: list[ModelInfo] = []
     for t in tags:
-        name = t["name"]
-        show = _request("POST", url, "/api/show", json={"model": name}).json()
-        mi = show.get("model_info") or {}
-        ctx = next(
-            (v for k, v in mi.items() if k.endswith(".context_length") and isinstance(v, int)),
-            None,
-        )
-        out.append(ModelInfo(
-            name=name,
-            digest=t.get("digest", ""),
-            params=int(mi.get("general.parameter_count") or 0),
-            max_context=ctx,
-            capabilities=list(show.get("capabilities") or []),
-        ))
+        try:
+            name = t["name"]
+            show = _request("POST", url, "/api/show", json={"model": name}).json()
+            mi = show.get("model_info") or {}
+            ctx = next(
+                (v for k, v in mi.items() if k.endswith(".context_length") and isinstance(v, int)),
+                None,
+            )
+            out.append(ModelInfo(
+                name=name,
+                digest=t.get("digest", ""),
+                params=int(mi.get("general.parameter_count") or 0),
+                max_context=ctx,
+                capabilities=list(show.get("capabilities") or []),
+            ))
+        except (LlmError, ValueError, KeyError, TypeError, AttributeError) as e:
+            log(f"skipping {t.get('name', '?') if isinstance(t, dict) else '?'}: "
+                f"could not read its details ({e})")
     return out
 
 
@@ -167,6 +175,9 @@ def choose(
     tried: list[str] = []
     for m in candidates:
         if pinned_ctx is not None:
+            if m.max_context is not None and m.max_context < pinned_ctx:
+                tried.append(f"{m.name} (trained context only {m.max_context} tokens)")
+                continue
             log(f"trying {m.name} at {pinned_ctx} tokens")
             if fits(url, m.name, pinned_ctx):
                 return Fit(model=m.name, num_ctx=pinned_ctx)
@@ -216,6 +227,15 @@ def _read_cache(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def last_choice(vault: Path) -> Fit | None:
+    """The choice `resolve` last cached for this vault, or None if there is none."""
+    cached = _read_cache(vault / "cache" / CACHE_NAME)
+    try:
+        return Fit(model=cached["model"], num_ctx=cached["num_ctx"])
+    except (KeyError, ValueError):
+        return None
+
+
 def resolve(
     url: str,
     vault: Path,
@@ -227,7 +247,7 @@ def resolve(
     """Turn the config values (`auto` or explicit) into a concrete model and context."""
     if model != "auto" and num_ctx != "auto":
         return Fit(model=model, num_ctx=int(num_ctx))
-    models = list_models(url)
+    models = list_models(url, log=log)
     key = json.dumps(
         {"url": url, "model": model, "num_ctx": num_ctx,
          "installed": sorted([m.name, m.digest] for m in models)},

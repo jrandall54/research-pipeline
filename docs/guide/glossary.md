@@ -70,7 +70,7 @@
 
 **Context window** — how much text a language model can read at once, counting both what you send and what it writes back, measured in tokens. Text beyond it is cut off or ignored. See `llm.md`.
 
-**`num_ctx`** — Ollama's name for the context window size; the config field `llm_num_ctx` (default 32768) sets it. See `llm.md`.
+**`num_ctx`** — Ollama's name for the context window size; the config field `llm_num_ctx` (default `auto`, or a number you pin) sets it. See `llm.md`.
 
 **Structured output / JSON schema** — telling the model server the exact JSON shape the answer must have (a schema, generated from a Pydantic class) so the reply can be parsed and validated by code instead of scraped from prose. See `llm.md`.
 
@@ -107,5 +107,7 @@
 **GPU offload** — how much of a model Ollama keeps on the graphics card versus the CPU. "Fully offloaded" means all of it is on the GPU; a partial offload spills the rest to the CPU and is many times slower. See `llm.md`.
 
 **KV cache** — the working memory a model builds while reading the prompt (a "key" and "value" for each token so far). It grows with the context window, which is why a bigger context can stop a model fitting in VRAM. See `llm.md`.
+
+**`auto`** — the default for `llm_model` and `llm_num_ctx`: the pipeline picks the largest installed model that fits fully on the GPU and the largest context it can hold, caches the answer, and re-checks with `rpipe model fit`. See `llm.md`.
 
 **Probe** — a test load: we load a model at a given context with an empty prompt and check whether it sits fully on the GPU, then unload it. See `llm.md`.

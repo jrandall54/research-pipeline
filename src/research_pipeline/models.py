@@ -4,6 +4,7 @@ import re
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -62,9 +63,10 @@ class Config(BaseModel):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     rss_feeds: list[str] = Field(default_factory=list)
     arxiv_max_results: int = Field(default=1000, ge=1)
-    llm_model: str = Field(default="qwen3:14b", min_length=1)
+    # "auto" = pick the best installed model / largest fitting context (see ollama_fit.py).
+    llm_model: str = Field(default="auto", min_length=1)
     llm_url: str = "http://localhost:11434"
-    llm_num_ctx: int = Field(default=32768, ge=8192)
+    llm_num_ctx: Annotated[int, Field(ge=8192)] | Literal["auto"] = "auto"
 
     @field_validator("arxiv_categories")
     @classmethod

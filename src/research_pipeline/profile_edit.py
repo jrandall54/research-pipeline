@@ -250,7 +250,7 @@ def set_categories(vault: Path, cats: list[str]) -> None:
 def set_llm_model(vault: Path, name: str) -> None:
     name = name.strip()
     if not name:
-        raise ValueError("model name must not be empty (for example qwen3:14b)")
+        raise ValueError("model name must not be empty (for example qwen3:14b, or auto)")
 
     def change(data) -> bool:
         data["llm_model"] = name
@@ -271,7 +271,19 @@ def set_llm_url(vault: Path, url: str) -> None:
     _edit(_config_path(vault), Config, change)
 
 
-def set_llm_num_ctx(vault: Path, n: int) -> None:
+def set_llm_num_ctx(vault: Path, n: int | str) -> None:
+    """Pin the context window to a whole number of tokens (at least 8192), or give `auto`."""
+    if isinstance(n, str):
+        text = n.strip().lower()
+        if text == "auto":
+            n = "auto"
+        elif text.isdigit():
+            n = int(text)
+        else:
+            raise ValueError(
+                f"{n!r} is not a context size: give a whole number of tokens (at least 8192) or auto"
+            )
+
     def change(data) -> bool:
         data["llm_num_ctx"] = n
         return True

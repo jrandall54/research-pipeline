@@ -111,9 +111,25 @@ def test_check_unreachable_raises_with_hint():
 
 def test_config_defaults_and_num_ctx_validation():
     cfg = Config(vault_path="/x")
-    assert (cfg.llm_model, cfg.llm_url, cfg.llm_num_ctx) == ("qwen3:14b", URL, 32768)
-    with pytest.raises(ValidationError):
-        Config(vault_path="/x", llm_num_ctx=100)
+    assert (cfg.llm_model, cfg.llm_url, cfg.llm_num_ctx) == ("auto", URL, "auto")
+    for bad in (100, "big"):
+        with pytest.raises(ValidationError, match="auto"):
+            Config(vault_path="/x", llm_num_ctx=bad)
+    assert Config(vault_path="/x", llm_num_ctx=22000).llm_num_ctx == 22000
+
+
+def test_old_vault_config_with_explicit_values_loads_unchanged(vault):
+    cfg = vault / "config.yaml"
+    text = cfg.read_text().replace("llm_model: auto", "llm_model: qwen3:14b").replace(
+        "llm_num_ctx: auto", "llm_num_ctx: 32768")
+    cfg.write_text(text)
+    loaded = load_config(cfg)
+    assert (loaded.llm_model, loaded.llm_num_ctx) == ("qwen3:14b", 32768)
+
+
+def test_init_writes_auto_defaults(vault):
+    text = (vault / "config.yaml").read_text()
+    assert "llm_model: auto" in text and "llm_num_ctx: auto" in text
 
 
 @pytest.fixture
@@ -152,7 +168,7 @@ def test_model_check_cli(vault, monkeypatch):
         def check(self):
             return "ready"
 
-    monkeypatch.setattr(cli, "build_llm", lambda cfg: Ok())
+    monkeypatch.setattr(cli, "build_llm", lambda cfg, vault: Ok())
     res = model(vault, "check")
     assert res.exit_code == 0 and "ready" in res.output
 
@@ -160,7 +176,7 @@ def test_model_check_cli(vault, monkeypatch):
         def check(self):
             raise LlmError("start it with `ollama serve`")
 
-    monkeypatch.setattr(cli, "build_llm", lambda cfg: Bad())
+    monkeypatch.setattr(cli, "build_llm", lambda cfg, vault: Bad())
     res = model(vault, "check")
     assert res.exit_code == 1 and "ollama serve" in res.output
 
@@ -206,3 +222,24 @@ def test_connect_error_message_names_set_url():
     from research_pipeline.llm import SERVE_HINT
 
     assert "rpipe model set-url" in SERVE_HINT
+
+
+def test_model_set_auto_and_set_context_auto_keep_comments(vault):
+    cfg = vault / "config.yaml"
+    assert model(vault, "set", "qwen3:8b").exit_code == 0
+    assert model(vault, "set-context", "16384").exit_code == 0
+    comments = [ln for ln in cfg.read_text().splitlines() if ln.startswith("#")]
+    assert model(vault, "set", "auto").exit_code == 0
+    assert model(vault, "set-context", "auto").exit_code == 0
+    loaded = load_config(cfg)
+    assert (loaded.llm_model, loaded.llm_num_ctx) == ("auto", "auto")
+    assert all(c in cfg.read_text() for c in comments)
+
+
+def test_set_context_rejects_bad_values_and_leaves_file(vault):
+    cfg = vault / "config.yaml"
+    before = cfg.read_text()
+    for arg in ("big", "100", "1.5"):
+        res = model(vault, "set-context", arg)
+        assert res.exit_code == 1 and "Traceback" not in res.output and "auto" in res.output
+    assert cfg.read_text() == before

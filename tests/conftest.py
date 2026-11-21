@@ -41,6 +41,7 @@ class FakeLLM:
     """Scripted stand-in for the local model: pops one response per generate call."""
 
     model_name = "fake-llm"
+    num_ctx = 32768
 
     def __init__(self, responses: list) -> None:
         self.responses = list(responses)

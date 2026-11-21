@@ -339,3 +339,39 @@ def test_resolve_error_is_not_cached(mock, tmp_path):
     assert not (tmp_path / "cache" / "llm_fit.json").exists()
 
 
+
+
+def test_list_models_skips_a_model_with_a_broken_show_and_logs_it(mock):
+    fake = FakeOllama({
+        "good": {"size": 1, "params": 1000, "ctx": 40960},
+        "bad": {"size": 1, "params": 1000},
+        "worse": {"size": 1, "params": 1000},
+    })
+    fake.install(mock)
+    good_show = fake.show
+
+    def show(request):
+        name = json.loads(request.content)["model"]
+        if name == "bad":
+            return httpx.Response(500, text="boom")
+        if name == "worse":
+            return httpx.Response(200, text="not json")
+        return good_show(request)
+
+    mock.post(f"{URL}/api/show").mock(side_effect=show)
+    notes: list[str] = []
+    models = list_models(URL, log=notes.append)
+    assert [m.name for m in models] == ["good"]
+    assert any("bad" in n for n in notes) and any("worse" in n for n in notes)
+
+
+def test_choose_pinned_ctx_skips_models_trained_on_less_context(mock):
+    fake = FakeOllama({
+        "short": {"size": 4 * GB, "params": 9 * GB, "ctx": 8192},
+        "long": {"size": 4 * GB, "params": 4 * GB, "ctx": 40960},
+    }, free=20 * GB, kv_per_token=10_000)
+    fake.install(mock)
+    models = [info("short", 9 * GB, ctx=8192), info("long", 4 * GB, ctx=40960)]
+    fit = choose(URL, models, None, 16384)
+    assert fit == Fit(model="long", num_ctx=16384)
+    assert all(c["model"] != "short" for c in fake.probes())

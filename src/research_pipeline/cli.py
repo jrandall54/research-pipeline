@@ -21,7 +21,7 @@ from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, h
 from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline import profile_edit
+from research_pipeline import ollama_fit, profile_edit
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.sources.arxiv import ArxivSource
@@ -64,14 +64,18 @@ def build_pipeline(config: Config) -> Pipeline:
         sources=[arxiv, HfDailySource()],
         make_embedder=lambda: SentenceTransformerEmbedder(config.embedding_model),
         seed_fetcher=arxiv.fetch_by_ids,
-        make_llm=lambda: build_llm(config),
+        make_llm=lambda: build_llm(config, config.vault_path),
         fulltext_fetcher=fetch_fulltext,
     )
 
 
-def build_llm(config: Config) -> OllamaClient:
-    """The real local model client; tests replace it."""
-    return OllamaClient(config.llm_url, config.llm_model, config.llm_num_ctx)
+def build_llm(
+    config: Config, vault: Path, log: Callable[[str], None] = lambda s: None
+) -> OllamaClient:
+    """The real local model client, with `auto` settings resolved to a concrete model and
+    context (cached in the vault). Raises LlmError if none can be chosen; tests replace it."""
+    fit = ollama_fit.resolve(config.llm_url, vault, config.llm_model, config.llm_num_ctx, log=log)
+    return OllamaClient(config.llm_url, fit.model, fit.num_ctx)
 
 
 @app.callback()
@@ -134,6 +138,8 @@ def _open(vault: Path | None) -> _Context:
         config = load_config(path / "config.yaml")
     except ConfigError as exc:
         raise _fail(str(exc)) from exc
+    # The folder actually opened is the vault, even if it was moved since `rpipe init`.
+    config = config.model_copy(update={"vault_path": path})
     return _Context(path, config, open_db(path / "vault.sqlite"))
 
 
@@ -216,7 +222,7 @@ def run(vault: VaultOption = None) -> None:
         errors.append(f"summaries skipped, model unavailable: {exc}")
     else:
         sum_counts, sum_errors = run_summarize(
-            ctx.conn, llm, pipeline.fulltext_fetcher, ctx.config.llm_num_ctx
+            ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
         )
         counts |= sum_counts
         errors += sum_errors
@@ -263,7 +269,7 @@ def summarize(vault: VaultOption = None) -> None:
         llm = _ready_llm(pipeline)
     except Exception as exc:  # noqa: BLE001
         raise _fail(f"model unavailable: {exc}") from exc
-    counts, errors = run_summarize(ctx.conn, llm, pipeline.fulltext_fetcher, ctx.config.llm_num_ctx)
+    counts, errors = run_summarize(ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx)
     typer.echo("Summarized:")
     _report(counts, errors)
 
@@ -658,7 +664,7 @@ def eval_run(vault: VaultOption = None) -> None:
         typer.echo(f"Replacing today's earlier eval ({today.isoformat()}); its grades are cleared.")
     typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
     with _clean_errors():
-        md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, ctx.config.llm_num_ctx, today, abstract_for)
+        md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for)
     typer.echo(f"Report written: {md}")
     typer.echo("Next: rpipe eval grade")
 
@@ -716,15 +722,22 @@ app.add_typer(model_app, name="model")
 @model_app.command("show")
 def model_show(vault: VaultOption = None) -> None:
     """Show which local model and server are configured."""
-    cfg = _open(vault).config
+    ctx = _open(vault)
+    cfg = ctx.config
     typer.echo(f"model: {cfg.llm_model}")
     typer.echo(f"server: {cfg.llm_url}")
     typer.echo(f"context window (num_ctx): {cfg.llm_num_ctx}")
+    if cfg.llm_model == "auto" or cfg.llm_num_ctx == "auto":
+        last = ollama_fit.last_choice(ctx.vault)
+        if last is None:
+            typer.echo("last choice: not probed yet; runs on first use, or `rpipe model fit`")
+        else:
+            typer.echo(f"last choice: {last.model} with a context of {last.num_ctx} tokens")
 
 
 @model_app.command("set")
 def model_set(
-    name: Annotated[str, typer.Argument(help="Ollama model name, e.g. qwen3:14b or qwen3:8b.")],
+    name: Annotated[str, typer.Argument(help="Ollama model name, e.g. qwen3:14b, or auto to choose the best installed.")],
     vault: VaultOption = None,
 ) -> None:
     """Choose which Ollama model writes summaries (install it first: ollama pull NAME)."""
@@ -748,14 +761,34 @@ def model_set_url(
 
 @model_app.command("set-context")
 def model_set_context(
-    n: Annotated[int, typer.Argument(help="Context window in tokens, at least 8192.")],
+    n: Annotated[str, typer.Argument(help="Context window in tokens (at least 8192), or auto to use the largest that fits.")],
     vault: VaultOption = None,
 ) -> None:
     """Set how much text (in tokens) the model can read at once; larger needs more memory."""
     ctx = _open(vault)
     with _clean_errors():
         profile_edit.set_llm_num_ctx(ctx.vault, n)
-    typer.echo(f"context window is now {n} tokens.")
+    typer.echo("context window is now auto." if n.strip().lower() == "auto"
+               else f"context window is now {int(n)} tokens.")
+
+
+@model_app.command("fit")
+def model_fit(vault: VaultOption = None) -> None:
+    """Probe Ollama now: choose the best installed model and the largest context that fits in GPU memory."""
+    ctx = _open(vault)
+    cfg = ctx.config
+    if cfg.llm_model != "auto" and cfg.llm_num_ctx != "auto":
+        typer.echo("Both the model and the context are pinned, so there is nothing to probe.")
+    else:
+        typer.echo("Probing Ollama: this loads and unloads models and can take a few minutes.")
+    try:
+        fit = ollama_fit.resolve(
+            cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True,
+            log=lambda line: typer.echo(f"  {line}"),
+        )
+    except LlmError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"Using model {fit.model} with a context of {fit.num_ctx} tokens")
 
 
 @model_app.command("check")
@@ -763,7 +796,7 @@ def model_check(vault: VaultOption = None) -> None:
     """Check that Ollama is running and the configured model is installed."""
     ctx = _open(vault)
     try:
-        typer.echo(build_llm(ctx.config).check())
+        typer.echo(build_llm(ctx.config, ctx.vault).check())
     except LlmError as exc:
         raise _fail(str(exc)) from exc
 

@@ -25,6 +25,7 @@ class LlmError(Exception):
 
 class LLM(Protocol):
     model_name: str
+    num_ctx: int
 
     def generate(self, system: str, user: str, schema: type[T]) -> T:
         """Ask the model and return its answer as `schema`; raises LlmError on any failure."""

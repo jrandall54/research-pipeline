@@ -34,9 +34,11 @@ The pipeline currently writes `vault.sqlite` (which also holds full texts and su
 | `arxiv_max_results` | `1000` | Safety cap on arXiv papers fetched per run (at least 1). Paging stops earlier at the first page with an already-stored paper; hitting the cap first adds a warning to the health line (expected on the first run). See `sources.md`. |
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | Model that turns text into vectors for similarity (see `glossary.md`). |
 | `rss_feeds` | `[]` | Extra feed URLs (read but not used yet: RSS collection is a later phase). |
-| `llm_model` | `qwen3:14b` | Ollama model that writes summaries. Change with `rpipe model set NAME`. See `llm.md`. |
+| `llm_model` | `auto` | Ollama model that writes summaries; `auto` picks the largest installed model that fits fully in GPU memory. Pin with `rpipe model set NAME`, go back with `rpipe model set auto`. See `llm.md`. |
 | `llm_url` | `http://localhost:11434` | Where the Ollama server listens. Change with `rpipe model set-url URL`. |
-| `llm_num_ctx` | `32768` | Context window in tokens (at least 8192; smaller leaves no room for the paper): how much text the model reads at once. Change with `rpipe model set-context N`. See `llm.md`. |
+| `llm_num_ctx` | `auto` | Context window in tokens: how much text the model reads at once. `auto` finds the largest that fits; a pinned number must be at least 8192 (smaller leaves no room for the paper). Change with `rpipe model set-context N` or `auto`. See `llm.md`. Vaults created before `auto` existed keep their explicit values (`qwen3:14b`, `32768`) unchanged. |
+
+When either is `auto`, the choice is remembered in `cache/llm_fit.json` (the chosen model and context, keyed by the Ollama address and every installed model's name and digest). It is safe to delete; the next run probes again. `rpipe model fit` rewrites it.
 
 Both files reject unknown keys: a typo such as `keyword:` or `top-n:` stops the command with an error naming the file and the key, instead of being silently ignored.
 

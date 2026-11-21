@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from conftest import FakeEmbedder
+from conftest import FakeEmbedder, FakeLLM
+from test_summarize import SECTIONS, critique, summary
+from research_pipeline.llm import LlmError
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
 from research_pipeline.models import PaperMeta
@@ -46,12 +48,28 @@ def vault(tmp_path):
     return path
 
 
-def install(monkeypatch, sources=None, fetcher=seed_fetcher):
+def fetch_text(pid):
+    return SECTIONS
+
+
+class AlwaysSummary(FakeLLM):
+    """Answers every request with a valid summary or critique, whatever the order."""
+
+    def generate(self, system, user, schema):
+        self.calls.append((system, user))
+        return summary() if schema.__name__ == "Summary" else critique()
+
+
+def make_llm():
+    return AlwaysSummary([])
+
+
+def install(monkeypatch, sources=None, fetcher=seed_fetcher, llm=make_llm):
     arxiv = parse_arxiv_atom((FIXTURES / "arxiv_atom.xml").read_text())
     hf = parse_hf_daily(json.loads((FIXTURES / "hf_daily.json").read_text()))
     srcs = sources if sources is not None else [FixtureSource("arxiv", arxiv), FixtureSource("hf_daily", hf)]
     monkeypatch.setattr(
-        cli, "build_pipeline", lambda config: Pipeline(srcs, FakeEmbedder, fetcher)
+        cli, "build_pipeline", lambda config: Pipeline(srcs, FakeEmbedder, fetcher, llm, fetch_text)
     )
 
 
@@ -148,7 +166,7 @@ def _no_extra_pipeline(monkeypatch):
     hf = parse_hf_daily(json.loads((FIXTURES / "hf_daily.json").read_text()))
     monkeypatch.setattr(
         cli, "build_pipeline",
-        lambda config: Pipeline([FixtureSource("hf_daily", hf)], make_embedder, seed_fetcher),
+        lambda config: Pipeline([FixtureSource("hf_daily", hf)], make_embedder, seed_fetcher, make_llm, fetch_text),
     )
 
 
@@ -238,7 +256,7 @@ def test_embedding_model_load_failure_is_a_clear_error(vault, monkeypatch, exc):
 
     monkeypatch.setattr(
         cli, "build_pipeline",
-        lambda config: Pipeline([], make_embedder, seed_fetcher),
+        lambda config: Pipeline([], make_embedder, seed_fetcher, make_llm, fetch_text),
     )
     res = run_cli("triage", "--vault", str(vault))
     assert res.exit_code == 1
@@ -249,3 +267,87 @@ def test_health_line_collapses_whitespace_to_one_line():
     line = cli.health_line(date(2026, 1, 2), {}, ["arxiv: boom\n  second\tline", "x\n\ny"])
     assert "\n" not in line and "\t" not in line
     assert "errors: arxiv: boom second line; x y" in line
+
+
+def test_e2e_run_digest_contains_cited_summary(vault, monkeypatch):
+    install(monkeypatch)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    text = next((vault / "digests").glob("*.md")).read_text()
+    assert "A classifier for X." in text
+    assert "[§ 2 Method]" in text
+    first = text.splitlines()[0]
+    assert "summarized 2" in first and "errors: none" in first
+    assert "abstract-only" not in first and "summary failures" not in first
+
+
+def test_e2e_ollama_down_still_writes_digest_and_names_cause(vault, monkeypatch):
+    def down():
+        raise LlmError("cannot reach Ollama at http://localhost:11434: start it with `ollama serve`")
+
+    install(monkeypatch, llm=down)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    text = next((vault / "digests").glob("*.md")).read_text()
+    first = text.splitlines()[0]
+    assert "cannot reach Ollama" in first and "summar" in first
+    assert "## 1. [SoK: Assessing" in text and "A classifier for X." not in text
+
+
+def test_e2e_failed_check_is_also_skipped_not_fatal(vault, monkeypatch):
+    class Down(AlwaysSummary):
+        def check(self):
+            raise LlmError("model 'qwen3:14b' is not installed: run `ollama pull qwen3:14b`")
+
+    install(monkeypatch, llm=lambda: Down([]))
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert "ollama pull qwen3:14b" in first
+
+
+def test_e2e_abstract_only_shows_in_health_line(vault, monkeypatch):
+    from research_pipeline.fulltext import FullTextUnavailable
+
+    def none(pid):
+        raise FullTextUnavailable("no HTML")
+
+    install(monkeypatch)
+    arxiv = parse_arxiv_atom((FIXTURES / "arxiv_atom.xml").read_text())
+    monkeypatch.setattr(
+        cli, "build_pipeline",
+        lambda config: Pipeline([FixtureSource("arxiv", arxiv)], FakeEmbedder, seed_fetcher, make_llm, none),
+    )
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    text = next((vault / "digests").glob("*.md")).read_text()
+    assert "abstract-only 2" in text.splitlines()[0]
+    assert "Summary based on the abstract only (full text unavailable)" in text
+
+
+def test_summarize_command_with_nothing_triaged(vault, monkeypatch):
+    install(monkeypatch)
+    res = run_cli("summarize", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert "nothing to summarize" in res.output.lower()
+
+
+def test_summarize_command_runs_stage_alone(vault, monkeypatch):
+    install(monkeypatch)
+    for cmd in ("collect", "triage"):
+        assert run_cli(cmd, "--vault", str(vault)).exit_code == 0
+    res = run_cli("summarize", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert "summarized=2" in res.output
+
+
+def test_summarize_command_reports_ollama_down(vault, monkeypatch):
+    def down():
+        raise LlmError("cannot reach Ollama")
+
+    install(monkeypatch, llm=down)
+    for cmd in ("collect", "triage"):
+        assert run_cli(cmd, "--vault", str(vault)).exit_code == 0
+    res = run_cli("summarize", "--vault", str(vault))
+    assert res.exit_code == 1
+    assert "cannot reach Ollama" in res.output

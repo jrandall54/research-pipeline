@@ -107,3 +107,63 @@ def test_other_days_papers_not_included(conn, tmp_path):
     text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
     assert "Title 2501.00001" not in text
     assert get_paper(conn, "2501.00001")["digest_date"] == "2026-11-20"
+
+
+# ---- summaries in the digest (Task 4) ----
+from research_pipeline.db import save_summary  # noqa: E402
+from research_pipeline.summarize import PaperSummary  # noqa: E402
+from test_summarize import critique, summary  # noqa: E402
+
+
+def with_summary(conn, pid, basis="full_text", unverified=(), status=Status.summarized):
+    s = summary()
+    s = s.model_copy(update={"approach": s.approach.model_copy(
+        update={"sections": ["2 Method", "3 Results"]})})
+    save_summary(conn, pid, PaperSummary(summary=s, critique=critique(), basis=basis,
+                                         truncated=False, unverified=list(unverified)), "fake")
+    set_status(conn, pid, status)
+
+
+def test_digest_renders_summary_and_citations(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "A classifier for X." in text
+    assert "They train a classifier. [§ 2 Method, 3 Results]" in text
+    assert "X is hard. [§ 1 Introduction]" in text
+    assert "Clear method. [§ 2 Method]" in text
+    assert "One dataset only. [§ 3 Results]" in text
+    assert "Does it generalise?" in text
+    assert "abstract only" not in text
+    assert "Abstract 2501.00001" in text
+
+
+def test_digest_marks_unverified(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001", unverified=["They train a classifier."])
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "⚠ unverified They train a classifier." in text
+    assert "⚠ unverified X is hard." not in text
+
+
+def test_digest_abstract_basis_note(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001", basis="abstract")
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "Summary based on the abstract only (full text unavailable)" in text
+
+
+def test_digest_includes_fetched_status_without_summary(conn, tmp_path):
+    add(conn, "2501.00001", 0.9, status=Status.fetched)
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "Title 2501.00001" in text and "Abstract 2501.00001" in text
+    assert "Summary" not in text.split("# Research digest")[1]
+    assert get_paper(conn, "2501.00001")["status"] == "in_digest"
+
+
+def test_same_day_rerun_keeps_summary(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    write_digest(conn, tmp_path, DAY, HEALTH)
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "A classifier for X." in text

@@ -1,6 +1,6 @@
 # Research Pipeline
 
-Nightly pipeline that collects CS/security/AI papers, ranks them against your profile and writes a digest.
+Nightly pipeline that collects CS/security/AI papers, ranks them against your profile, summarises and critiques the best ones with a local model (every claim cites the paper section it came from), and writes a digest.
 
 Start with [docs/guide/README.md](docs/guide/README.md).
 

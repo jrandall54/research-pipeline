@@ -282,3 +282,20 @@ def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
         critique=Critique.model_validate(rows["critique"]),
         **meta,
     )
+
+
+def record_failure(conn: sqlite3.Connection, paper_id: str, error: str) -> None:
+    """Note that a stage failed for this paper: store the message and count a retry.
+
+    The paper keeps its status, so the next run tries it again.
+    """
+    conn.execute(
+        "UPDATE papers SET error = ?, retry_count = retry_count + 1, updated_at = ? WHERE id = ?",
+        (" ".join(error.split()), _now(), paper_id),
+    )
+    conn.commit()
+
+
+def clear_error(conn: sqlite3.Connection, paper_id: str) -> None:
+    """Forget an earlier failure message once the paper gets through."""
+    conn.execute("UPDATE papers SET error = NULL WHERE id = ?", (paper_id,))

@@ -2,25 +2,27 @@
 
 ## What it does
 
-Every night the pipeline collects new computer-science, security and AI papers, scores them against your personal profile, and writes a short digest of the best ones into your vault (a folder of your own files, kept outside this repo). Each paper in the digest says why it was picked. This is Phase 1: it works from titles and abstracts only. Later phases add full-text reading, summaries, voting and note-linking.
+Every night the pipeline collects new computer-science, security and AI papers, scores them against your personal profile, and writes a short digest of the best ones into your vault (a folder of your own files, kept outside this repo). Each paper in the digest says why it was picked and carries a short summary and critique written by a local model (Ollama) from the paper's full text, with every claim citing the section it came from; code checks the citations and flags any that do not exist. If a paper has no full text, the summary uses the abstract and says so; if Ollama is down, the digest is still written with abstracts. Later phases add voting and note-linking.
 
 ## How it works
 
 ```
  arXiv API --------+
-                   +--> collect --> triage --> digest --> digests/YYYY-MM-DD.md
- HF Daily Papers --+       |          ^   |        |
-                           v          |   v        v
-                       papers: new   profile   papers: in_digest
-                                     + seeds    + runs row (counts, errors)
+                   +--> collect --> triage --> summarize --> digest --> digests/YYYY-MM-DD.md
+ HF Daily Papers --+       |          ^   |       |   ^          |
+                           v          |   v       v   |          v
+                       papers: new   profile   Ollama + arXiv   papers: in_digest
+                                     + seeds   HTML full text   + runs row (counts, errors)
+                                               (skipped if Ollama is down)
 ```
 
 One command, `rpipe run`, executes the whole flow and records it. Each stage in a paragraph:
 
 1. **Collect** ([sources.md](sources.md)). Asks arXiv (newest papers in your categories, politely, one request per 3 seconds) and Hugging Face Daily Papers (community-upvoted papers with code links) for recent papers and stores each as a row with status `new`. A paper seen before is not duplicated; a higher version updates it. If one source is down, the other still runs and the failure is recorded.
 2. **Triage** ([triage.md](triage.md)). Turns each new paper into an embedding (numbers capturing its meaning), compares it with your seed papers and topics, adds small boosts for upvotes, followed authors and keywords, keeps the top N as `triaged` and marks the rest `skipped` (still searchable). Every score comes with plain-language reasons.
-3. **Digest** ([digest.md](digest.md)). Writes the kept papers, best first, as a markdown file with a one-line health summary on top, then marks them `in_digest`.
-4. **The run record** ([running.md](running.md)). `run` also writes a row to the `runs` table with start and end times, counts per stage and any errors.
+3. **Summarize** ([fulltext.md](fulltext.md), [summaries.md](summaries.md), [llm.md](llm.md)). For each kept paper, downloads the arXiv HTML version and strips hidden text (a defence against prompt injection), then asks the local model for a summary and a critique. Each claim must cite paper sections; code checks the citations against the real section titles. The paper moves `triaged` to `fetched` to `summarized`. No HTML version means an abstract-only summary; Ollama being down means this stage is skipped and the cause is shown in the health line. One paper failing never stops the others.
+4. **Digest** ([digest.md](digest.md)). Writes the kept papers, best first, with their summaries, as a markdown file with a one-line health summary on top, then marks them `in_digest`.
+5. **The run record** ([running.md](running.md)). `run` also writes a row to the `runs` table with start and end times, counts per stage and any errors.
 
 Underneath all of this are the typed objects and the SQLite tables ([data-model.md](data-model.md)) and the vault folder with its two settings files ([vault-and-config.md](vault-and-config.md)).
 

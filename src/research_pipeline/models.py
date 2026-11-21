@@ -64,7 +64,7 @@ class Config(BaseModel):
     arxiv_max_results: int = Field(default=1000, ge=1)
     llm_model: str = Field(default="qwen3:14b", min_length=1)
     llm_url: str = "http://localhost:11434"
-    llm_num_ctx: int = Field(default=32768, ge=2048)
+    llm_num_ctx: int = Field(default=32768, ge=8192)
 
     @field_validator("arxiv_categories")
     @classmethod

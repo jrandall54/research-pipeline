@@ -179,3 +179,104 @@ def test_llm_error_propagates():
     llm = FakeLLM([LlmError("boom")])
     with pytest.raises(LlmError):
         summarize_paper(llm, "Paper T", "We study X.", SECTIONS, 32768)
+
+
+# ---- run_summarize (Task 4) ----
+from research_pipeline.db import (  # noqa: E402
+    get_fulltext, get_paper, get_summary, open_db, save_fulltext, set_status, upsert_paper,
+)
+from research_pipeline.fulltext import FullTextUnavailable  # noqa: E402
+from research_pipeline.models import PaperMeta, Status  # noqa: E402
+from research_pipeline.sources.base import SourceError  # noqa: E402
+from research_pipeline.summarize import run_summarize  # noqa: E402
+
+
+@pytest.fixture
+def conn(tmp_path):
+    c = open_db(tmp_path / "s.db")
+    yield c
+    c.close()
+
+
+def add_triaged(conn, pid):
+    upsert_paper(conn, PaperMeta(id=pid, title=f"Title {pid}", abstract=f"Abstract {pid}",
+                                 source="arxiv", url=f"https://arxiv.org/abs/{pid}"))
+    set_status(conn, pid, Status.triaged, score=0.5, reasons=["r"])
+
+
+def test_run_summarize_happy_path(conn):
+    add_triaged(conn, "2501.00001")
+    add_triaged(conn, "2501.00002")
+    llm = FakeLLM([summary(), critique(), summary(), critique()])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
+    assert counts == {"fetched": 2, "summarized": 2, "abstract_only": 0, "summary_failed": 0}
+    assert errors == []
+    for pid in ("2501.00001", "2501.00002"):
+        assert get_paper(conn, pid)["status"] == "summarized"
+        assert get_summary(conn, pid).basis == "full_text"
+        assert get_fulltext(conn, pid) == SECTIONS
+
+
+def test_stored_fulltext_is_reused_without_fetching(conn):
+    add_triaged(conn, "2501.00001")
+    save_fulltext(conn, "2501.00001", SECTIONS)
+
+    def boom(pid):
+        raise AssertionError("must not fetch")
+
+    llm = FakeLLM([summary(), critique()])
+    counts, _ = run_summarize(conn, llm, boom, 32768)
+    assert counts["summarized"] == 1
+
+
+def test_unavailable_fulltext_falls_back_to_abstract(conn):
+    add_triaged(conn, "2501.00001")
+
+    def none(pid):
+        raise FullTextUnavailable("no HTML")
+
+    ok_s = Summary(one_line="x", problem=Claim(text="a", sections=["Abstract"]),
+                   approach=Claim(text="b", sections=["Abstract"]),
+                   results=Claim(text="c", sections=["Abstract"]),
+                   limitations=Claim(text="d", sections=["Abstract"]))
+    ok_c = Critique(strengths=[Claim(text="e", sections=["Abstract"])], weaknesses=[], questions=[])
+    llm = FakeLLM([ok_s, ok_c])
+    counts, errors = run_summarize(conn, llm, none, 32768)
+    assert counts["abstract_only"] == 1 and counts["summarized"] == 1 and counts["fetched"] == 0
+    assert errors == []
+    assert get_paper(conn, "2501.00001")["status"] == "summarized"
+    assert get_summary(conn, "2501.00001").basis == "abstract"
+
+
+def test_one_failure_does_not_stop_others(conn):
+    add_triaged(conn, "2501.00001")
+    add_triaged(conn, "2501.00002")
+    llm = FakeLLM([LlmError("model fell over"), summary(), critique()])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
+    assert counts["summarized"] == 1 and counts["summary_failed"] == 1
+    bad = get_paper(conn, "2501.00001")
+    assert bad["status"] == "fetched" and bad["retry_count"] == 1
+    assert "model fell over" in bad["error"]
+    assert get_paper(conn, "2501.00002")["status"] == "summarized"
+    assert len(errors) == 1 and "2501.00001" in errors[0]
+
+
+def test_fetch_network_error_fails_the_paper_not_abstract_fallback(conn):
+    add_triaged(conn, "2501.00001")
+
+    def down(pid):
+        raise SourceError("arXiv HTML returned HTTP 503")
+
+    counts, errors = run_summarize(conn, FakeLLM([]), down, 32768)
+    assert counts["summary_failed"] == 1 and counts["abstract_only"] == 0
+    p = get_paper(conn, "2501.00001")
+    assert p["status"] == "triaged" and p["retry_count"] == 1 and "503" in p["error"]
+    assert "2501.00001" in errors[0]
+
+
+def test_num_ctx_floor_is_8192():
+    from pydantic import ValidationError
+    from research_pipeline.models import Config
+    assert Config(vault_path="/x", llm_num_ctx=8192).llm_num_ctx == 8192
+    with pytest.raises(ValidationError):
+        Config(vault_path="/x", llm_num_ctx=8191)

@@ -40,6 +40,7 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 | `arxiv_categories` | arXiv categories to collect. Default `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE`, or exactly `["all"]` for every computer-science category (`cs.*`). |
 | `embedding_model` | Model used to turn text into vectors. Default `BAAI/bge-small-en-v1.5`. |
 | `rss_feeds` | Extra RSS feed URLs; default none. |
+| `llm_model`, `llm_url`, `llm_num_ctx` | The local model for summaries (`llm.md`). `llm_num_ctx` defaults to 32768 and must be at least 8192. |
 
 `Profile` and `Config` reject unknown keys (`extra="forbid"`).
 
@@ -56,17 +57,17 @@ Defines the small set of typed objects every stage passes around, and the lifecy
   any stage --> failed
 ```
 
-In words: a paper starts `new`. Triage moves it to `triaged` (kept, top N) or `skipped` (below the cut). A kept paper is listed in a digest and becomes `in_digest`. In Phase 1 the middle steps `fetched` and `summarized` are skipped: `triaged` goes straight to `in_digest`. If a higher version of a kept paper arrives, it goes back to `triaged` so it can be reconsidered. Any stage can end in `failed`.
+In words: a paper starts `new`. Triage moves it to `triaged` (kept, top N) or `skipped` (below the cut). A kept paper is listed in a digest and becomes `in_digest`. The summarize stage then moves each `triaged` paper to `fetched` (its full text, or just its abstract if there is no HTML version, is stored) and then `summarized` (the model's summary and critique are stored). The digest lists `triaged`, `fetched` and `summarized` papers and marks them `in_digest`. A paper whose fetch or summary fails keeps its last status (`triaged` or `fetched`), gets `error` and `retry_count` updated, and is tried again next run; until then the digest lists it with its abstract only. If a higher version of a kept paper arrives, it goes back to `triaged` so it can be reconsidered. Any stage can end in `failed`.
 
-| Status | Meaning | Used in Phase 1? |
+| Status | Meaning | Set by |
 | --- | --- | --- |
-| `new` | Collected, not yet scored. | yes |
-| `triaged` | Scored and kept in the top N. | yes |
-| `fetched` | Full text downloaded. | no (later phase) |
-| `summarized` | Summary written. | no (later phase) |
-| `in_digest` | Listed in a digest. | yes |
-| `skipped` | Scored but below the cut; kept and searchable. | yes |
-| `failed` | Processing errored. | no |
+| `new` | Collected, not yet scored. | collect |
+| `triaged` | Scored and kept in the top N. | triage |
+| `fetched` | Full text (or the abstract, when no HTML exists) stored; waiting for the model. | summarize |
+| `summarized` | Summary and critique stored. | summarize |
+| `in_digest` | Listed in a digest. | digest |
+| `skipped` | Scored but below the cut; kept and searchable. | triage |
+| `failed` | Processing errored. | nothing yet (failed papers keep their last status instead) |
 
 A new version of a kept paper (`triaged`, `fetched`, `summarized`, `in_digest`) sets it back to `triaged`. A new version of a `new` paper leaves it `new`; of a `skipped` paper leaves it `skipped`; of a `failed` paper leaves it `failed`.
 
@@ -106,13 +107,13 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 | `triage_score` | Score from the last triage, or NULL. |
 | `triage_reasons` | JSON list of strings explaining the score, or NULL. |
 | `digest_date` | ISO date of the digest that listed it, or NULL. |
-| `retry_count` | Times processing was retried; starts 0 (used by later phases). |
-| `error` | Last error message, or NULL. |
+| `retry_count` | Times a stage failed for this paper (`record_failure` in `db.py` adds one each time the summarize stage fails it); starts 0. |
+| `error` | Last error message from a failed stage, or NULL; cleared when the summary succeeds. |
 | `created_at`, `updated_at` | When the row was first stored / last changed. |
 
 ### Other tables
 
-Created now so later phases need no migration. Phase 1 uses `runs` and `embeddings`; Phase 2 adds helpers for `fulltexts` and `summaries`.
+Created now so later phases need no migration. Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`.
 
 | Table | Columns | Purpose |
 | --- | --- | --- |

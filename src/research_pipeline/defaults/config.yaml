@@ -24,5 +24,5 @@ rss_feeds: []
 # Local model server (Ollama) used to write summaries. Change the model with `rpipe model set`.
 llm_model: qwen3:14b
 llm_url: http://localhost:11434
-# Context window in tokens: how much text the model can read at once (at least 2048).
+# Context window in tokens: how much text the model can read at once (at least 8192).
 llm_num_ctx: 32768

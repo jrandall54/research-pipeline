@@ -2,7 +2,7 @@
 
 ## What it does
 
-`rpipe run` is the one command you run each night. It collects new papers, ranks them against your profile and writes a digest, then records how the run went. The same stages are also available one at a time (`collect`, `triage`, `digest`) for debugging.
+`rpipe run` is the one command you run each night. It collects new papers, ranks them against your profile, has a local model summarise and critique the kept ones, and writes a digest, then records how the run went. The stage order is collect, seed lookup, triage, summarize, digest. The same stages are also available one at a time (`collect`, `triage`, `summarize`, `digest`) for debugging.
 
 ## How it works
 
@@ -51,16 +51,19 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 | Command | What it does | Writes |
 | --- | --- | --- |
-| `run` | `start_run`, then collect, seed lookup, triage, digest for today, then `finish_run` with the merged counts and errors | the `runs` row, papers, `digests/<today>.md` |
+| `run` | `start_run`, then collect, seed lookup, triage, summarize, digest for today, then `finish_run` with the merged counts and errors | the `runs` row, papers, summaries, `digests/<today>.md` |
 | `collect` | fetch from arXiv and Hugging Face into the database | papers (status `new`) |
 | `triage` | rank the `new` papers, keep the top N | statuses, scores, reasons, embeddings |
+| `summarize` | summarise and critique every `triaged` paper with the local model (fetching arXiv HTML full text first; abstract only if there is none) | full texts, summaries, statuses `fetched` then `summarized` |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
+
+**The summarize stage.** `rpipe run` checks that Ollama is up and the model installed before this stage. If not, it skips the stage, records the cause in the health line and `runs.errors`, and still writes the digest (abstracts only), so a stopped Ollama never costs you the night's digest. A single paper that fails (model error, network error fetching its text) keeps its status, gets its `error` and `retry_count` set, and the rest carry on. `rpipe summarize` on its own prints "Nothing to summarize" and exits 0 when no paper is `triaged`; it exits 1 with the cause if Ollama is unavailable. The model setting `llm_num_ctx` must be at least 8192 (see `llm.md`).
 
 Model commands (`rpipe model show`, `rpipe model set NAME`, `rpipe model check`) view, change and test the local Ollama model used for summaries; see `llm.md`. `check` exits 1 with a fix hint if Ollama is not running or the model is not installed.
 
 Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
-**Exit codes.** `0` normally, **including when a source failed** (the failure is recorded, see below). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, or `--date` is not a date.
+**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, or `--date` is not a date.
 
 ### A real run, step by step
 
@@ -77,7 +80,8 @@ It took about 13 seconds with the model already downloaded (about 2 minutes the 
 1. **collect** fetches the newest arXiv papers across the configured categories, in pages of 100 spaced 3 seconds apart because of arXiv's rate limit. It stops after the first page that contains a paper already in the vault, or at `arxiv_max_results` (default 1000), whichever comes first. (This sample run predates that rule and used a fixed limit of 300, so it fetched 3 pages.) It also fetches about 50 Hugging Face Daily Papers. `inserted=339` papers were new; `updated=11` papers appeared in both sources, so the second source merged upvotes and repos into the first source's row.
 2. **seeds**: the four seed ids were not in the database, so one arXiv request fetched their abstracts and saved them to `<vault>/cache/seeds.json`. A second run makes no seed request.
 3. **triage** embedded all 339 papers (`embedded=339`; stored vectors are reused on later nights), scored them, kept 15 and skipped 324.
-4. **digest** wrote the file and marked the 15 papers `in_digest`.
+4. **summarize** (added in Phase 2, after this sample run was taken, so its counts and time are not in the numbers above) fetched each kept paper's arXiv HTML, asked the local model for a cited summary and critique, and moved the paper to `summarized`. It is by far the slowest stage: expect on the order of a minute per paper on a laptop-class GPU.
+5. **digest** wrote the file and marked the papers `in_digest`.
 
 The top of the digest file:
 
@@ -116,13 +120,13 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 
 ### Running it nightly
 
-Phase 1 stops at the command; scheduling it (for example with a systemd timer or cron entry running `rpipe run`) is a later phase. Running twice on the same day is safe: no paper is stored twice and the day's digest is rewritten with everything from both runs (`digest.md`, "Same-day re-runs").
+The pipeline stops at the command; scheduling it (for example with a systemd timer or cron entry running `rpipe run`) is a later phase. Running twice on the same day is safe: no paper is stored twice and the day's digest is rewritten with everything from both runs (`digest.md`, "Same-day re-runs").
 
 ## Why it's built this way
 
 - **One command that records itself**: `run` owns the `runs` row, so counts from every stage and every error end up in one place. The individual stage functions return counts and errors rather than finishing the run.
 - **A failed source does not fail the run**: a nightly job that exits non-zero because one website was down would train you to ignore failures. The error is written to the digest's first line and to `runs.errors` instead; exit code 1 is kept for "nothing could run".
-- **`build_pipeline` as the single seam**: `cli.py` builds the real sources, a lazy embedder factory and seed lookup in one function. The end-to-end tests replace that one function with fixture-backed stubs, so the *real* CLI, database, ranking and digest code run offline.
+- **`build_pipeline` as the single seam**: `cli.py` builds the real sources, a lazy embedder factory, seed lookup, a lazy model-client factory (`make_llm`) and the full-text fetcher in one function. The end-to-end tests replace that one function with fixture-backed stubs, so the *real* CLI, database, ranking and digest code run offline.
 - **Optional `embed` extra**: keeps installs and tests light. Rejected: making PyTorch a hard dependency.
 - **No `feedparser` dependency**: the arXiv response is parsed with the standard library (see `sources.md`); RSS is a later phase and can add the library then.
 
@@ -134,7 +138,7 @@ uv run pytest -q                                      # whole suite, offline
 uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 ```
 
-`tests/test_e2e.py` runs the real CLI on a temporary vault with fixture sources and the test embedder, and checks: the digest is written and the top paper is the on-topic one; the `runs` row is finished; a second run the same day adds no duplicates; an uninitialised vault exits 1; a failing source exits 0 with the error recorded; a failed seed lookup does not stop the run; a missing `embed` extra gives a clear error.
+`tests/test_e2e.py` runs the real CLI on a temporary vault with fixture sources and the test embedder, and checks: the digest is written and the top paper is the on-topic one; the `runs` row is finished; a second run the same day adds no duplicates; an uninitialised vault exits 1; a failing source exits 0 with the error recorded; a failed seed lookup does not stop the run; a missing `embed` extra gives a clear error; with a scripted fake model the digest contains a cited summary; with the model unavailable `run` still exits 0, writes the digest and names the cause in the health line; `rpipe summarize` runs the stage alone.
 
 ### Troubleshooting
 
@@ -146,6 +150,9 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 | Health line says `errors: arxiv: arXiv API returned HTTP 5xx` (or a timeout) | arXiv (or Hugging Face) was down. The digest was built from the other source. Re-run later: `run` is safe to repeat. |
 | Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, for example a mistyped id. Remove it with `rpipe profile remove-seed` and add the right one with `rpipe profile add-seed` (`rpipe profile show` numbers the seeds). Ranking continues using your topics and any seeds that did resolve. |
 | Health line says `seeds: could not fetch ...: <reason>` | The seed lookup failed (network). Ranking used the seeds it already had; it retries next run. |
+| Health line says `summaries skipped, model unavailable: cannot reach Ollama at ...` | Ollama is not running. Start it with `ollama serve` (or the desktop app), check the URL with `rpipe model show` and test with `rpipe model check`. Tonight's digest was still written, with abstracts only. Papers kept this run were already listed as `in_digest`, so they will not be summarised later; the next night's new papers will be. |
+| Health line says `model unavailable: model 'qwen3:14b' is not installed: run ollama pull ...` | The model is not downloaded. Run the `ollama pull` command shown, or pick another with `rpipe model set NAME`. |
+| Health line shows `summary failures N` or `abstract-only N` | `summary failures`: the model errored or timed out on N papers (see the `summarize <id>: ...` entries in the errors); they show abstracts only. `abstract-only`: N papers have no arXiv HTML version (non-arXiv ids, or too new), so their summary rests on the abstract and says so in the digest. |
 | Digest says "Nothing new matched your profile today." | No paper was `triaged`: either no new papers arrived since the last run (they are already in an earlier digest) or every source failed (check the health line). |
 | Health line says `arxiv: reached max_results (N) before already-seen papers; some may be missed` | arXiv paging hit `arxiv_max_results` without reaching a paper you already had. Expected on the first run (empty database). Otherwise you were away a long time and the cap is too low; `arxiv_max_results` is an advanced setting with no command yet (see the file reference in `vault-and-config.md`). |
 | Health line says `written from stored papers` | You re-ran `digest` on its own; it replaced that day's original health line. The original errors remain in the `runs` table. |
@@ -155,6 +162,7 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 
 ## Where the code is
 
-- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `digest`, `build_pipeline`, `health_line` (the `profile` commands are in `profile.md`)
+- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `summarize`, `digest`, `build_pipeline`, `health_line` (the `profile` commands are in `profile.md`)
 - `src/research_pipeline/seeds.py`: seed text lookup and cache
-- `tests/test_e2e.py`, `tests/test_seeds.py`
+- `src/research_pipeline/summarize.py`: `run_summarize` (the per-paper loop)
+- `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`

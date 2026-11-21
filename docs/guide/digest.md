@@ -2,14 +2,15 @@
 
 ## What it does
 
-The digest stage turns the night's kept papers into one markdown file, `<vault>/digests/YYYY-MM-DD.md`. It is the only output you normally open. Each paper gets its title (linked to arXiv), authors, the reasons it ranked where it did, its abstract and handy links. The very first line is a **health line** telling you how the run went, so a broken night is visible instead of looking like "nothing interesting happened".
+The digest stage turns the night's kept papers into one markdown file, `<vault>/digests/YYYY-MM-DD.md`. It is the only output you normally open. Each paper gets its title (linked to arXiv), authors, the reasons it ranked where it did, its abstract, a cited summary and critique written by the local model (when one exists) and handy links. The very first line is a **health line** telling you how the run went, so a broken night is visible instead of looking like "nothing interesting happened".
 
 It also changes the database: every paper it lists moves from `triaged` to `in_digest` and records the digest date.
 
 ## How it works
 
 ```
-papers: triaged (+ in_digest for this date)
+papers: triaged / fetched / summarized (+ in_digest for this date)
+   --> attach each paper's stored summary, if any
    --> sort by score desc, then id asc
    --> render markdown
    --> write digests/YYYY-MM-DD.md
@@ -18,9 +19,9 @@ papers: triaged (+ in_digest for this date)
 
 The entry point is `write_digest(conn, vault, digest_date, run_summary)`. `run_summary` is the health line, built by the caller (the `run` command, see `running.md`) from the collect/triage counts and source errors; the digest stage prints it verbatim.
 
-1. **Select.** Papers with status `triaged`, plus papers with status `in_digest` whose `digest_date` equals this date (see "Same-day re-runs").
+1. **Select.** Papers with status `triaged`, `fetched` or `summarized` (the summarize stage moves papers along that path; a paper whose summary failed is still `triaged` or `fetched` and is listed with its abstract only), plus papers with status `in_digest` whose `digest_date` equals this date (see "Same-day re-runs").
 2. **Order.** `triage_score` highest first; equal scores break by `id` ascending, so the order is deterministic.
-3. **Render** each paper (layout below).
+3. **Render** each paper (layout below). If `get_summary` returns a stored summary for the paper, the summary block (below) goes between the abstract and the links line; a paper with no summary renders exactly as before.
 4. **Write** the file, creating `digests/` if needed, replacing any file of that name.
 5. **Mark** the listed papers `in_digest` with `digest_date` set (`mark_in_digest` in `db.py`) and commit. The file is written first, so a crash can never leave papers marked as delivered without a file.
 
@@ -70,15 +71,47 @@ We show that jailbreak suffixes found by gradient search transfer across aligned
 | Abstract | The abstract as collected, or `_No abstract available._` when the source gave none. |
 | Links line | `abs` (the paper page), `PDF` (`https://arxiv.org/pdf/<id>`, only for papers with an arXiv id), HF upvotes when above zero, and one `repo` link per code repository found. |
 
+### The summary block
+
+Under a paper that has a summary, the digest shows the one-line takeaway, the four summary claims (problem, approach, results, limitations), the critique's strengths and weaknesses, and questions to ask. Every claim ends with the paper sections it cites, written `[§ 2 Method, 3 Results]`. A real rendering (paper and model output are made up; the layout is produced by the code):
+
+```markdown
+**Summary:** Gradient-searched suffixes jailbreak many aligned models at once.
+
+- **Problem:** Aligned models can still be pushed to produce harmful text. [§ 1 Introduction]
+- **Approach:** They optimise a suffix with gradient search on open models. [§ 3 Method, 4 Experiments]
+- **Results:** Suffixes transfer to closed models with high success. [§ 5 Results]
+- **Limitations:** ⚠ unverified Defences were not evaluated. [§ 7 Limitations]
+
+**Strengths**
+
+- Tests several model families. [§ 5 Results]
+
+**Weaknesses**
+
+- Success rates depend on one prompt set. [§ 4 Experiments]
+
+**Questions to ask**
+
+- Does a perplexity filter stop these suffixes?
+```
+
+- **`⚠ unverified`** in front of a claim means at least one section it cites does not exist in the paper (the code checks every cited title against the real section titles, see `summaries.md`). Treat that claim as a guess and check the paper.
+- **Basis note.** A summary written from the abstract only (the paper has no arXiv HTML version) ends with the line _Summary based on the abstract only (full text unavailable)._ Its citations can only point at "Abstract". If the paper was too long for the model's context window a second note says part of it was left out.
+- **No summary.** A paper whose summary failed, or that was written while Ollama was down, shows the abstract and links only. The next `rpipe run` tries it again only if it is still `triaged`/`fetched`; once a digest lists it, it is `in_digest` and is not retried (use `rpipe summarize` after fixing the cause only for papers still waiting).
+- As always, read the paper before relying on a summary.
+
 ### The health line
 
 One line at the top, written by the `run` command (`health_line` in `cli.py`) in exactly this shape:
 
 ```
-Run 2026-11-21: collected 339 new, 11 updated · kept 15 · skipped 324 · errors: none
+Run 2026-11-21: collected 339 new, 11 updated · kept 15 · skipped 324 · summarized 15 · errors: none
 ```
 
-`collected N new` is the number of papers never seen before, `updated` those that changed (a new version, or new upvotes/repos), `kept` and `skipped` come from triage. After `errors:` comes `none` or every error joined with `; ` (whitespace inside an error, including newlines, is collapsed to single spaces so the health line is always one line), for example `errors: arxiv: arXiv API returned HTTP 500; seeds: could not fetch 2302.12173: ...`. If a source failed, the digest is still written from whatever the other sources produced and the failure is stated here. A quiet digest with `errors: none` means a quiet day; one with an error means some papers may be missing. The `digest` command on its own has no run to summarise, so it writes a plain `Digest <date>: written from stored papers (no collection run)` line instead. That means running `digest` again on the same day overwrites the original health line (and any errors it showed) in that day's file; the errors are not lost, they stay in the `runs` table.
+`summarized N` counts papers the model summarised this run. Two more parts appear only when above zero: `abstract-only N` (summaries written from the abstract because no full text was available) and `summary failures N` (papers the model could not summarise; they keep their status and are retried). If Ollama is down or the model is missing, the stage is skipped and the cause is in the errors, for example `errors: summaries skipped, model unavailable: cannot reach Ollama at http://localhost:11434: start it with `ollama serve``. The digest is still written, with abstracts only.
+
+`collected N new` is the number of papers never seen before, `updated` those that changed (a new version, or new upvotes/repos), `kept` and `skipped` come from triage, `summarized` from the summarize stage. After `errors:` comes `none` or every error joined with `; ` (whitespace inside an error, including newlines, is collapsed to single spaces so the health line is always one line), for example `errors: arxiv: arXiv API returned HTTP 500; seeds: could not fetch 2302.12173: ...`. If a source failed, the digest is still written from whatever the other sources produced and the failure is stated here. A quiet digest with `errors: none` means a quiet day; one with an error means some papers may be missing. The `digest` command on its own has no run to summarise, so it writes a plain `Digest <date>: written from stored papers (no collection run)` line instead. That means running `digest` again on the same day overwrites the original health line (and any errors it showed) in that day's file; the errors are not lost, they stay in the `runs` table.
 
 ### When nothing qualified
 
@@ -88,10 +121,10 @@ The file is still written: health line, the heading, and the sentence "Nothing n
 
 | Before | After | Also set |
 | --- | --- | --- |
-| `triaged` | `in_digest` | `digest_date` = the digest's date (ISO, e.g. `2026-11-21`) |
+| `triaged`, `fetched`, `summarized` | `in_digest` | `digest_date` = the digest's date (ISO, e.g. `2026-11-21`) |
 | `in_digest` with this date | stays `in_digest` | nothing new |
 
-Papers with other statuses (`new`, `skipped`, ...) are never touched. Score and reasons are left unchanged. If a newer version of a paper later arrives, the database moves it back to `triaged` (see `data-model.md`) and it can appear in a later digest.
+Papers with other statuses (`new`, `skipped`, `failed`) are never touched. Score and reasons are left unchanged. If a newer version of a paper later arrives, the database moves it back to `triaged` (see `data-model.md`) and it can appear in a later digest.
 
 ### Same-day re-runs
 
@@ -101,15 +134,16 @@ Example: the 08:00 run lists papers A and B. At 14:00 a re-run triages paper C. 
 
 ## Why it's built this way
 
-- **A markdown file in the vault**: plain text opens anywhere, works in Obsidian-style note tools, can be searched, and needs no server. Rejected: HTML or email, which add rendering and delivery problems for no gain in Phase 1.
+- **A markdown file in the vault**: plain text opens anywhere, works in Obsidian-style note tools, can be searched, and needs no server. Rejected: HTML or email, which add rendering and delivery problems for no gain.
 - **Health line first**: you see failures at the same place you read results. Rejected: only logging errors, which nobody checks.
 - **Date-matched `in_digest` on re-runs**: keeps the file complete and idempotent (same inputs, same file). Rejected: appending to the file (duplicates, messy ordering) and ignoring re-runs (loses content).
 - **The caller supplies the health line**: the digest stage does not know about source failures or skipped counts; the run orchestration does. Keeps the writer simple and testable.
+- **Summaries stored, rendered at write time**: the digest reads the stored summary with `get_summary`, so a same-day re-run reproduces the same text without calling the model again. A paper with no summary is still listed: a missing model must never hide the night's papers. Citations and the `⚠ unverified` flag are shown rather than hidden so you can judge each claim yourself.
 - **Reasons stored, not recomputed**: the digest prints what triage decided at the time, so the explanation always matches the ranking.
 
 ## How to run / check it
 
-Normally via the `run` command, which runs collect, triage, then digest (see `running.md`); `rpipe digest [--date YYYY-MM-DD]` rewrites just this stage. Open `<vault>/digests/<today>.md`. To inspect the effect in the database:
+Normally via the `run` command, which runs collect, triage, summarize, then digest (see `running.md`); `rpipe digest [--date YYYY-MM-DD]` rewrites just this stage. Open `<vault>/digests/<today>.md`. To inspect the effect in the database:
 
 ```
 sqlite3 <vault>/vault.sqlite "select id, status, digest_date from papers where digest_date is not null"
@@ -119,6 +153,6 @@ Tests: `uv run pytest -q tests/test_digest.py tests/test_db.py` (offline; they u
 
 ## Where the code is
 
-- `src/research_pipeline/digest.py`: `write_digest` and the markdown rendering.
+- `src/research_pipeline/digest.py`: `write_digest` and the markdown rendering (including the summary block).
 - `src/research_pipeline/db.py`: `mark_in_digest`.
 - `tests/test_digest.py`, `tests/test_db.py`.

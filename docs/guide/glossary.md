@@ -89,3 +89,7 @@
 **Citation check** — code comparing every section title a summary claim cites with the paper's real section titles. A title that matches none triggers one retry; if it is still wrong the claim is flagged "unverified". It proves the section exists, not that it says what the claim says. See `summaries.md`.
 
 **Truncation** — cutting text so it fits the model's context window. We drop references and appendices first, then trim every section by the same fraction, and mark the summary `truncated`. See `summaries.md`.
+
+**abstract-only summary** — a summary written from the abstract because the paper has no arXiv HTML full text. The digest says so under the summary and the health line counts them as `abstract-only N`. See `digest.md`.
+
+**unverified claim** — a summary or critique claim that cites a section title the paper does not have; the digest prefixes it with `⚠ unverified`. See `summaries.md`.

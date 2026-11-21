@@ -35,7 +35,7 @@ Phase 1 only writes `vault.sqlite`, `digests/` and `cache/` (plus the two YAML f
 | `rss_feeds` | `[]` | Extra feed URLs (read but not used yet: RSS collection is a later phase). |
 | `llm_model` | `qwen3:14b` | Ollama model that writes summaries. Change with `rpipe model set NAME`. See `llm.md`. |
 | `llm_url` | `http://localhost:11434` | Where the Ollama server listens. |
-| `llm_num_ctx` | `32768` | Context window in tokens (at least 2048): how much text the model reads at once. See `llm.md`. |
+| `llm_num_ctx` | `32768` | Context window in tokens (at least 8192; smaller leaves no room for the paper): how much text the model reads at once. See `llm.md`. |
 
 Both files reject unknown keys: a typo such as `keyword:` or `top-n:` stops the command with an error naming the file and the key, instead of being silently ignored.
 

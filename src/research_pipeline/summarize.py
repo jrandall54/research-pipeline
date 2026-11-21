@@ -4,12 +4,16 @@ The model writes claims that cite paper sections; code (not the model) checks ev
 title against the real section titles. See docs/guide/summaries.md.
 """
 
+import sqlite3
+from collections.abc import Callable
 from typing import Literal, TypeVar
 
 from pydantic import BaseModel, Field
 
-from research_pipeline.llm import LLM
-from research_pipeline.models import Section
+from research_pipeline.fulltext import FullTextUnavailable
+from research_pipeline.llm import LLM, LlmError
+from research_pipeline.models import Section, Status
+from research_pipeline.sources.base import SourceError
 from research_pipeline.prompts import (
     build_critique_prompt,
     build_summary_prompt,
@@ -112,3 +116,53 @@ def summarize_paper(
         truncated=truncated,
         unverified=bad_s + bad_c,
     )
+
+
+def run_summarize(
+    conn: sqlite3.Connection,
+    llm: LLM,
+    fetch: Callable[[str], list[Section]],
+    num_ctx: int,
+) -> tuple[dict[str, int], list[str]]:
+    """Summarise every `triaged` paper: full text (stored, else fetched), then the model.
+
+    A paper with no HTML version is summarised from its abstract. A paper that fails
+    (model error, network error) keeps its last status, gets `error` and `retry_count`
+    updated, and the others carry on. Commits per paper. See docs/guide/running.md.
+    """
+    # Imported here because db.py imports the schemas defined above.
+    from research_pipeline.db import (
+        clear_error,
+        get_fulltext,
+        papers_with_status,
+        record_failure,
+        save_fulltext,
+        save_summary,
+        set_status,
+    )
+
+    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "summary_failed": 0}
+    errors: list[str] = []
+    for paper in papers_with_status(conn, Status.triaged):
+        pid = paper["id"]
+        try:
+            sections = get_fulltext(conn, pid)
+            if sections is None:
+                try:
+                    sections = fetch(pid)
+                    save_fulltext(conn, pid, sections)
+                except FullTextUnavailable:
+                    sections = None
+            set_status(conn, pid, Status.fetched)
+            counts["fetched" if sections is not None else "abstract_only"] += 1
+            result = summarize_paper(llm, paper["title"], paper["abstract"], sections, num_ctx)
+            save_summary(conn, pid, result, llm.model_name)
+            clear_error(conn, pid)
+            set_status(conn, pid, Status.summarized)  # commits the summary rows too
+            counts["summarized"] += 1
+        except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
+            counts["summary_failed"] += 1
+            message = f"{type(exc).__name__}: {exc}" if not isinstance(exc, (LlmError, SourceError)) else str(exc)
+            record_failure(conn, pid, message)
+            errors.append(f"summarize {pid}: {' '.join(message.split())}")
+    return counts, errors

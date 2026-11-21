@@ -13,17 +13,19 @@ from typing import Annotated
 import typer
 
 from research_pipeline.collect import run_collect
-from research_pipeline.db import finish_run, open_db, start_run
+from research_pipeline.db import finish_run, open_db, papers_with_status, start_run
 from research_pipeline.digest import write_digest
-from research_pipeline.llm import LlmError, OllamaClient
+from research_pipeline.fulltext import fetch_fulltext
+from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
-from research_pipeline.models import Config, PaperMeta, Profile
+from research_pipeline.models import Config, PaperMeta, Profile, Section, Status
 from research_pipeline import profile_edit
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.sources.hf_daily import HfDailySource
+from research_pipeline.summarize import run_summarize
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
     DEFAULT_TOPICS,
@@ -49,6 +51,8 @@ class Pipeline:
     sources: list[Source]
     make_embedder: Callable[[], Embedder]  # called only by run and triage (may raise RuntimeError)
     seed_fetcher: Callable[[list[str]], list[PaperMeta]]
+    make_llm: Callable[[], LLM]  # called only by run and summarize (may raise LlmError)
+    fulltext_fetcher: Callable[[str], list[Section]]
 
 
 def build_pipeline(config: Config) -> Pipeline:
@@ -58,6 +62,8 @@ def build_pipeline(config: Config) -> Pipeline:
         sources=[arxiv, HfDailySource()],
         make_embedder=lambda: SentenceTransformerEmbedder(config.embedding_model),
         seed_fetcher=arxiv.fetch_by_ids,
+        make_llm=lambda: build_llm(config),
+        fulltext_fetcher=fetch_fulltext,
     )
 
 
@@ -163,11 +169,26 @@ def _seed_texts(
 
 def health_line(day: date, counts: dict[str, int], errors: list[str]) -> str:
     detail = "; ".join(" ".join(e.split()) for e in errors) or "none"
+    extras = ""
+    if counts.get("abstract_only"):
+        extras += f" · abstract-only {counts['abstract_only']}"
+    if counts.get("summary_failed"):
+        extras += f" · summary failures {counts['summary_failed']}"
     return (
         f"Run {day.isoformat()}: collected {counts.get('inserted', 0)} new, "
         f"{counts.get('updated', 0)} updated · kept {counts.get('triaged', 0)} · "
-        f"skipped {counts.get('skipped', 0)} · errors: {detail}"
+        f"skipped {counts.get('skipped', 0)} · summarized {counts.get('summarized', 0)}"
+        f"{extras} · errors: {detail}"
     )
+
+
+def _ready_llm(pipeline: Pipeline) -> LLM:
+    """The model client, checked: raises LlmError (with a fix hint) if it cannot be used."""
+    llm = pipeline.make_llm()
+    check = getattr(llm, "check", None)
+    if check is not None:
+        check()
+    return llm
 
 
 def _report(counts: dict[str, int], errors: list[str]) -> None:
@@ -178,7 +199,7 @@ def _report(counts: dict[str, int], errors: list[str]) -> None:
 
 @app.command()
 def run(vault: VaultOption = None) -> None:
-    """Collect, triage and write today's digest (the nightly command)."""
+    """Collect, triage, summarize and write today's digest (the nightly command)."""
     ctx = _open(vault)
     profile = _load_profile(ctx)
     pipeline = build_pipeline(ctx.config)
@@ -187,6 +208,16 @@ def run(vault: VaultOption = None) -> None:
     counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
     seeds = _seed_texts(ctx, profile, pipeline, errors)
     counts |= run_triage(ctx.conn, embedder, profile, seeds)
+    try:
+        llm = _ready_llm(pipeline)
+    except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
+        errors.append(f"summaries skipped, model unavailable: {exc}")
+    else:
+        sum_counts, sum_errors = run_summarize(
+            ctx.conn, llm, pipeline.fulltext_fetcher, ctx.config.llm_num_ctx
+        )
+        counts |= sum_counts
+        errors += sum_errors
     today = date.today()
     out = write_digest(ctx.conn, ctx.vault, today, health_line(today, counts, errors))
     finish_run(ctx.conn, run_id, counts, errors)
@@ -215,6 +246,23 @@ def triage(vault: VaultOption = None) -> None:
     seeds = _seed_texts(ctx, profile, pipeline, errors)
     counts = run_triage(ctx.conn, embedder, profile, seeds)
     typer.echo("Triaged:")
+    _report(counts, errors)
+
+
+@app.command()
+def summarize(vault: VaultOption = None) -> None:
+    """Summarize and critique `triaged` papers with the local model."""
+    ctx = _open(vault)
+    pipeline = build_pipeline(ctx.config)
+    if not papers_with_status(ctx.conn, Status.triaged):
+        typer.echo("Nothing to summarize: no triaged papers. Run `rpipe run` or `rpipe triage` first.")
+        return
+    try:
+        llm = _ready_llm(pipeline)
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(f"model unavailable: {exc}") from exc
+    counts, errors = run_summarize(ctx.conn, llm, pipeline.fulltext_fetcher, ctx.config.llm_num_ctx)
+    typer.echo("Summarized:")
     _report(counts, errors)
 
 

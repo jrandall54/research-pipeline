@@ -6,8 +6,9 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
-from research_pipeline.db import mark_in_digest
+from research_pipeline.db import get_summary, mark_in_digest
 from research_pipeline.models import Status
+from research_pipeline.summarize import Claim, PaperSummary
 
 MAX_AUTHORS = 5
 _ARXIV_ID = re.compile(r"^(\d{4}\.\d{4,5}|[a-z-]+(\.[A-Z]{2})?/\d{7})$")
@@ -31,7 +32,39 @@ def _authors(raw: str) -> str:
     return f"{shown} et al." if len(names) > MAX_AUTHORS else shown
 
 
-def _render(n: int, p: sqlite3.Row) -> str:
+def _claim(c: Claim, unverified: list[str], label: str = "") -> str:
+    flag = "⚠ unverified " if c.text in unverified else ""
+    cited = ", ".join(c.sections)
+    return f"- {label}{flag}{_one_line(c.text)} [§ {cited}]"
+
+
+def _render_summary(ps: PaperSummary) -> list[str]:
+    s, c, bad = ps.summary, ps.critique, ps.unverified
+    lines = [f"**Summary:** {_one_line(s.one_line)}", ""]
+    lines += [
+        _claim(s.problem, bad, "**Problem:** "),
+        _claim(s.approach, bad, "**Approach:** "),
+        _claim(s.results, bad, "**Results:** "),
+        _claim(s.limitations, bad, "**Limitations:** "),
+        "",
+    ]
+    if c.strengths:
+        lines += ["**Strengths**", ""] + [_claim(x, bad) for x in c.strengths] + [""]
+    if c.weaknesses:
+        lines += ["**Weaknesses**", ""] + [_claim(x, bad) for x in c.weaknesses] + [""]
+    if c.questions:
+        lines += ["**Questions to ask**", ""] + [f"- {_one_line(q)}" for q in c.questions] + [""]
+    notes = []
+    if ps.basis == "abstract":
+        notes.append("Summary based on the abstract only (full text unavailable)")
+    if ps.truncated:
+        notes.append("the paper was too long for the model, so part of it was left out")
+    if notes:
+        lines += [f"_{'; '.join(notes)}._", ""]
+    return lines
+
+
+def _render(n: int, p: sqlite3.Row, ps: PaperSummary | None = None) -> str:
     lines = [f"## {n}. [{_link_text(p['title'])}]({_link_url(p['url'])})", ""]
     authors = _authors(p["authors"])
     if authors:
@@ -39,6 +72,8 @@ def _render(n: int, p: sqlite3.Row) -> str:
     lines += [f"**Why it matched** (score {p['triage_score'] or 0.0:.2f})", ""]
     lines += [f"- {r}" for r in json.loads(p["triage_reasons"] or "[]")]
     lines += ["", p["abstract"].strip() or "_No abstract available._", ""]
+    if ps is not None:
+        lines += _render_summary(ps)
     links = [f"[abs]({_link_url(p['url'])})"]
     if _ARXIV_ID.match(p["id"]):
         links.append(f"[PDF](https://arxiv.org/pdf/{p['id']})")
@@ -54,18 +89,24 @@ def write_digest(
 ) -> Path:
     """Write `<vault>/digests/YYYY-MM-DD.md` and mark its papers `in_digest`.
 
-    Includes `triaged` papers plus papers already `in_digest` for this same date,
+    Includes `triaged`, `fetched` and `summarized` papers (with their summary when they have one) plus papers already `in_digest` for this same date,
     so a same-day re-run rewrites a complete file. See docs/guide/digest.md.
     """
     papers = conn.execute(
-        "SELECT * FROM papers WHERE status = ? OR (status = ? AND digest_date = ?)"
+        "SELECT * FROM papers WHERE status IN (?, ?, ?) OR (status = ? AND digest_date = ?)"
         " ORDER BY triage_score DESC, id ASC",
-        (Status.triaged.value, Status.in_digest.value, digest_date.isoformat()),
+        (
+            Status.triaged.value,
+            Status.fetched.value,
+            Status.summarized.value,
+            Status.in_digest.value,
+            digest_date.isoformat(),
+        ),
     ).fetchall()
 
     parts = [run_summary.strip(), "", f"# Research digest — {digest_date.isoformat()}", ""]
     if papers:
-        parts += [_render(i, p) for i, p in enumerate(papers, 1)]
+        parts += [_render(i, p, get_summary(conn, p["id"])) for i, p in enumerate(papers, 1)]
     else:
         parts += ["Nothing new matched your profile today.", ""]
 

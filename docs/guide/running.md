@@ -57,7 +57,7 @@ Digest written to <vault>/digests/2026-11-21.md
 
 It took about 13 seconds with the model already downloaded (about 2 minutes the very first time, which includes the model download and a cold start). Where the time goes:
 
-1. **collect** fetches 300 newest arXiv papers across the configured categories (3 pages of 100, 3 seconds apart because of arXiv's rate limit) and about 50 Hugging Face Daily Papers. `inserted=339` papers were new; `updated=11` papers appeared in both sources, so the second source merged upvotes and repos into the first source's row.
+1. **collect** fetches the newest arXiv papers across the configured categories, in pages of 100 spaced 3 seconds apart because of arXiv's rate limit. It stops after the first page that contains a paper already in the vault, or at `arxiv_max_results` (default 1000), whichever comes first. (This sample run predates that rule and used a fixed limit of 300, so it fetched 3 pages.) It also fetches about 50 Hugging Face Daily Papers. `inserted=339` papers were new; `updated=11` papers appeared in both sources, so the second source merged upvotes and repos into the first source's row.
 2. **seeds**: the four seed ids were not in the database, so one arXiv request fetched their abstracts and saved them to `<vault>/cache/seeds.json`. A second run makes no seed request.
 3. **triage** embedded all 339 papers (`embedded=339`; stored vectors are reused on later nights), scored them, kept 15 and skipped 324.
 4. **digest** wrote the file and marked the 15 papers `in_digest`.

@@ -132,3 +132,42 @@ def test_add_seed_cache_failure_is_clean_and_leaves_no_half_state(tmp_path, monk
     assert "disk full" in result.output
     assert "Traceback" not in result.output
     assert load_profile(path / "profile.yaml").seeds == []
+
+
+def topics_after(tmp_path, tty_input, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    result = init(tmp_path, tty_input)
+    assert result.exit_code == 0, result.output
+    return load_profile(tmp_path / "v" / "profile.yaml").topics
+
+
+@pytest.mark.parametrize("typed", ["operating system and kernel security", "  Operating  SYSTEM and kernel security "])
+def test_wizard_entered_example_topic_survives(tmp_path, tty, monkeypatch, typed):
+    topics = topics_after(tmp_path, f"{typed}\n\n\n\n", monkeypatch)
+    assert "operating system and kernel security" in [t.casefold() for t in topics]
+    assert len(topics) == 3  # only a topic of your own replaces the examples
+
+
+def test_wizard_non_example_topic_replaces_examples(tmp_path, tty, monkeypatch):
+    assert topics_after(tmp_path, "my own topic\n\n\n\n", monkeypatch) == ["my own topic"]
+
+
+def test_wizard_non_example_then_example_keeps_example(tmp_path, tty, monkeypatch):
+    topics = topics_after(tmp_path, "my own topic\noperating system and kernel security\n\n\n\n", monkeypatch)
+    assert topics == ["my own topic", "operating system and kernel security"]
+
+
+def test_wizard_example_then_non_example_keeps_both(tmp_path, tty, monkeypatch):
+    topics = topics_after(tmp_path, "operating system and kernel security\nmy own topic\n\n\n\n", monkeypatch)
+    assert topics == ["operating system and kernel security", "my own topic"]
+
+
+def test_wizard_example_removal_failure_is_skipped_not_a_traceback(tmp_path, tty, monkeypatch):
+    def boom(vault, text):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(cli.profile_edit, "remove_topic", boom)
+    use(monkeypatch, StubArxiv())
+    result = init(tmp_path, "my own topic\n\n\n\n")
+    assert result.exit_code == 0, result.output
+    assert "Skipped" in result.output and "read-only" in result.output

@@ -431,6 +431,7 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
     else:
         typer.echo("Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.")
     examples = list(DEFAULT_TOPICS) if fresh_profile else []
+    entered: set[str] = set()
     while text := _ask("Topic (blank to finish)"):
         try:
             profile_edit.add_topic(vault, text)
@@ -438,9 +439,19 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
             typer.echo(f"Skipped: {exc}")
             continue
         typer.echo(f"Added topic: {profile_edit.normalise_text(text)}")
-        for example in examples:  # the first real topic replaces the template's examples
-            profile_edit.remove_topic(vault, example)
-        examples = []
+        entered.add(profile_edit.normalise_text(text).casefold())
+        # Once you enter a topic of your own, template examples you did not type are dropped.
+        # A topic you typed is never removed, even if it matches an example.
+        if entered <= {e.casefold() for e in examples}:
+            continue
+        for example in examples:
+            if example.casefold() in entered:
+                continue
+            try:
+                profile_edit.remove_topic(vault, example)
+            except (ValueError, ConfigError, OSError) as exc:
+                typer.echo(f"Skipped removing example topic: {exc}")
+        examples = [e for e in examples if e.casefold() in entered]
 
 
 def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:

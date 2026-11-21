@@ -312,3 +312,16 @@ def test_lowercase_subcategory_config_loads_and_set_categories_repairs_it(vault)
     assert res.exit_code == 0
     assert load_config(cfg).arxiv_categories == ["cs.CR"]
     assert run(vault, "set-categories", "cond-mat.stat-mech").exit_code == 0
+
+
+def test_help_articles_use_an_for_vowel_words():
+    add_help = runner.invoke(cli.app, ["profile", "add-author", "--help"]).output
+    remove_help = runner.invoke(cli.app, ["profile", "remove-author", "--help"]).output
+    assert "an author" in add_help
+    assert "an author" in remove_help
+    assert "a author" not in add_help + remove_help
+
+    topic_help = runner.invoke(cli.app, ["profile", "remove-topic", "--help"]).output
+    keyword_help = runner.invoke(cli.app, ["profile", "add-keyword", "--help"]).output
+    assert "a topic" in topic_help
+    assert "a keyword" in keyword_help

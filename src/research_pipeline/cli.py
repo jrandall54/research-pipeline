@@ -319,7 +319,7 @@ def _remove_command(kind: str, remove: Callable[[Path, str], bool]) -> None:
         else:
             typer.echo(f'"{text_or_number.strip()}" is not in your profile ({kind}s). Nothing was changed.')
 
-    command.__doc__ = f"Remove a {kind} by its text or its number from `rpipe profile show`."
+    command.__doc__ = f"Remove {_a(kind)} by its text or its number from `rpipe profile show`."
     profile_app.command(f"remove-{kind}")(command)
 
 

@@ -139,3 +139,18 @@ def test_mark_in_digest_sets_status_and_date_only_for_given_ids(tmp_path):
     assert (a["status"], a["digest_date"], a["triage_score"]) == ("in_digest", "2026-11-21", 0.5)
     assert (b["status"], b["digest_date"]) == ("new", None)
     mark_in_digest(conn, [], date(2026, 11, 21))  # no-op, no error
+
+
+def test_fulltext_round_trip_and_unknown(tmp_path):
+    from research_pipeline.db import get_fulltext, save_fulltext
+    from research_pipeline.models import Section
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    assert get_fulltext(conn, "2401.00001") is None
+    secs = [Section(title="Abstract", text="a"), Section(title="1 Intro", text="b")]
+    save_fulltext(conn, "2401.00001", secs)
+    assert get_fulltext(conn, "2401.00001") == secs
+    save_fulltext(conn, "2401.00001", secs[:1])  # overwrite
+    assert get_fulltext(conn, "2401.00001") == secs[:1]
+    assert get_fulltext(conn, "nope") is None

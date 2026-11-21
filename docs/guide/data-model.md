@@ -118,6 +118,7 @@ Created now so later phases need no migration; unused in Phase 1 except `runs` a
 | --- | --- | --- |
 | `embeddings` | `item_id`, `embedding_model`, `vector` (BLOB), `dim`; primary key (`item_id`, `embedding_model`) | Cached vectors, one per item per model, so changing the model never mixes vectors. |
 | `summaries` | `paper_id`, `kind`, `text`, `model`, `created_at`; primary key (`paper_id`, `kind`) | LLM summaries (later phase). |
+| `fulltexts` | `paper_id` (primary key, references `papers`), `sections` (JSON list of `{title, text}`), `fetched_at` | A paper's arXiv HTML full text, hidden text already removed, split into titled sections (`fulltext.md`). `save_fulltext()` replaces any earlier copy; `get_fulltext()` returns `Section` objects or `None`. |
 | `votes` | `id`, `paper_id`, `vote` (+1/-1), `created_at` | Your thumbs up/down (later phase). |
 | `links` | `src_id`, `dst_id`, `kind`, `created_at`; primary key (all three) | Relations between items, e.g. a paper and a note (later phase). |
 | `runs` | `id`, `started_at`, `finished_at`, `counts` (JSON object), `errors` (JSON list) | One row per pipeline run: `start_run()` opens it, `finish_run()` fills in counts per stage and error messages. |

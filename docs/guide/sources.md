@@ -100,6 +100,10 @@ Tests are offline: HTTP is mocked with `respx` and `tests/fixtures/arxiv_atom.xm
 - `src/research_pipeline/sources/arxiv.py`: `ArxivSource`, `parse_arxiv_atom`
 - `tests/test_arxiv.py`, `tests/fixtures/arxiv_atom.xml`
 
+### Full text (arXiv HTML)
+
+Besides the Atom API, the pipeline fetches `https://arxiv.org/html/<id>` for full text, under the same 3-second spacing and `User-Agent`. See [fulltext.md](fulltext.md).
+
 ## Hugging Face Daily Papers
 
 ### What it does

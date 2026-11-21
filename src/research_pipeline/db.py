@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
-from research_pipeline.models import PaperMeta, Status
+from research_pipeline.models import PaperMeta, Section, Status
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS summaries (
     model      TEXT,
     created_at TEXT NOT NULL,
     PRIMARY KEY (paper_id, kind)
+);
+
+CREATE TABLE IF NOT EXISTS fulltexts (
+    paper_id   TEXT PRIMARY KEY REFERENCES papers(id),
+    sections   TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS votes (
@@ -211,3 +217,22 @@ def finish_run(
         (_now(), json.dumps(counts), json.dumps(errors), run_id),
     )
     conn.commit()
+
+
+def save_fulltext(conn: sqlite3.Connection, paper_id: str, sections: list[Section]) -> None:
+    """Store (or replace) a paper's full text as a JSON list of sections."""
+    conn.execute(
+        "INSERT OR REPLACE INTO fulltexts (paper_id, sections, fetched_at) VALUES (?, ?, ?)",
+        (paper_id, json.dumps([s.model_dump() for s in sections]), _now()),
+    )
+    conn.commit()
+
+
+def get_fulltext(conn: sqlite3.Connection, paper_id: str) -> list[Section] | None:
+    """The stored sections for a paper, or None if no full text was saved."""
+    row = conn.execute(
+        "SELECT sections FROM fulltexts WHERE paper_id = ?", (paper_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return [Section(**d) for d in json.loads(row["sections"])]

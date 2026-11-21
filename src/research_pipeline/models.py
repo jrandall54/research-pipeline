@@ -77,3 +77,10 @@ class Config(BaseModel):
         if bad:
             raise ValueError(f"invalid arXiv categories {bad}")
         return v
+
+
+class Section(BaseModel):
+    """One titled section of a paper's full text."""
+
+    title: str
+    text: str

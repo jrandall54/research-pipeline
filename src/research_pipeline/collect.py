@@ -7,15 +7,16 @@ from research_pipeline.sources.base import Source
 
 
 def run_collect(
-    conn: sqlite3.Connection, sources: list[Source], run_id: int
+    conn: sqlite3.Connection, sources: list[Source], run_id: int | None = None
 ) -> tuple[dict[str, int], list[str]]:
     """Fetch each source in order and store its papers; return (counts, errors).
 
     A source that raises is logged as ``"<name>: <message>"`` and skipped; the
     others still run. Each source's papers are committed before the next source
     starts. This function does not call ``finish_run``: the caller aggregates
-    counts across stages and finishes the run once. ``run_id`` is accepted for
-    future per-run tagging and is currently unused.
+    counts across stages and finishes the run once. ``run_id`` is optional (the standalone
+    ``collect`` command has no run) and is currently unused: reserved for future
+    per-run tagging.
     """
     counts = {"inserted": 0, "updated": 0, "unchanged": 0, "source_errors": 0}
     errors: list[str] = []

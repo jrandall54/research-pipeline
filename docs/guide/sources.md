@@ -229,7 +229,7 @@ Errors are plain strings `"<source name>: <message>"` returned to the caller. Th
 - **Commit per source**: bounds the loss from a crash to one source.
 - **Return errors instead of finishing the run**: the run row covers all stages, so only the caller can write it once with combined counts and errors. Rejected: having `run_collect` call `finish_run`, which would close the run before triage and digest.
 - **No merge logic here**: duplicates are the database's job (one rule, one place), so adding a third source needs no change to collect.
-- **`run_id` accepted but unused**: reserved for tagging papers with the run that found them, without changing the signature later.
+- **`run_id` accepted but unused (and optional)**: the standalone `collect` command passes none, since only `run` writes a `runs` row; reserved for tagging papers with the run that found them, without changing the signature later.
 
 ### How to run / check it
 

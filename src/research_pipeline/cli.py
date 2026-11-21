@@ -184,7 +184,7 @@ def collect(vault: VaultOption = None) -> None:
     """Fetch new papers from every source into the database."""
     ctx = _open(vault)
     pipeline = build_pipeline(ctx.config)
-    counts, errors = run_collect(ctx.conn, pipeline.sources, start_run(ctx.conn))
+    counts, errors = run_collect(ctx.conn, pipeline.sources)
     typer.echo("Collected:")
     _report(counts, errors)
 

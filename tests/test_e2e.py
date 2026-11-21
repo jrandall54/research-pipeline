@@ -183,3 +183,15 @@ def test_real_build_pipeline_does_not_load_the_embedder_until_asked(vault, monke
     pipeline = cli.build_pipeline(cli.load_config(vault / "config.yaml"))
     with pytest.raises(RuntimeError):
         pipeline.make_embedder()
+
+
+@pytest.mark.parametrize("cmd", ["collect", "triage", "digest"])
+def test_single_stage_commands_leave_runs_empty(vault, monkeypatch, cmd):
+    import sqlite3
+
+    install(monkeypatch)
+    if cmd == "triage":
+        assert run_cli("collect", "--vault", str(vault)).exit_code == 0
+    res = run_cli(cmd, "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert sqlite3.connect(vault / "vault.sqlite").execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0

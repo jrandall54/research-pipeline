@@ -66,9 +66,19 @@ def init_vault(
     open_db(path / "vault.sqlite").close()
 
 
+class _NoFloatLoader(yaml.SafeLoader):
+    """SafeLoader that leaves float-looking scalars (e.g. arXiv id 2301.10000) as strings."""
+
+
+_NoFloatLoader.yaml_implicit_resolvers = {
+    ch: [(tag, rx) for tag, rx in resolvers if tag != "tag:yaml.org,2002:float"]
+    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
 def _load[T: BaseModel](path: Path, model: type[T]) -> T:
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.load(path.read_text(encoding="utf-8"), Loader=_NoFloatLoader)  # noqa: S506
     except OSError as e:
         raise ConfigError(f"{path}: cannot read file ({e.strerror or e})") from e
     except yaml.YAMLError as e:

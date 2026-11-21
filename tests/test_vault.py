@@ -99,3 +99,17 @@ def test_cli_init_tty_prompts(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["agent security", "kernels"]
     assert load_config(tmp_path / "v" / "config.yaml").arxiv_categories == ["cs.CR", "cs.OS"]
+
+
+def test_load_profile_unquoted_arxiv_id_keeps_trailing_zeros(tmp_path):
+    p = tmp_path / "profile.yaml"
+    p.write_text("topics: [a]\nseeds: [2301.10000, 2401.00001]\ntop_n: 5\n")
+    profile = load_profile(p)
+    assert profile.seeds == ["2301.10000", "2401.00001"]
+    assert profile.top_n == 5
+
+
+def test_load_profile_unquoted_short_id(tmp_path):
+    p = tmp_path / "profile.yaml"
+    p.write_text("topics: [a]\nseeds: [2301.1234]\n")
+    assert load_profile(p).seeds == ["2301.1234"]

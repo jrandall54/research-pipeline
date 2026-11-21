@@ -43,7 +43,7 @@ Phase 1 only writes `vault.sqlite`, `digests/` and `cache/`; the other folders a
 | `keywords` | `[]` | Words in a title/abstract that give a small boost. |
 | `top_n` | 15 | Papers kept per digest (at least 1). |
 
-Write seed ids **in quotes** (`"2301.10000"`). Unquoted, YAML reads `2301.10000` as the number 2301.1 and the id is lost.
+Seed ids may be written with or without quotes (`2301.10000` or `"2301.10000"`); both load as the text `"2301.10000"`. See the YAML note under "Why it's built this way".
 
 ### What `init` does, step by step
 
@@ -62,7 +62,7 @@ A missing file, invalid YAML, or a value that breaks the schema (for example `to
 
 ### Picking good seed papers
 
-Choose 10-20 papers you would be glad to see more of: ones you have read and learned from, spread over your topics rather than all on one narrow idea. Mix landmark papers with recent ones. Avoid papers you only skimmed or that are famous but outside your interests, since the ranker treats every seed as "more like this". Put the arXiv id (the part after `arxiv.org/abs/`, without a version suffix) in quotes.
+Choose 10-20 papers you would be glad to see more of: ones you have read and learned from, spread over your topics rather than all on one narrow idea. Mix landmark papers with recent ones. Avoid papers you only skimmed or that are famous but outside your interests, since the ranker treats every seed as "more like this". Use the arXiv id (the part after `arxiv.org/abs/`, without a version suffix).
 
 ## Why it's built this way
 
@@ -71,6 +71,7 @@ Choose 10-20 papers you would be glad to see more of: ones you have read and lea
 - **Never overwrite**: your profile is the most valuable file here; re-running `init` must be harmless. Rejected: an `--force` flag (YAGNI; delete the file instead).
 - **Prompts only on a TTY**: keeps `init` usable in scripts and tests.
 - **Single `ConfigError`**: callers handle one exception, and users see which file is wrong rather than a pydantic traceback.
+- **Float-free YAML loader**: YAML infers types. An unquoted `2301.10000` looks like a decimal number, so a standard loader turns it into the float 2301.1, dropping the trailing zeros and naming a different paper; the original text cannot be recovered afterwards. Our loader is `yaml.SafeLoader` with its implicit float rule removed, so float-looking scalars stay strings. Integers such as `top_n: 15` still parse as ints and no setting is a float. Rejected: telling users to quote every id (easy to forget, and the failure is silent).
 - **`vault.sqlite`** holds everything in one file; plain files would need a hand-rolled index.
 
 ## How to run / check it

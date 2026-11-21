@@ -53,23 +53,25 @@ Keyword search needs the same word. A paper on "defending language models agains
 
 ```
 score = max over seeds & topics of cosine(paper, profile item)
-      + 0.05 × ln(1 + hf_upvotes)
-      + 0.1  × (number of followed authors on the paper)
-      + min(0.2, 0.05 × (number of keywords found in title/abstract))
+      + 0.01 × ln(1 + hf_upvotes)
+      + 0.02 × (number of followed authors on the paper)
+      + min(0.04, 0.01 × (number of keywords found in title/abstract))
       + 0.0  (my_work similarity, Phase 4)
       − 0.0  (downvote penalty, Phase 3)
 ```
 
+**Scale matters.** Cosine similarity is *not* spread over 0 to 1 in practice. It can in principle be anywhere from -1 to 1 (we do not clamp it, so an unrelated paper can score below 0 before boosts), but real embedding models bunch related-sounding text together. In the first real run (about 340 papers, `bge-small`) similarity ran from 0.57 to 0.85 with a standard deviation of only 0.045: *every* paper that mentions LLMs looks fairly similar to an LLM seed. The first version of the weights used boosts up to 0.19 for a 42-upvote paper, which is four standard deviations, and the top of the digest filled with popular papers off your topics. The boosts below are sized against that real spread, so they reorder close calls but do not override a clear similarity gap.
+
 | Term | Weight | Why this size |
 | --- | --- | --- |
-| Similarity | 1.0 (cosine, about 0 to 1) | The main signal. A paper is judged by its *closest* seed or topic: being very close to one thing you like matters more than being vaguely near all of them. |
-| HF upvotes | 0.05 × ln(1 + n) | ln compresses: 1 vote gives 0.035, 10 gives 0.12, 42 gives 0.19, 100 gives 0.23. Community interest helps, but a viral paper cannot beat a well-matched one on hype alone. |
-| Followed author | 0.1 each | Equivalent to a clear jump in similarity; strong but not decisive. Case-insensitive exact name match (no fuzzy matching, so "Ada Lovelace Jr" does not match "Ada Lovelace"). |
-| Keyword | 0.05 each, capped at 0.2 | Keywords are blunt (a word can appear in an unrelated paper), so each is a nudge and four of them are the most you can get. Each keyword counts once; matching is case-insensitive substring in title or abstract. |
+| Similarity | 1.0 (cosine; typically 0.5 to 0.9 for real models, can be lower or even negative) | The main signal. A paper is judged by its *closest* seed or topic: being very close to one thing you like matters more than being vaguely near all of them. |
+| HF upvotes | 0.01 × ln(1 + n) | ln compresses: 1 vote gives 0.007, 10 gives 0.024, 42 gives 0.038, 100 gives 0.046. Community interest helps break ties; a similarity gap larger than about 0.04 to 0.05 outweighs even a very popular paper, but a small gap does not. |
+| Followed author | 0.02 each | Worth about half a standard deviation of similarity: a clear nudge, not decisive. Case-insensitive exact name match (no fuzzy matching, so "Ada Lovelace Jr" does not match "Ada Lovelace"). |
+| Keyword | 0.01 each, capped at 0.04 | Keywords are blunt (a word can appear in an unrelated paper), so each is a nudge and four of them are the most you can get. Each keyword counts once; matching is case-insensitive substring in title or abstract. |
 | my_work | 0.0 (stub) | `TODO(phase4)`: similarity to your own notes. |
 | Vote penalty | 0.0 (stub) | `TODO(phase3)`: penalty for topics you downvote. |
 
-The weights are named constants at the top of `rank.py`.
+The weights are named constants at the top of `rank.py`; if you change the embedding model, re-check the similarity spread first, because a model with a wider spread can carry larger boosts.
 
 ### Reasons
 
@@ -81,18 +83,22 @@ Profile: seed `2401.00001`, topic "adversarial robustness", followed author "Ada
 
 **Paper A**: "Fuzzing LLM agents", by Ada Lovelace, 3 upvotes. Closest to seed `2401.00001` at 0.71; the topic scores 0.55.
 - similarity 0.71
-- upvotes 0.05 × ln(4) = 0.069
-- followed author 0.10
-- keyword "fuzzing" found, "jailbreak" absent: 0.05
-- **score 0.929**; reasons: `closest seed: 2401.00001 (0.71)`, `HF upvotes: 3`, `followed author: Ada Lovelace`, `keyword: fuzzing`
+- upvotes 0.01 × ln(4) = 0.014
+- followed author 0.02
+- keyword "fuzzing" found, "jailbreak" absent: 0.01
+- **score 0.754**; reasons: `closest seed: 2401.00001 (0.71)`, `HF upvotes: 3`, `followed author: Ada Lovelace`, `keyword: fuzzing`
 
-**Paper B**: "Certified defences against jailbreak attacks", 42 upvotes. Closest to the topic at 0.64.
-- similarity 0.64
-- upvotes 0.05 × ln(43) = 0.188
-- no followed author; keyword "jailbreak" found, "fuzzing" absent: 0.05
-- **score 0.878**; reasons: `topic: adversarial robustness (0.64)`, `HF upvotes: 42`, `keyword: jailbreak`
+**Paper B**: "Certified defences against jailbreak attacks", 42 upvotes. Closest to the topic at 0.70.
+- similarity 0.70
+- upvotes 0.01 × ln(43) = 0.038
+- no followed author; keyword "jailbreak" found, "fuzzing" absent: 0.01
+- **score 0.748**; reasons: `topic: adversarial robustness (0.70)`, `HF upvotes: 42`, `keyword: jailbreak`
 
-A (0.929) beats B (0.878) despite far fewer upvotes: closer match plus a followed author. With `top_n` 1, A becomes `triaged`, B becomes `skipped` (still searchable, score and reasons kept).
+A (0.754) narrowly beats B (0.748) despite far fewer upvotes: slightly closer match plus a followed author. Had B's similarity been 0.75 instead, B would win (0.798): the boosts decide close calls, similarity decides clear ones. With `top_n` 1, A becomes `triaged`, B becomes `skipped` (still searchable, score and reasons kept).
+
+### Seed papers: where their text comes from
+
+Seeds are arXiv ids in `profile.yaml`; triage needs their text. `resolve_seed_texts` (`seeds.py`) finds it in this order: (1) the `papers` table, if you have already collected that paper; (2) `<vault>/cache/seeds.json`; (3) one arXiv lookup by id for whatever is still missing, written to the cache so later runs make no request. The text is title, a newline, then the abstract. Seeds are never inserted into `papers`, otherwise they would be ranked and listed as new papers. If the lookup fails, or arXiv does not know an id (such as the placeholder seeds `init` writes), the run carries on with the seeds it has and the problem appears in the health line and in `runs.errors`.
 
 ### Caching embeddings
 
@@ -106,17 +112,18 @@ Vectors are stored in the `embeddings` table as raw float32 bytes, keyed by (pap
 - **Reasons from the same numbers as the score**: the explanation cannot disagree with the ranking.
 - **Skipped, not deleted**: triage is a cheap filter and may be wrong; skipped papers remain searchable.
 - **Model choice**: default `BAAI/bge-small-en-v1.5`: small (384 dimensions), good retrieval quality, runs on CPU. It is swappable via `embedding_model` in `config.yaml`. Open question: compare models (e.g. bge-base) by checking how well each ranks a gold set of papers you have judged relevant; until then bge-small is the default.
-- The embedding library is an optional extra: `uv sync --extra embed`. Without it, triage reports that hint instead of crashing obscurely.
+- The embedding library is an optional extra: `uv sync --extra embed`. Without it, `research-pipeline run` stops with that hint instead of crashing obscurely (see `running.md`).
 
 ## How to run / check it
 
 - Tuning: edit weights in `rank.py`; edit `top_n`, topics, seeds, authors and keywords in `profile.yaml`. Add a few seeds that are truly representative (10 to 20 is plenty); too-broad topics make everything look similar.
 - Inspect results: a paper's `triage_score` and `triage_reasons` columns show exactly why it ranked (also for `skipped` ones, to see what just missed the cut).
-- Tests: `uv run pytest tests/test_rank.py tests/test_triage.py -q`. They use a fake hashed bag-of-words embedder, so no model is downloaded.
+- Tests: `uv run pytest tests/test_rank.py tests/test_triage.py tests/test_seeds.py -q`. They use a fake hashed bag-of-words embedder, so no model is downloaded.
 
 ## Where the code is
 
 - `src/research_pipeline/embed.py`: `Embedder` protocol, `SentenceTransformerEmbedder`
 - `src/research_pipeline/rank.py`: `build_profile_vectors`, `score_papers`, weights
 - `src/research_pipeline/triage.py`: `run_triage`
+- `src/research_pipeline/seeds.py`: `resolve_seed_texts`
 - `tests/conftest.py`: `FakeEmbedder`

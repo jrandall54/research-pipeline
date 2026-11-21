@@ -1,6 +1,6 @@
 # Sources
 
-A source is something that can list recent papers. Phase 1 has two: arXiv and Hugging Face Daily Papers (both below). The collect stage (last section) combines them.
+A source is something that can list recent papers. Phase 1 has two: arXiv and Hugging Face Daily Papers (both below). The collect stage (last section) combines them. `cli.py` wires them up in `build_pipeline`: an `ArxivSource` for your configured categories followed by an `HfDailySource`.
 
 ## arXiv
 
@@ -58,7 +58,7 @@ The API returns at most a page of results per call. We ask for pages of 100: `st
 
 #### Seed lookup by id
 
-`fetch_by_ids(["1706.03762", ...])` sends `id_list=<comma-separated ids>` instead of a search query, up to 100 ids per call, with the same spacing. It returns one `PaperMeta` per id arXiv knows. Seeds are not stored in the `papers` table (they would show up in triage and the digest); the caller caches them separately.
+`fetch_by_ids(["1706.03762", ...])` sends `id_list=<comma-separated ids>` instead of a search query, up to 100 ids per call, with the same spacing. It returns one `PaperMeta` per id arXiv knows. Seeds are not stored in the `papers` table (they would show up in triage and the digest); `resolve_seed_texts` in `seeds.py` caches them in `<vault>/cache/seeds.json` (see `triage.md`).
 
 #### Errors
 
@@ -68,13 +68,13 @@ Every failure raises `SourceError` (from `sources/base.py`) with a message sayin
 - timeouts and connection failures (`arXiv API request failed: ...`)
 - a response that is not valid XML or has malformed entries (`could not parse arXiv response: ...`)
 
-Callers catch `SourceError` to log the failure and keep other sources running (see the last section).
+The collect stage catches these failures, logs them and keeps the other sources running (see the last section).
 
 ### Why it's built this way
 
 - **Official API, not scraping or RSS**: stable, documented, supports category queries, paging and id lookup. RSS only covers the latest day per category.
 - **HTTPS endpoint `export.arxiv.org`**: the plain-http URL now redirects (301).
-- **Standard-library XML parser, not feedparser**: feedparser silently tolerates broken input; we want bad responses to fail loudly as `SourceError`.
+- **Standard-library XML parser, not feedparser**: feedparser silently tolerates broken input; we want bad responses to fail loudly as `SourceError`. (`feedparser` is therefore not a dependency; if RSS feeds are added in a later phase, that phase can add it back.)
 - **Spacing by elapsed time, not a fixed sleep**: if a call took 2 s we only wait 1 s more; if the caller was idle for a minute we do not wait at all.
 - **Sorted by submission date**: simple and deterministic; the exact daily-listing semantics are deferred.
 
@@ -221,7 +221,7 @@ Because the same paper can appear in two sources, the first three counts add up 
 
 #### Where errors go
 
-Errors are plain strings `"<source name>: <message>"` returned to the caller. They are not raised, so a failure never stops the run. The caller stores them in `runs.errors` (JSON list) via `finish_run` and shows them in the digest health line (Tasks 8 and 9).
+Errors are plain strings `"<source name>: <message>"` returned to the caller. They are not raised, so a failure never stops the run. The `run` command (see `running.md`) does three things with them: it appends any seed-lookup problem to the same list, writes the list to `runs.errors` (a JSON list) through `finish_run`, and prints it in the digest's health line after `errors:`. The `run` command still exits 0 when a source fails; it exits non-zero only when the vault is missing or unusable.
 
 ### Why it's built this way
 

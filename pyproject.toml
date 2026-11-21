@@ -9,7 +9,6 @@ dependencies = [
     "pyyaml",
     "typer",
     "httpx",
-    "feedparser",
     "numpy",
 ]
 

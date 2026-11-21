@@ -49,3 +49,7 @@
 **Health line** — the first line of a digest: counts collected/kept/skipped and any source errors, so a failed night is visible. See `digest.md`.
 
 **Re-run (same day)** — running the pipeline again on the same date. The digest then rewrites the same file, still including papers already listed that day. See `digest.md`.
+
+**Pipeline stub (test double)** — a fake stand-in for a real part (a source, the embedding model) used in tests so they run offline. `build_pipeline` in `cli.py` is the one place the real parts are created; tests replace it. See `running.md`.
+
+**Run** — one execution of `research-pipeline run`, recorded as a row in the `runs` table with start/end times, counts and errors. See `running.md`.

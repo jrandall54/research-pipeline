@@ -14,7 +14,7 @@ research-vault/
   profile.yaml     what you care about          (Phase 1)
   vault.sqlite     all paper state, runs, search index  (Phase 1)
   digests/         one markdown digest per day  (Phase 1)
-  cache/           small caches, e.g. seeds.json (Phase 1)
+  cache/           small caches; seeds.json holds the text of your seed papers (Phase 1)
   raw/             downloaded PDFs              (Phase 2)
   markdown/        PDFs converted to markdown   (Phase 2)
   summaries/       generated summaries          (Phase 2)
@@ -22,7 +22,7 @@ research-vault/
   gold/            papers you rated, for tuning (Phase 3)
 ```
 
-Phase 1 only writes `vault.sqlite`, `digests/` and `cache/`; the other folders are created now so the layout never changes later.
+Phase 1 only writes `vault.sqlite`, `digests/` and `cache/` (plus the two YAML files); the other folders are created now so the layout never changes later.
 
 ### `config.yaml` fields
 
@@ -31,7 +31,7 @@ Phase 1 only writes `vault.sqlite`, `digests/` and `cache/`; the other folders a
 | `vault_path` | the vault's path (set by `init`) | Absolute path of the vault. Required. |
 | `arxiv_categories` | `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE` | arXiv categories collected each night. |
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | Model that turns text into vectors for similarity (see `glossary.md`). |
-| `rss_feeds` | `[]` | Extra feed URLs (unused in Phase 1). |
+| `rss_feeds` | `[]` | Extra feed URLs (read but not used yet: RSS collection is a later phase). |
 
 ### `profile.yaml` fields
 
@@ -68,7 +68,7 @@ Choose 10-20 papers you would be glad to see more of: ones you have read and lea
 
 - **Vault outside the repo**: personal data can never be committed by accident.
 - **Templates shipped as package data** (`importlib.resources`) rather than copied from a path in the repo, so it works from an installed wheel.
-- **Never overwrite**: your profile is the most valuable file here; re-running `init` must be harmless. Rejected: an `--force` flag (YAGNI; delete the file instead).
+- **Never overwrite**: your profile is the most valuable file here; re-running `init` must be harmless. Rejected: a `--force` flag (YAGNI; delete the file instead).
 - **Prompts only on a TTY**: keeps `init` usable in scripts and tests.
 - **Single `ConfigError`**: callers handle one exception, and users see which file is wrong rather than a pydantic traceback.
 - **Float-free YAML loader**: YAML infers types. An unquoted `2301.10000` looks like a decimal number, so a standard loader turns it into the float 2301.1, dropping the trailing zeros and naming a different paper; the original text cannot be recovered afterwards. Our loader is `yaml.SafeLoader` with its implicit float rule removed, so float-looking scalars stay strings. Integers such as `top_n: 15` still parse as ints and no setting is a float. Rejected: telling users to quote every id (easy to forget, and the failure is silent).

@@ -109,7 +109,7 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 
 ### Other tables
 
-Created now so later phases need no migration; unused in Phase 1 except `runs`.
+Created now so later phases need no migration; unused in Phase 1 except `runs` and `embeddings`.
 
 | Table | Columns | Purpose |
 | --- | --- | --- |

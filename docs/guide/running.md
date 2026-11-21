@@ -12,7 +12,7 @@
 uv sync --extra embed
 ```
 
-`uv sync` installs the pipeline. The `embed` extra adds `sentence-transformers` (and with it PyTorch), the library that runs the embedding model. It is an **optional extra** because it is large (gigabytes, mostly PyTorch) and the tests, and every part of the pipeline except triage, do not need it. Without it `run` and `triage` stop with a clear message (see Troubleshooting). On a machine with a GPU, PyTorch uses it automatically; a CPU is also fine for a few hundred papers a night. The first run downloads the embedding model (about 130 MB for the default) from Hugging Face and caches it.
+`uv sync` installs the pipeline. The `embed` extra adds `sentence-transformers` (and with it PyTorch), the library that runs the embedding model. It is an **optional extra** because it is large (gigabytes, mostly PyTorch) and the tests, and every part of the pipeline except triage, do not need it. Without it `run` and `triage` stop with a clear message (see Troubleshooting); `collect` and `digest` never load the model and work without it. On a machine with a GPU, PyTorch uses it automatically; a CPU is also fine for a few hundred papers a night. The first run downloads the embedding model (about 130 MB for the default) from Hugging Face and caches it.
 
 ### Create your vault
 
@@ -41,7 +41,7 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 | `triage` | rank the `new` papers, keep the top N | statuses, scores, reasons, embeddings |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
-Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead. `collect` and `triage` build the same real sources and embedding model as `run`, so they also need the `embed` extra.
+Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
 **Exit codes.** `0` normally, **including when a source failed** (the failure is recorded, see below). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, the `embed` extra is missing, or `--date` is not a date.
 
@@ -105,7 +105,7 @@ Phase 1 stops at the command; scheduling it (for example with a systemd timer or
 
 - **One command that records itself**: `run` owns the `runs` row, so counts from every stage and every error end up in one place. The individual stage functions return counts and errors rather than finishing the run.
 - **A failed source does not fail the run**: a nightly job that exits non-zero because one website was down would train you to ignore failures. The error is written to the digest's first line and to `runs.errors` instead; exit code 1 is kept for "nothing could run".
-- **`build_pipeline` as the single seam**: `cli.py` builds the real sources, embedder and seed lookup in one function. The end-to-end tests replace that one function with fixture-backed stubs, so the *real* CLI, database, ranking and digest code run offline.
+- **`build_pipeline` as the single seam**: `cli.py` builds the real sources, a lazy embedder factory and seed lookup in one function. The end-to-end tests replace that one function with fixture-backed stubs, so the *real* CLI, database, ranking and digest code run offline.
 - **Optional `embed` extra**: keeps installs and tests light. Rejected: making PyTorch a hard dependency.
 - **No `feedparser` dependency**: the arXiv response is parsed with the standard library (see `sources.md`); RSS is a later phase and can add the library then.
 

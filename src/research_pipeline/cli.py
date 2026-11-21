@@ -42,7 +42,7 @@ class Pipeline:
     """The pieces that touch the outside world; tests swap them for stubs."""
 
     sources: list[Source]
-    embedder: Embedder
+    make_embedder: Callable[[], Embedder]  # called only by run and triage (may raise RuntimeError)
     seed_fetcher: Callable[[list[str]], list[PaperMeta]]
 
 
@@ -51,7 +51,7 @@ def build_pipeline(config: Config) -> Pipeline:
     arxiv = ArxivSource(config.arxiv_categories)
     return Pipeline(
         sources=[arxiv, HfDailySource()],
-        embedder=SentenceTransformerEmbedder(config.embedding_model),
+        make_embedder=lambda: SentenceTransformerEmbedder(config.embedding_model),
         seed_fetcher=arxiv.fetch_by_ids,
     )
 
@@ -124,11 +124,11 @@ def _load_profile(ctx: _Context) -> Profile:
         raise _fail(str(exc)) from exc
 
 
-def _pipeline(config: Config) -> Pipeline:
+def _embedder(pipeline: Pipeline) -> Embedder:
     try:
-        return build_pipeline(config)
+        return pipeline.make_embedder()
     except RuntimeError as exc:  # e.g. the `embed` extra is not installed
-        raise _fail(f"{exc}") from exc
+        raise _fail(str(exc)) from exc
 
 
 def _seed_texts(
@@ -166,11 +166,12 @@ def run(vault: VaultOption = None) -> None:
     """Collect, triage and write today's digest (the nightly command)."""
     ctx = _open(vault)
     profile = _load_profile(ctx)
-    pipeline = _pipeline(ctx.config)
+    pipeline = build_pipeline(ctx.config)
+    embedder = _embedder(pipeline)
     run_id = start_run(ctx.conn)
     counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
     seeds = _seed_texts(ctx, profile, pipeline, errors)
-    counts |= run_triage(ctx.conn, pipeline.embedder, profile, seeds)
+    counts |= run_triage(ctx.conn, embedder, profile, seeds)
     today = date.today()
     out = write_digest(ctx.conn, ctx.vault, today, health_line(today, counts, errors))
     finish_run(ctx.conn, run_id, counts, errors)
@@ -182,7 +183,7 @@ def run(vault: VaultOption = None) -> None:
 def collect(vault: VaultOption = None) -> None:
     """Fetch new papers from every source into the database."""
     ctx = _open(vault)
-    pipeline = _pipeline(ctx.config)
+    pipeline = build_pipeline(ctx.config)
     counts, errors = run_collect(ctx.conn, pipeline.sources, start_run(ctx.conn))
     typer.echo("Collected:")
     _report(counts, errors)
@@ -193,10 +194,11 @@ def triage(vault: VaultOption = None) -> None:
     """Rank `new` papers against your profile; keep the top N."""
     ctx = _open(vault)
     profile = _load_profile(ctx)
-    pipeline = _pipeline(ctx.config)
+    pipeline = build_pipeline(ctx.config)
+    embedder = _embedder(pipeline)
     errors: list[str] = []
     seeds = _seed_texts(ctx, profile, pipeline, errors)
-    counts = run_triage(ctx.conn, pipeline.embedder, profile, seeds)
+    counts = run_triage(ctx.conn, embedder, profile, seeds)
     typer.echo("Triaged:")
     _report(counts, errors)
 

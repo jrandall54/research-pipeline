@@ -50,7 +50,7 @@ def install(monkeypatch, sources=None, fetcher=seed_fetcher):
     hf = parse_hf_daily(json.loads((FIXTURES / "hf_daily.json").read_text()))
     srcs = sources if sources is not None else [FixtureSource("arxiv", arxiv), FixtureSource("hf_daily", hf)]
     monkeypatch.setattr(
-        cli, "build_pipeline", lambda config: Pipeline(srcs, FakeEmbedder(), fetcher)
+        cli, "build_pipeline", lambda config: Pipeline(srcs, FakeEmbedder, fetcher)
     )
 
 
@@ -132,14 +132,33 @@ def test_seed_fetch_failure_does_not_stop_the_run(vault, monkeypatch):
     assert "seeds: could not fetch 9999.00001: arXiv down" in first
 
 
-def test_missing_embed_extra_is_a_clear_error(vault, monkeypatch):
-    def no_extra(config):
+def _no_extra_pipeline(monkeypatch):
+    def make_embedder():
         raise RuntimeError("sentence-transformers is not installed; run `uv sync --extra embed`")
 
-    monkeypatch.setattr(cli, "build_pipeline", no_extra)
-    res = run_cli("run", "--vault", str(vault))
+    hf = parse_hf_daily(json.loads((FIXTURES / "hf_daily.json").read_text()))
+    monkeypatch.setattr(
+        cli, "build_pipeline",
+        lambda config: Pipeline([FixtureSource("hf_daily", hf)], make_embedder, seed_fetcher),
+    )
+
+
+@pytest.mark.parametrize("cmd", ["run", "triage"])
+def test_missing_embed_extra_is_a_clear_error_for_run_and_triage(vault, monkeypatch, cmd):
+    _no_extra_pipeline(monkeypatch)
+    res = run_cli(cmd, "--vault", str(vault))
     assert res.exit_code == 1
     assert "uv sync --extra embed" in res.output
+
+
+def test_collect_and_digest_work_without_the_embed_extra(vault, monkeypatch):
+    _no_extra_pipeline(monkeypatch)
+    res = run_cli("collect", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert "inserted=" in res.output
+    res = run_cli("digest", "--vault", str(vault), "--date", "2026-01-02")
+    assert res.exit_code == 0, res.output
+    assert (vault / "digests" / "2026-01-02.md").exists()
 
 
 def test_individual_commands_compose_to_a_digest(vault, monkeypatch):
@@ -154,3 +173,13 @@ def test_individual_commands_compose_to_a_digest(vault, monkeypatch):
 def test_digest_rejects_bad_date(vault):
     res = run_cli("digest", "--vault", str(vault), "--date", "yesterday")
     assert res.exit_code == 1
+
+
+def test_real_build_pipeline_does_not_load_the_embedder_until_asked(vault, monkeypatch):
+    def boom(model_name):
+        raise RuntimeError("sentence-transformers is not installed; run `uv sync --extra embed`")
+
+    monkeypatch.setattr(cli, "SentenceTransformerEmbedder", boom)
+    pipeline = cli.build_pipeline(cli.load_config(vault / "config.yaml"))
+    with pytest.raises(RuntimeError):
+        pipeline.make_embedder()

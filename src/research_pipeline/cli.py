@@ -339,14 +339,22 @@ def _choose(candidates: list[PaperMeta], yes: bool) -> PaperMeta | None:
     return candidates[pick - 1] if pick else None
 
 
+def _close(source: object) -> None:
+    """Close an arXiv client if it can be closed (test stubs may not)."""
+    close = getattr(source, "close", None)
+    if callable(close):
+        close()
+
+
 class _SeedProblem(Exception):
     """A seed could not be added; the message is shown to the user as one line."""
 
 
-def _add_seed(vault: Path, config: Config, text: str, yes: bool = False) -> str:
+def _add_seed(vault: Path, arxiv: ArxivSource, text: str, yes: bool = False) -> str:
     """Look up, confirm and save one seed. Returns the message to show; raises _SeedProblem.
 
-    Shared by `profile add-seed` and the `init` wizard. The cache is written first and the
+    Shared by `profile add-seed` and the `init` wizard, which pass ONE arXiv client for the
+    whole run so its 3 s spacing between requests holds. The cache is written first and the
     profile second, so a failure in either step never leaves a profile entry without its text.
     """
     if not text.strip():
@@ -355,11 +363,14 @@ def _add_seed(vault: Path, config: Config, text: str, yes: bool = False) -> str:
         profile = load_profile(vault / "profile.yaml")
     except ConfigError as exc:
         raise _SeedProblem(str(exc)) from exc
-    kind, value = parse_seed_input(text)
-    if kind == "id" and value in profile.seeds:
+    try:
+        kind, value = parse_seed_input(text)
+    except ValueError as exc:
+        raise _SeedProblem(str(exc)) from exc
+    if kind == "id" and profile_edit.has_seed(profile.seeds, value):
         return f"{value} is already in your profile."
     try:
-        candidates = find_seed_candidates(text, make_arxiv(config))
+        candidates = find_seed_candidates(text, arxiv)
     except SourceError as exc:
         raise _SeedProblem(f"Could not reach arXiv: {exc}. Nothing was changed.") from exc
     if not candidates:
@@ -367,7 +378,7 @@ def _add_seed(vault: Path, config: Config, text: str, yes: bool = False) -> str:
     chosen = _choose(candidates, yes)
     if chosen is None:
         return "Cancelled. Nothing was changed."
-    if chosen.id in profile.seeds:
+    if profile_edit.has_seed(profile.seeds, chosen.id):
         return f"{chosen.id} is already in your profile."
     try:
         cache_seed(vault / "cache" / "seeds.json", chosen)
@@ -385,10 +396,13 @@ def profile_add_seed(
 ) -> None:
     """Add a seed paper from an arXiv link, id or title search."""
     ctx = _open(vault)
+    arxiv = make_arxiv(ctx.config)
     try:
-        typer.echo(_add_seed(ctx.vault, ctx.config, text, yes))
+        typer.echo(_add_seed(ctx.vault, arxiv, text, yes))
     except _SeedProblem as exc:
         raise _fail(str(exc)) from exc
+    finally:
+        _close(arxiv)
 
 
 @profile_app.command("set-top-n")
@@ -424,13 +438,19 @@ def _ask(prompt: str) -> str:
 
 def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
     profile = load_profile(vault / "profile.yaml")
+    # "Still the template" is decided from the content, not from whether this run created the
+    # file: an interrupted first run or a non-terminal `init` leaves the examples in place.
+    is_template = [profile_edit.normalise_text(t).casefold() for t in profile.topics] == [
+        t.casefold() for t in DEFAULT_TOPICS
+    ]
     if not fresh_profile:
-        typer.echo(f"Your topics:\n{_numbered(profile.topics)}")
+        label = "Your topics (these are the template examples, not topics of your own)" if is_template else "Your topics"
+        typer.echo(f"{label}:\n{_numbered(profile.topics)}")
         if not typer.confirm("Add more topics?", default=False):
             return
     else:
         typer.echo("Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.")
-    examples = list(DEFAULT_TOPICS) if fresh_profile else []
+    examples = list(DEFAULT_TOPICS) if is_template else []
     entered: set[str] = set()
     while text := _ask("Topic (blank to finish)"):
         try:
@@ -473,11 +493,15 @@ def _wizard_seeds(vault: Path, config: Config) -> None:
     typer.echo(
         "Seed papers are papers you like; the ranker finds new papers similar to them."
     )
-    while text := _ask("Paper link, arXiv id or title (blank to finish)"):
-        try:
-            typer.echo(_add_seed(vault, config, text))
-        except _SeedProblem as exc:
-            typer.echo(f"Skipped: {exc}")
+    arxiv = make_arxiv(config)  # one client for the whole run, so lookups stay 3 s apart
+    try:
+        while text := _ask("Paper link, arXiv id or title (blank to finish)"):
+            try:
+                typer.echo(_add_seed(vault, arxiv, text))
+            except _SeedProblem as exc:
+                typer.echo(f"Skipped: {exc}")
+    finally:
+        _close(arxiv)
     if len(load_profile(vault / "profile.yaml").seeds) < 5:
         typer.echo("Tip: 10-20 seeds work best; add more later with rpipe profile add-seed")
 

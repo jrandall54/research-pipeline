@@ -231,3 +231,50 @@ def test_add_seed_pick_out_of_range_exit_1(vault, monkeypatch):
     res = run(vault, "add-seed", "some title words", input="7\n")
     assert res.exit_code == 1 and "Nothing was changed" in res.output
     assert load_profile(vault / "profile.yaml").seeds == []
+
+
+@pytest.mark.parametrize("form", ["https://arxiv.org/abs/2307.15043", "arXiv:2307.15043", "2307.15043v3"])
+def test_add_seed_other_spellings_are_already_present(vault, monkeypatch, form):
+    use(monkeypatch, StubArxiv(by_id=[paper()]))
+    run(vault, "add-seed", "2307.15043", "--yes")
+    res = run(vault, "add-seed", form, "--yes")
+    assert res.exit_code == 0 and "already in your profile" in res.output
+    assert load_profile(vault / "profile.yaml").seeds == ["2307.15043"]
+
+
+def test_hand_written_versioned_seed_dedupes(vault, monkeypatch):
+    p = vault / "profile.yaml"
+    p.write_text(p.read_text().replace("seeds: []", 'seeds: ["2307.15043v2"]'))
+    use(monkeypatch, StubArxiv(by_id=[paper()]))
+    res = run(vault, "add-seed", "2307.15043", "--yes")
+    assert "already in your profile" in res.output
+    assert load_profile(p).seeds == ["2307.15043v2"]
+
+
+def _with_bogus_seed(vault):
+    p = vault / "profile.yaml"
+    p.write_text(p.read_text().replace("seeds: []", 'seeds: ["bogus-entry", "2307.15043v2"]'))
+
+
+def test_remove_seed_by_id_with_non_id_item_earlier(vault):
+    _with_bogus_seed(vault)
+    res = run(vault, "remove-seed", "2307.15043")
+    assert res.exit_code == 0, res.output
+    assert load_profile(vault / "profile.yaml").seeds == ["bogus-entry"]
+
+
+def test_remove_seed_by_non_id_value(vault):
+    _with_bogus_seed(vault)
+    res = run(vault, "remove-seed", "bogus-entry")
+    assert res.exit_code == 0, res.output
+    assert load_profile(vault / "profile.yaml").seeds == ["2307.15043v2"]
+
+
+def test_one_arxiv_client_per_command_is_closed(vault, monkeypatch):
+    stub = use(monkeypatch, StubArxiv(by_id=[paper()]))
+    closed = []
+    stub.close = lambda: closed.append(1)
+    made = []
+    monkeypatch.setattr(cli, "make_arxiv", lambda config: made.append(1) or stub)
+    run(vault, "add-seed", "2307.15043", "--yes")
+    assert len(made) == 1 and closed == [1]

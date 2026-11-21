@@ -167,3 +167,31 @@ def test_write_is_atomic(vault, monkeypatch):
     assert path.read_bytes() == before
     assert sorted(p.name for p in vault.glob("*.yaml")) == ["config.yaml", "profile.yaml"]
     assert not list(vault.glob("*.tmp")) and not list(vault.glob(".*"))
+
+
+HAND_WRITTEN = """# my profile
+topics:
+  - a topic  # why
+  - another
+seeds:
+  - "2307.15043"
+followed_authors: [A One, B Two]
+keywords: []
+top_n: 15
+"""
+
+
+def test_edit_keeps_untouched_list_indentation_and_comments(vault):
+    path = vault / "profile.yaml"
+    path.write_text(HAND_WRITTEN)
+    pe.add_author(vault, "C Three")
+    after = path.read_text()
+    assert "topics:\n  - a topic  # why\n  - another\nseeds:\n  - \"2307.15043\"\n" in after
+    assert "followed_authors: [A One, B Two, C Three]" in after
+
+
+def test_edit_of_block_list_keeps_two_space_indent(vault):
+    path = vault / "profile.yaml"
+    path.write_text(HAND_WRITTEN)
+    pe.add_topic(vault, "third")
+    assert "topics:\n  - a topic  # why\n  - another\n  - third\n" in path.read_text()

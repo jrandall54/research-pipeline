@@ -10,16 +10,29 @@ from research_pipeline.models import PaperMeta
 from research_pipeline.profile_edit import normalise_arxiv_id
 from research_pipeline.sources.arxiv import ArxivSource
 
-_URL_RE = re.compile(r"^(?:https?://)?(?:www\.)?arxiv\.org/(?:abs|pdf|html)/(?P<id>\S+?)(?:\.pdf)?$", re.I)
+_HOST = r"(?:[a-z0-9-]+\.)*arxiv\.org"
+_LINK_RE = re.compile(rf"^(?:https?://)?{_HOST}/(?:abs|pdf|html)/(?P<id>\S+?)(?:\.pdf)?$", re.I)
+_LOOKS_LIKE_URL_RE = re.compile(rf"^(?:https?://|{_HOST}/)", re.I)
 
 
 def parse_seed_input(text: str) -> tuple[Literal["id", "title"], str]:
-    """Classify input as an arXiv id (normalised, no version) or a title to search."""
+    """Classify input as an arXiv id (normalised, no version) or a title to search.
+
+    Links may carry a query, a #fragment, a trailing slash or any arxiv.org host. Something
+    that looks like a link but holds no arXiv id raises ValueError (it is never title-searched).
+    """
     t = text.strip()
-    m = _URL_RE.match(t)
-    candidate = m.group("id") if m else t
+    if _LOOKS_LIKE_URL_RE.match(t):
+        link = re.split(r"[?#]", t, maxsplit=1)[0].rstrip("/")
+        m = _LINK_RE.match(link)
+        try:
+            if not m:
+                raise ValueError
+            return "id", normalise_arxiv_id(m.group("id"))
+        except ValueError:
+            raise ValueError(f"couldn't find an arXiv id in that link: {t!r}. Try the id itself, e.g. 2307.15043.") from None
     try:
-        return "id", normalise_arxiv_id(candidate)
+        return "id", normalise_arxiv_id(t)
     except ValueError:
         return "title", " ".join(t.split())
 

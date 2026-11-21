@@ -45,9 +45,24 @@ def normalise_arxiv_id(s: str) -> str:
     raise ValueError(f"{s!r} is not an arXiv id (expected something like 2307.15043)")
 
 
+def seed_key(s: str) -> str:
+    """Comparison key for a seed: its bare arXiv id if it is one, else its plain text."""
+    try:
+        return normalise_arxiv_id(s)
+    except ValueError:
+        return _key(s)
+
+
+def has_seed(seeds: list[str], text: str) -> bool:
+    """True if `text` names a seed already in `seeds`, however either was spelled."""
+    wanted = seed_key(text)
+    return any(seed_key(str(s)) == wanted for s in seeds)
+
+
 def _yaml() -> YAML:
     y = YAML(typ="rt")
     y.preserve_quotes = True
+    y.indent(mapping=2, sequence=4, offset=2)  # "  - item" under its key, like the template
     y.width = 4096  # never re-wrap the user's long lines
     # Keep float-looking scalars (arXiv id 2301.10000) as text, like vault.load_profile.
     resolver = type("NoFloatResolver", (y.Resolver,), {})
@@ -125,10 +140,10 @@ def _list(data: Any, field: str) -> list:
     return data[field]
 
 
-def _add(vault: Path, field: str, value: str, wrap=lambda v: v) -> bool:
+def _add(vault: Path, field: str, value: str, wrap=lambda v: v, key=_key) -> bool:
     def change(data) -> bool:
         items = _list(data, field)
-        if any(_key(str(i)) == _key(value) for i in items):
+        if any(key(str(i)) == key(value) for i in items):
             return False
         items.append(wrap(value))
         return True
@@ -140,12 +155,9 @@ def _remove(vault: Path, field: str, text_or_index: str, norm=_key) -> bool:
     def change(data) -> bool:
         items = _list(data, field)
         ref = text_or_index.strip()
-        try:
-            wanted = norm(ref)
-        except ValueError:
-            wanted = None
+        wanted = norm(ref)
         for i, item in enumerate(items):
-            if wanted is not None and norm(str(item)) == wanted:
+            if norm(str(item)) == wanted:
                 del items[i]
                 return True
         if ref.isdigit():
@@ -194,11 +206,11 @@ def remove_keyword(vault: Path, text_or_index: str) -> bool:
 
 def add_seed_id(vault: Path, arxiv_id: str) -> bool:
     # Quoted on write so the id is always read back as text, never as a number.
-    return _add(vault, "seeds", normalise_arxiv_id(arxiv_id), DoubleQuotedScalarString)
+    return _add(vault, "seeds", normalise_arxiv_id(arxiv_id), DoubleQuotedScalarString, key=seed_key)
 
 
 def remove_seed(vault: Path, id_or_index: str) -> bool:
-    return _remove(vault, "seeds", id_or_index, norm=normalise_arxiv_id)
+    return _remove(vault, "seeds", id_or_index, norm=seed_key)
 
 
 def set_top_n(vault: Path, n: int) -> None:

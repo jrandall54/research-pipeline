@@ -76,6 +76,10 @@ class ArxivSource:
         self._clock = clock
         self._last_call: float | None = None
 
+    def close(self) -> None:
+        """Release the HTTP connection pool."""
+        self._client.close()
+
     def _get(self, params: dict[str, str | int]) -> list[PaperMeta]:
         """One API call, waiting out the remainder of the 3 s gap since the last one."""
         if self._last_call is not None:

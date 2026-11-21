@@ -30,7 +30,7 @@ A second call with `2307.15043` finds it and returns `False`.
 
 ### Round-trip YAML keeps your comments
 
-Normal YAML libraries (including the `pyyaml` the pipeline reads with) throw comments away when they load a file, so loading and saving would delete every explanation in your template. **Round-trip YAML** (the `ruamel.yaml` library) keeps comments, ordering and layout in the loaded structure and writes them back. The template's explanatory comments, and any note you added yourself, survive every command. The one cosmetic change: lists the command touches may switch from `[a, b]` to one item per line.
+Normal YAML libraries (including the `pyyaml` the pipeline reads with) throw comments away when they load a file, so loading and saving would delete every explanation in your template. **Round-trip YAML** (the `ruamel.yaml` library) keeps comments, ordering and layout in the loaded structure and writes them back. The template's explanatory comments, and any note you added yourself, survive every command. Layout is kept too: the writer is set to the template's style (`  - item` indented two spaces under its key, `key: [a, b]` flow lists left as flow lists), so a profile written in that style is not re-indented when a command edits one list. Cosmetic changes remain only for hand-written files in a different style: a block list written as `- x` flush with its key is re-indented to `  - x` (all lists in the file, not just the edited one) and inline `# comments` after items may shift to line up.
 
 ### Validation and atomic writes protect the file
 
@@ -62,6 +62,8 @@ A **seed** is a paper you already like; the ranker looks for new papers close to
 | `https://arxiv.org/abs/2307.15043` | id `2307.15043` | Looked up by id. |
 | `arxiv.org/pdf/2307.15043v2.pdf` | id `2307.15043` | Scheme optional; `vN` and `.pdf` removed. |
 | `http://arxiv.org/html/2307.15043v1` | id `2307.15043` | `abs`, `pdf` and `html` links all work. |
+| `https://export.arxiv.org/abs/2307.15043/?context=cs#top` | id `2307.15043` | Any `*.arxiv.org` host; a trailing `/`, `?query` and `#fragment` are ignored. |
+| `https://arxiv.org/list/cs.CR/recent`, `https://example.com/x` | error | Anything that looks like a link but holds no arXiv id is refused with `couldn't find an arXiv id in that link` instead of being title-searched as a string. |
 | `2307.15043` or `arXiv:2307.15043` | id `2307.15043` | Bare new-style id. |
 | `hep-th/9901001` | id `hep-th/9901001` | Old-style id. |
 | `Universal and Transferable Adversarial Attacks` | title | Searched on arXiv; you pick from up to 5 results. |
@@ -122,7 +124,7 @@ arXiv categories: cs.LG, cs.CL, cs.CR, cs.OS, cs.SE
 How `add-seed` decides, in order:
 
 1. Empty or blank input is refused at once (exit 1), before any network call; otherwise an empty title search would be sent to arXiv.
-2. If the input is an id or link and that id is already a seed, print "already in your profile" (exit 0) without contacting arXiv.
+2. If the input is an id or link and that id is already a seed, print "already in your profile" (exit 0) without contacting arXiv. Seeds are compared by bare id (`has_seed` in `profile_edit.py`: version, `arXiv:` and URL spellings all reduce to the same id), so a hand-written `"2307.15043v2"` counts as `2307.15043`. A hand-written entry that is not an id at all (for example `bogus-entry`) is compared as plain text, so `remove-seed bogus-entry` and `remove-seed 2307.15043` both work whatever else is in the list.
 3. Ask arXiv (`find_seed_candidates`). arXiv unreachable: `Could not reach arXiv: <reason>. Nothing was changed.` (exit 1). No match: `No paper found for "<input>"` (exit 1).
 4. One match: show title, first author, year and ask `Add this paper? [Y/n]`. Several: a numbered list and `Pick 1-N or 0 to cancel`. Declining or `0` prints "Cancelled. Nothing was changed." (exit 0); a number outside the range exits 1.
 5. Cache the seed's text, then add the id. A title search can return a paper that is already a seed; that also prints "already in your profile".
@@ -140,7 +142,7 @@ In a terminal, `rpipe init` uses the same edit functions as the commands above t
 * **Validate with the real models.** One definition of "valid" (`Profile`, `Config`) for the pipeline and the editor, so the editor can never write a file the pipeline then refuses.
 * **Refuse an already-invalid file.** Editing on top of a broken file could hide the problem or make it worse; the user gets the original error instead.
 * **Accept links, ids and titles.** Rejected: id only, because club members rarely know ids but always have a link or a title. Rejected: auto-picking the top title hit, because a wrong seed silently skews every ranking; the user confirms instead.
-* **Thin commands, logic in libraries.** `cli.py` only parses, calls `profile_edit` / `seed_input` and prints, so every rule is tested once, offline, and the commands cannot drift from the library. The arXiv client comes from one factory, `make_arxiv(config)`, which tests replace with a stub (same idea as `build_pipeline`).
+* **Thin commands, logic in libraries.** `cli.py` only parses, calls `profile_edit` / `seed_input` and prints, so every rule is tested once, offline, and the commands cannot drift from the library. The arXiv client comes from one factory, `make_arxiv(config)`, which tests replace with a stub (same idea as `build_pipeline`). A command (or one `init` wizard run) builds exactly one client and passes it to `_add_seed`, closing it at the end: arXiv asks for at least 3 seconds between requests and `ArxivSource` enforces that gap per object, so a fresh client per seed would let successive lookups hit arXiv back to back (see `sources.md`).
 * **Ask before adding a seed, but allow `--yes`.** The question guards against the wrong paper; `--yes` keeps scripts and confident users fast. Rejected: prompting for every setting, because simple ones (a topic) have nothing to confirm.
 * **Atomic write instead of overwrite in place.** A crash during a plain write can leave a truncated file, which would break every later run.
 

@@ -28,6 +28,11 @@ def source() -> ArxivSource:
         ("arxiv.org/pdf/2307.15043v2.pdf", ("id", "2307.15043")),
         ("http://arxiv.org/html/2307.15043v1", ("id", "2307.15043")),
         ("2307.15043", ("id", "2307.15043")),
+        ("https://arxiv.org/abs/2307.15043/", ("id", "2307.15043")),
+        ("https://arxiv.org/abs/2307.15043?context=cs", ("id", "2307.15043")),
+        ("https://arxiv.org/abs/2307.15043v2#section", ("id", "2307.15043")),
+        ("https://export.arxiv.org/abs/2307.15043", ("id", "2307.15043")),
+        ("https://www.arxiv.org/pdf/2307.15043v2.pdf?download=1", ("id", "2307.15043")),
         ("hep-th/9901001", ("id", "hep-th/9901001")),
         (
             "Universal and Transferable Adversarial Attacks",
@@ -99,3 +104,9 @@ def test_search_title_http_error_raises_source_error():
     respx.get(API).mock(return_value=httpx.Response(503))
     with pytest.raises(SourceError):
         source().search_title("anything")
+
+
+@pytest.mark.parametrize("text", ["https://arxiv.org/abs/not-an-id", "https://arxiv.org/list/cs.CR/recent", "http://example.com/x"])
+def test_url_without_arxiv_id_is_a_clear_error(text):
+    with pytest.raises(ValueError, match="couldn't find an arXiv id in that link"):
+        parse_seed_input(text)

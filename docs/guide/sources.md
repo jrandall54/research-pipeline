@@ -50,7 +50,7 @@ If the entry has no `vN` suffix, `version` is 1. A later run seeing `version = 3
 
 #### The 3-second rule
 
-arXiv's API terms of use ask clients to make no more than one request every three seconds, and to use a single connection. Ignoring this gets your IP throttled or blocked, which would break the nightly run. So the source tracks when its last request finished and, before the next one, sleeps only the *remaining* part of the 3 seconds (never before the very first request). The gap holds across both `fetch` and `fetch_by_ids` on the same `ArxivSource` object. The sleep function and clock are injectable so tests run instantly.
+arXiv's API terms of use ask clients to make no more than one request every three seconds, and to use a single connection. Ignoring this gets your IP throttled or blocked, which would break the nightly run. So the source tracks when its last request finished and, before the next one, sleeps only the *remaining* part of the 3 seconds (never before the very first request). The gap holds across both `fetch` and `fetch_by_ids` on the same `ArxivSource` object, which is why callers that make several requests (the `init` wizard adding seed after seed) share one object and call `close()` on it when done. The sleep function and clock are injectable so tests run instantly.
 
 The requests also carry a generic `User-Agent` (`research-pipeline/0.1`) so arXiv can identify the client; it contains no personal information.
 

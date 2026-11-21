@@ -98,7 +98,7 @@ A (0.754) narrowly beats B (0.748) despite far fewer upvotes: slightly closer ma
 
 ### Seed papers: where their text comes from
 
-Seeds are arXiv ids in `profile.yaml`; triage needs their text. `resolve_seed_texts` (`seeds.py`) finds it in this order: (1) the `papers` table, if you have already collected that paper; (2) `<vault>/cache/seeds.json`; (3) one arXiv lookup by id for whatever is still missing, written to the cache so later runs make no request. The text is title, a newline, then the abstract. Seeds are never inserted into `papers`, otherwise they would be ranked and listed as new papers. If the lookup fails, or arXiv does not know an id (such as the placeholder seeds `init` writes), the run carries on with the seeds it has and the problem appears in the health line and in `runs.errors`.
+Seeds are arXiv ids in `profile.yaml`; triage needs their text. `resolve_seed_texts` (`seeds.py`) finds it in this order: (1) the `papers` table, if you have already collected that paper; (2) `<vault>/cache/seeds.json`; (3) one arXiv lookup by id for whatever is still missing, written to the cache so later runs make no request. The text is title, a newline, then the abstract. Seeds are never inserted into `papers`, otherwise they would be ranked and listed as new papers. If the lookup fails, or arXiv does not know an id (for example a mistyped id), the run carries on with the seeds it has and the problem appears in the health line and in `runs.errors`.
 
 ### Caching embeddings
 

@@ -171,3 +171,63 @@ def test_wizard_example_removal_failure_is_skipped_not_a_traceback(tmp_path, tty
     result = init(tmp_path, "my own topic\n\n\n\n")
     assert result.exit_code == 0, result.output
     assert "Skipped" in result.output and "read-only" in result.output
+
+
+def test_wizard_rerun_after_eof_treats_untouched_template_topics_as_examples(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    first = init(tmp_path, "")  # EOF at the first topic prompt
+    assert first.exit_code == 130
+    use(monkeypatch, StubArxiv())
+    second = init(tmp_path, "y\nmy own topic\n\n\n\n")
+    assert second.exit_code == 0, second.output
+    assert "template examples" in second.output
+    assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["my own topic"]
+
+
+def test_wizard_rerun_keeps_own_topics_even_if_one_matches_an_example(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    init_vault(tmp_path / "v", topics=["mine", "operating system and kernel security"])
+    result = init(tmp_path, "y\nextra\n\nn\n\n")
+    assert result.exit_code == 0, result.output
+    assert load_profile(tmp_path / "v" / "profile.yaml").topics == [
+        "mine", "operating system and kernel security", "extra"]
+
+
+def test_wizard_waits_between_seed_lookups_in_one_run(tmp_path, tty, monkeypatch):
+    from research_pipeline.sources.arxiv import ArxivSource
+
+    sleeps, now = [], [100.0]
+
+    def factory(config):  # like the real make_arxiv: a new source per call
+        src = ArxivSource([], sleep=sleeps.append, clock=lambda: now[0])
+        src._client = _FakeClient()
+        return src
+
+    monkeypatch.setattr(cli, "make_arxiv", factory)
+    answers = "topic\n\n\n2307.15043\ny\n2301.00001\ny\n\n"
+    result = init(tmp_path, answers)
+    assert result.exit_code == 0, result.output
+    assert len(sleeps) == 1 and sleeps[0] > 0  # second lookup waited out the gap
+    assert load_profile(tmp_path / "v" / "profile.yaml").seeds == ["2307.15043", "2301.00001"]
+
+
+class _FakeResp:
+    def __init__(self, text):
+        self.text = text
+
+    def raise_for_status(self):
+        pass
+
+
+class _FakeClient:
+    def get(self, url, params=None, headers=None):
+        pid = params["id_list"]
+        return _FakeResp(
+            '<feed xmlns="http://www.w3.org/2005/Atom"><entry>'
+            f"<id>http://arxiv.org/abs/{pid}v1</id><title>T {pid}</title><summary>S</summary>"
+            "<published>2023-07-27T00:00:00Z</published><author><name>A B</name></author>"
+            "</entry></feed>"
+        )
+
+    def close(self):
+        pass

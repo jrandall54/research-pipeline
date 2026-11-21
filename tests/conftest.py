@@ -6,6 +6,9 @@ import re
 import numpy as np
 import pytest
 
+from research_pipeline.models import Section
+from research_pipeline.summarize import Claim, Critique, Summary
+
 
 class FakeEmbedder:
     """Deterministic hashed bag-of-words embedder: texts sharing words are closer."""
@@ -49,3 +52,29 @@ class FakeLLM:
         if isinstance(r, Exception):
             raise r
         return r
+
+
+SECTIONS = [
+    Section(title="Abstract", text="We study X."),
+    Section(title="1 Introduction", text="X matters because Y."),
+    Section(title="2 Method", text="We train a classifier."),
+    Section(title="3 Results", text="Accuracy is 91%."),
+]
+
+
+def summary(cite: str = "2 Method") -> Summary:
+    return Summary(
+        one_line="A classifier for X.",
+        problem=Claim(text="X is hard.", sections=["1 Introduction"]),
+        approach=Claim(text="They train a classifier.", sections=[cite]),
+        results=Claim(text="91% accuracy.", sections=["3 results "]),  # case/space ignored
+        limitations=Claim(text="Not stated in the paper.", sections=["Abstract"]),
+    )
+
+
+def critique(cite: str = "3 Results") -> Critique:
+    return Critique(
+        strengths=[Claim(text="Clear method.", sections=["2 Method"])],
+        weaknesses=[Claim(text="One dataset only.", sections=[cite])],
+        questions=["Does it generalise?"],
+    )

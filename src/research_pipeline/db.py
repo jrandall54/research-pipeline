@@ -284,10 +284,43 @@ def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
     )
 
 
-def record_failure(conn: sqlite3.Connection, paper_id: str, error: str) -> None:
-    """Note that a stage failed for this paper: store the message and count a retry.
+MAX_SUMMARY_TRIES = 3  # a paper that failed this many times is no longer retried
 
-    The paper keeps its status, so the next run tries it again.
+_SUMMARY_CANDIDATES = (
+    "(status IN ('triaged', 'fetched')"
+    " OR (status = 'in_digest' AND digest_date = ?"
+    "     AND NOT EXISTS (SELECT 1 FROM summaries s"
+    "                     WHERE s.paper_id = papers.id AND s.kind = 'summary')))"
+)
+
+
+def papers_to_summarize(conn: sqlite3.Connection, today: date) -> list[sqlite3.Row]:
+    """Papers the summarize stage should work on, oldest first.
+
+    That is every `triaged` or `fetched` paper, plus papers listed in *today's* digest that
+    still have no summary (so a same-day re-run can fill in an outage), skipping any paper
+    that has already failed MAX_SUMMARY_TRIES times. Papers from earlier days' digests are
+    never touched.
+    """
+    return conn.execute(
+        f"SELECT * FROM papers WHERE {_SUMMARY_CANDIDATES} AND retry_count < ? ORDER BY rowid",
+        (today.isoformat(), MAX_SUMMARY_TRIES),
+    ).fetchall()
+
+
+def papers_given_up_on(conn: sqlite3.Connection, today: date) -> list[sqlite3.Row]:
+    """Papers that would be summarized except that they hit MAX_SUMMARY_TRIES failures."""
+    return conn.execute(
+        f"SELECT * FROM papers WHERE {_SUMMARY_CANDIDATES} AND retry_count >= ? ORDER BY rowid",
+        (today.isoformat(), MAX_SUMMARY_TRIES),
+    ).fetchall()
+
+
+def record_failure(conn: sqlite3.Connection, paper_id: str, error: str) -> None:
+    """Note that a stage failed for this paper: store the message and count a failure.
+
+    The paper keeps its status. `papers_to_summarize` offers it again until it has failed
+    MAX_SUMMARY_TRIES times.
     """
     conn.execute(
         "UPDATE papers SET error = ?, retry_count = retry_count + 1, updated_at = ? WHERE id = ?",
@@ -297,5 +330,5 @@ def record_failure(conn: sqlite3.Connection, paper_id: str, error: str) -> None:
 
 
 def clear_error(conn: sqlite3.Connection, paper_id: str) -> None:
-    """Forget an earlier failure message once the paper gets through."""
+    """Forget an earlier failure message once the paper gets through. Does not commit."""
     conn.execute("UPDATE papers SET error = NULL WHERE id = ?", (paper_id,))

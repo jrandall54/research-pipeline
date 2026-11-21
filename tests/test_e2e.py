@@ -6,7 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import FakeEmbedder, FakeLLM
-from test_summarize import SECTIONS, critique, summary
+from conftest import SECTIONS, critique, summary
 from research_pipeline.llm import LlmError
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline

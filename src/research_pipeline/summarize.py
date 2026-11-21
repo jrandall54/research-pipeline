@@ -6,6 +6,7 @@ title against the real section titles. See docs/guide/summaries.md.
 
 import sqlite3
 from collections.abc import Callable
+from datetime import date
 from typing import Literal, TypeVar
 
 from pydantic import BaseModel, Field
@@ -123,18 +124,23 @@ def run_summarize(
     llm: LLM,
     fetch: Callable[[str], list[Section]],
     num_ctx: int,
+    today: date | None = None,
 ) -> tuple[dict[str, int], list[str]]:
-    """Summarise every `triaged` paper: full text (stored, else fetched), then the model.
+    """Summarise the papers that need it: full text (stored, else fetched), then the model.
 
-    A paper with no HTML version is summarised from its abstract. A paper that fails
-    (model error, network error) keeps its last status, gets `error` and `retry_count`
-    updated, and the others carry on. Commits per paper. See docs/guide/running.md.
+    Works on `triaged` and `fetched` papers plus papers in *today's* digest that have no
+    summary yet (they stay `in_digest`; the summary is just saved), skipping papers that
+    failed 3 times. A paper with no HTML version is summarised from its abstract. A paper
+    that fails (model error, network error) keeps its status, gets `error` and
+    `retry_count` updated, and the others carry on. Commits per paper.
+    See docs/guide/running.md.
     """
     # Imported here because db.py imports the schemas defined above.
     from research_pipeline.db import (
         clear_error,
         get_fulltext,
-        papers_with_status,
+        papers_given_up_on,
+        papers_to_summarize,
         record_failure,
         save_fulltext,
         save_summary,
@@ -143,8 +149,15 @@ def run_summarize(
 
     counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "summary_failed": 0}
     errors: list[str] = []
-    for paper in papers_with_status(conn, Status.triaged):
+    today = today or date.today()
+    for paper in papers_given_up_on(conn, today):
+        errors.append(
+            f"summarize {paper['id']}: gave up after {paper['retry_count']} failed tries"
+            f" (last error: {paper['error']})"
+        )
+    for paper in papers_to_summarize(conn, today):
         pid = paper["id"]
+        listed = paper["status"] == Status.in_digest.value  # already in today's digest
         try:
             sections = get_fulltext(conn, pid)
             if sections is None:
@@ -153,12 +166,16 @@ def run_summarize(
                     save_fulltext(conn, pid, sections)
                 except FullTextUnavailable:
                     sections = None
-            set_status(conn, pid, Status.fetched)
+            if not listed:
+                set_status(conn, pid, Status.fetched)
             counts["fetched" if sections is not None else "abstract_only"] += 1
             result = summarize_paper(llm, paper["title"], paper["abstract"], sections, num_ctx)
             save_summary(conn, pid, result, llm.model_name)
             clear_error(conn, pid)
-            set_status(conn, pid, Status.summarized)  # commits the summary rows too
+            if listed:
+                conn.commit()  # keep `in_digest`; the digest rewrite picks the summary up
+            else:
+                set_status(conn, pid, Status.summarized)  # commits the summary rows too
             counts["summarized"] += 1
         except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
             counts["summary_failed"] += 1

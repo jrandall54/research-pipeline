@@ -13,12 +13,12 @@ from typing import Annotated
 import typer
 
 from research_pipeline.collect import run_collect
-from research_pipeline.db import finish_run, open_db, papers_with_status, start_run
+from research_pipeline.db import finish_run, open_db, papers_given_up_on, papers_to_summarize, start_run
 from research_pipeline.digest import write_digest
 from research_pipeline.fulltext import fetch_fulltext
 from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
-from research_pipeline.models import Config, PaperMeta, Profile, Section, Status
+from research_pipeline.models import Config, PaperMeta, Profile, Section
 from research_pipeline import profile_edit
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
@@ -251,11 +251,11 @@ def triage(vault: VaultOption = None) -> None:
 
 @app.command()
 def summarize(vault: VaultOption = None) -> None:
-    """Summarize and critique `triaged` papers with the local model."""
+    """Summarize and critique kept papers (and today's digest papers lacking a summary) with the local model."""
     ctx = _open(vault)
     pipeline = build_pipeline(ctx.config)
-    if not papers_with_status(ctx.conn, Status.triaged):
-        typer.echo("Nothing to summarize: no triaged papers. Run `rpipe run` or `rpipe triage` first.")
+    if not papers_to_summarize(ctx.conn, date.today()) and not papers_given_up_on(ctx.conn, date.today()):
+        typer.echo("Nothing to summarize: no triaged papers, and today's digest has none missing a summary. Run `rpipe run` or `rpipe triage` first.")
         return
     try:
         llm = _ready_llm(pipeline)

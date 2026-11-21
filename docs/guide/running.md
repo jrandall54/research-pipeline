@@ -54,10 +54,14 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 | `run` | `start_run`, then collect, seed lookup, triage, summarize, digest for today, then `finish_run` with the merged counts and errors | the `runs` row, papers, summaries, `digests/<today>.md` |
 | `collect` | fetch from arXiv and Hugging Face into the database | papers (status `new`) |
 | `triage` | rank the `new` papers, keep the top N | statuses, scores, reasons, embeddings |
-| `summarize` | summarise and critique every `triaged` paper with the local model (fetching arXiv HTML full text first; abstract only if there is none) | full texts, summaries, statuses `fetched` then `summarized` |
+| `summarize` | summarise and critique every paper still waiting (`triaged`, `fetched`, or in today's digest without a summary) with the local model (fetching arXiv HTML full text first; abstract only if there is none) | full texts, summaries, statuses `fetched` then `summarized` |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
-**The summarize stage.** `rpipe run` checks that Ollama is up and the model installed before this stage. If not, it skips the stage, records the cause in the health line and `runs.errors`, and still writes the digest (abstracts only), so a stopped Ollama never costs you the night's digest. A single paper that fails (model error, network error fetching its text) keeps its status, gets its `error` and `retry_count` set, and the rest carry on. `rpipe summarize` on its own prints "Nothing to summarize" and exits 0 when no paper is `triaged`; it exits 1 with the cause if Ollama is unavailable. The model setting `llm_num_ctx` must be at least 8192 (see `llm.md`).
+**The summarize stage.** `rpipe run` checks that Ollama is up and the model installed before this stage. If not, it skips the stage, records the cause in the health line and `runs.errors`, and still writes the digest (abstracts only), so a stopped Ollama never costs you the night's digest. A single paper that fails (model error, network error fetching its text) keeps its status, gets its `error` and `retry_count` set, and the rest carry on.
+
+**Which papers the stage works on.** Papers that are `triaged` or `fetched`, plus papers already listed in *today's* digest that have no summary yet (they stay `in_digest`; the summary is just saved). A paper that has failed 3 times (`retry_count` 3) is skipped and the errors say `gave up after 3 failed tries (last error: ...)`. Papers from an *earlier* day's digest are never touched: if Ollama was down that night, those papers stay abstract-only (accepted limitation).
+
+`rpipe summarize` on its own prints "Nothing to summarize" and exits 0 when there is nothing of that kind; it exits 1 with the cause if Ollama is unavailable. The model setting `llm_num_ctx` must be at least 8192 (see `llm.md`).
 
 Model commands (`rpipe model show`, `rpipe model set NAME`, `rpipe model check`) view, change and test the local Ollama model used for summaries; see `llm.md`. `check` exits 1 with a fix hint if Ollama is not running or the model is not installed.
 
@@ -86,7 +90,7 @@ It took about 13 seconds with the model already downloaded (about 2 minutes the 
 The top of the digest file:
 
 ```
-Run 2026-11-21: collected 339 new, 11 updated · kept 15 · skipped 324 · errors: none
+Run 2026-11-21: collected 339 new, 11 updated · kept 15 · skipped 324 · summarized 0 · errors: none
 
 # Research digest — 2026-11-21
 
@@ -116,7 +120,7 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 | `counts` | `{"inserted": 339, "updated": 11, "unchanged": 0, "source_errors": 0, "triaged": 15, "skipped": 324, "embedded": 339}` |
 | `errors` | `[]` |
 
-`counts` merges the collect counts (`inserted`, `updated`, `unchanged`, `source_errors`) with the triage counts (`triaged`, `skipped`, `embedded`); see `sources.md` and `triage.md`. A row with no `finished_at` means that run crashed before finishing. Look at it with `sqlite3 <vault>/vault.sqlite "select * from runs"`.
+`counts` merges the collect counts (`inserted`, `updated`, `unchanged`, `source_errors`) with the triage counts (`triaged`, `skipped`, `embedded`) and, since Phase 2, the summarize counts (`fetched`, `summarized`, `abstract_only`, `summary_failed`); see `sources.md`, `triage.md` and the summarize stage above. The sample row above predates Phase 2 so it has no summarize counts, and the sample health line shows `summarized 0` for the same reason. A row with no `finished_at` means that run crashed before finishing. Look at it with `sqlite3 <vault>/vault.sqlite "select * from runs"`.
 
 ### Running it nightly
 
@@ -150,7 +154,7 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 | Health line says `errors: arxiv: arXiv API returned HTTP 5xx` (or a timeout) | arXiv (or Hugging Face) was down. The digest was built from the other source. Re-run later: `run` is safe to repeat. |
 | Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, for example a mistyped id. Remove it with `rpipe profile remove-seed` and add the right one with `rpipe profile add-seed` (`rpipe profile show` numbers the seeds). Ranking continues using your topics and any seeds that did resolve. |
 | Health line says `seeds: could not fetch ...: <reason>` | The seed lookup failed (network). Ranking used the seeds it already had; it retries next run. |
-| Health line says `summaries skipped, model unavailable: cannot reach Ollama at ...` | Ollama is not running. Start it with `ollama serve` (or the desktop app), check the URL with `rpipe model show` and test with `rpipe model check`. Tonight's digest was still written, with abstracts only. Papers kept this run were already listed as `in_digest`, so they will not be summarised later; the next night's new papers will be. |
+| Health line says `summaries skipped, model unavailable: cannot reach Ollama at ...` | Ollama is not running. Start it with `ollama serve` (or the desktop app), check the URL with `rpipe model show` and test with `rpipe model check`. Tonight's digest was still written, with abstracts only. **To recover the same day:** start Ollama (`ollama serve`), then run `rpipe summarize` and `rpipe digest` (or just `rpipe run` again). The papers in today's digest get their summaries and the file is rewritten. If you wait until the next day, those papers are not summarised (accepted limitation); only newly kept papers are. |
 | Health line says `model unavailable: model 'qwen3:14b' is not installed: run ollama pull ...` | The model is not downloaded. Run the `ollama pull` command shown, or pick another with `rpipe model set NAME`. |
 | Health line shows `summary failures N` or `abstract-only N` | `summary failures`: the model errored or timed out on N papers (see the `summarize <id>: ...` entries in the errors); they show abstracts only. `abstract-only`: N papers have no arXiv HTML version (non-arXiv ids, or too new), so their summary rests on the abstract and says so in the digest. |
 | Digest says "Nothing new matched your profile today." | No paper was `triaged`: either no new papers arrived since the last run (they are already in an earlier digest) or every source failed (check the health line). |

@@ -10,33 +10,7 @@ from research_pipeline.summarize import (
     summarize_paper,
     unknown_citations,
 )
-from conftest import FakeLLM
-
-SECTIONS = [
-    Section(title="Abstract", text="We study X."),
-    Section(title="1 Introduction", text="X matters because Y."),
-    Section(title="2 Method", text="We train a classifier."),
-    Section(title="3 Results", text="Accuracy is 91%."),
-]
-
-
-def summary(cite: str = "2 Method") -> Summary:
-    return Summary(
-        one_line="A classifier for X.",
-        problem=Claim(text="X is hard.", sections=["1 Introduction"]),
-        approach=Claim(text="They train a classifier.", sections=[cite]),
-        results=Claim(text="91% accuracy.", sections=["3 results "]),  # case/space ignored
-        limitations=Claim(text="Not stated in the paper.", sections=["Abstract"]),
-    )
-
-
-def critique(cite: str = "3 Results") -> Critique:
-    return Critique(
-        strengths=[Claim(text="Clear method.", sections=["2 Method"])],
-        weaknesses=[Claim(text="One dataset only.", sections=[cite])],
-        questions=["Does it generalise?"],
-    )
-
+from conftest import SECTIONS, FakeLLM, critique, summary
 
 def between_tags(user: str) -> str:
     start, end = user.index("<paper>"), user.index("</paper>")
@@ -280,3 +254,68 @@ def test_num_ctx_floor_is_8192():
     assert Config(vault_path="/x", llm_num_ctx=8192).llm_num_ctx == 8192
     with pytest.raises(ValidationError):
         Config(vault_path="/x", llm_num_ctx=8191)
+
+
+# ---- recovery after an outage (fix round 1) ----
+from datetime import date, timedelta  # noqa: E402
+
+from research_pipeline.db import mark_in_digest  # noqa: E402
+from research_pipeline.digest import write_digest  # noqa: E402
+
+TODAY = date(2026, 11, 21)
+
+
+def test_same_day_in_digest_paper_without_summary_is_summarized_and_rendered(conn, tmp_path):
+    add_triaged(conn, "2501.00001")
+    write_digest(conn, tmp_path, TODAY, "health")  # outage night: abstract-only digest
+    assert get_paper(conn, "2501.00001")["status"] == "in_digest"
+    assert "A classifier for X." not in (tmp_path / "digests" / "2026-11-21.md").read_text()
+
+    llm = FakeLLM([summary(), critique()])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, today=TODAY)
+    assert counts["summarized"] == 1 and errors == []
+    assert get_paper(conn, "2501.00001")["status"] == "in_digest"  # not moved
+    assert get_summary(conn, "2501.00001") is not None
+
+    text = write_digest(conn, tmp_path, TODAY, "health").read_text()
+    assert "A classifier for X." in text and "[§ 2 Method]" in text
+
+    # a further run has nothing left to do
+    counts, _ = run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, today=TODAY)
+    assert counts["summarized"] == 0
+
+
+def test_prior_day_in_digest_paper_is_not_touched(conn):
+    add_triaged(conn, "2501.00001")
+    mark_in_digest(conn, ["2501.00001"], TODAY - timedelta(days=1))
+    counts, errors = run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, today=TODAY)
+    assert counts == {"fetched": 0, "summarized": 0, "abstract_only": 0, "summary_failed": 0}
+    assert errors == [] and get_summary(conn, "2501.00001") is None
+
+
+def test_fetched_paper_is_resumed_from_stored_text(conn):
+    add_triaged(conn, "2501.00001")
+    save_fulltext(conn, "2501.00001", SECTIONS)
+    set_status(conn, "2501.00001", Status.fetched)
+
+    def boom(pid):
+        raise AssertionError("stored text must be reused")
+
+    counts, _ = run_summarize(conn, FakeLLM([summary(), critique()]), boom, 32768, today=TODAY)
+    assert counts["summarized"] == 1
+    assert get_paper(conn, "2501.00001")["status"] == "summarized"
+
+
+def test_paper_is_given_up_on_after_three_failures(conn):
+    add_triaged(conn, "2501.00001")
+    for n in range(3):
+        counts, _ = run_summarize(
+            conn, FakeLLM([LlmError(f"boom {n}")]), lambda pid: SECTIONS, 32768, today=TODAY
+        )
+        assert counts["summary_failed"] == 1
+    assert get_paper(conn, "2501.00001")["retry_count"] == 3
+
+    llm = FakeLLM([])  # must not be called
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, today=TODAY)
+    assert counts["summary_failed"] == 0 and llm.calls == []
+    assert len(errors) == 1 and "gave up after 3 failed tries" in errors[0] and "boom 2" in errors[0]

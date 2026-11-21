@@ -57,7 +57,7 @@ Defines the small set of typed objects every stage passes around, and the lifecy
   any stage --> failed
 ```
 
-In words: a paper starts `new`. Triage moves it to `triaged` (kept, top N) or `skipped` (below the cut). A kept paper is listed in a digest and becomes `in_digest`. The summarize stage then moves each `triaged` paper to `fetched` (its full text, or just its abstract if there is no HTML version, is stored) and then `summarized` (the model's summary and critique are stored). The digest lists `triaged`, `fetched` and `summarized` papers and marks them `in_digest`. A paper whose fetch or summary fails keeps its last status (`triaged` or `fetched`), gets `error` and `retry_count` updated, and is tried again next run; until then the digest lists it with its abstract only. If a higher version of a kept paper arrives, it goes back to `triaged` so it can be reconsidered. Any stage can end in `failed`.
+In words: a paper starts `new`. Triage moves it to `triaged` (kept, top N) or `skipped` (below the cut). A kept paper is listed in a digest and becomes `in_digest`. The summarize stage then moves each `triaged` paper to `fetched` (its full text, or just its abstract if there is no HTML version, is stored) and then `summarized` (the model's summary and critique are stored). The digest lists `triaged`, `fetched` and `summarized` papers and marks them `in_digest`. A paper whose fetch or summary fails keeps its last status (`triaged` or `fetched`), gets `error` and `retry_count` updated, and the summarize stage offers it again on the next `rpipe summarize` or `rpipe run`, until it has failed 3 times. A paper already `in_digest` for *today* with no stored summary is also offered (its status does not change; only the summary is saved, and the digest rewrite shows it). Until then the digest lists the paper with its abstract only. Papers from an earlier day's digest are never summarised later (accepted limitation). If a higher version of a kept paper arrives, it goes back to `triaged` so it can be reconsidered. Any stage can end in `failed`.
 
 | Status | Meaning | Set by |
 | --- | --- | --- |
@@ -107,7 +107,7 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 | `triage_score` | Score from the last triage, or NULL. |
 | `triage_reasons` | JSON list of strings explaining the score, or NULL. |
 | `digest_date` | ISO date of the digest that listed it, or NULL. |
-| `retry_count` | Times a stage failed for this paper (`record_failure` in `db.py` adds one each time the summarize stage fails it); starts 0. |
+| `retry_count` | Times a stage failed for this paper (`record_failure` in `db.py` adds one each time the summarize stage fails it; at 3 the paper is no longer retried); starts 0. |
 | `error` | Last error message from a failed stage, or NULL; cleared when the summary succeeds. |
 | `created_at`, `updated_at` | When the row was first stored / last changed. |
 

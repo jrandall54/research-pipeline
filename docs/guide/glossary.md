@@ -65,3 +65,13 @@
 **Sub-command** — a command inside a command group: `rpipe profile add-topic` is the `add-topic` sub-command of `profile`. `rpipe profile --help` lists them. See `profile.md`.
 
 **Exit code** — the number a command returns to the shell: `0` means success, non-zero means it failed. The `rpipe profile` commands exit 1 on bad input or an invalid file, and 0 for harmless no-ops like "already in your profile".
+
+**Ollama** — a program that runs open language models on your own computer and answers requests on `http://localhost:11434`. The pipeline uses it for summaries. See `llm.md`.
+
+**Context window** — how much text a language model can read at once, counting both what you send and what it writes back, measured in tokens. Text beyond it is cut off or ignored. See `llm.md`.
+
+**`num_ctx`** — Ollama's name for the context window size; the config field `llm_num_ctx` (default 32768) sets it. See `llm.md`.
+
+**Structured output / JSON schema** — telling the model server the exact JSON shape the answer must have (a schema, generated from a Pydantic class) so the reply can be parsed and validated by code instead of scraped from prose. See `llm.md`.
+
+**Temperature** — a setting for how random the model's word choices are. 0 means always the most likely word, so the same input gives the same output. We use 0. See `llm.md`.

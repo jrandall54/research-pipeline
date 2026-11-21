@@ -39,10 +39,11 @@ New to the project? Read in this order:
 5. [digest.md](digest.md): the digest format
 6. [running.md](running.md): installing, the commands, a full real run, troubleshooting
 7. [profile.md](profile.md): the `rpipe profile` commands and how they edit safely
-8. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+8. [llm.md](llm.md): the local model client and `rpipe model` commands
+9. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.

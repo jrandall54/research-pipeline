@@ -15,6 +15,7 @@ import typer
 from research_pipeline.collect import run_collect
 from research_pipeline.db import finish_run, open_db, start_run
 from research_pipeline.digest import write_digest
+from research_pipeline.llm import LlmError, OllamaClient
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile
 from research_pipeline import profile_edit
@@ -58,6 +59,11 @@ def build_pipeline(config: Config) -> Pipeline:
         make_embedder=lambda: SentenceTransformerEmbedder(config.embedding_model),
         seed_fetcher=arxiv.fetch_by_ids,
     )
+
+
+def build_llm(config: Config) -> OllamaClient:
+    """The real local model client; tests replace it."""
+    return OllamaClient(config.llm_url, config.llm_model, config.llm_num_ctx)
 
 
 @app.callback()
@@ -453,6 +459,41 @@ def profile_set_categories(
         profile_edit.set_categories(ctx.vault, categories)
     cleaned = ["all" if c.strip().lower() == "all" else c.strip() for c in categories]
     typer.echo(f"arXiv categories are now: {_categories_text(cleaned)}")
+
+
+model_app = typer.Typer(help="Show, change and check the local summary model.", no_args_is_help=True)
+app.add_typer(model_app, name="model")
+
+
+@model_app.command("show")
+def model_show(vault: VaultOption = None) -> None:
+    """Show which local model and server are configured."""
+    cfg = _open(vault).config
+    typer.echo(f"model: {cfg.llm_model}")
+    typer.echo(f"server: {cfg.llm_url}")
+    typer.echo(f"context window (num_ctx): {cfg.llm_num_ctx}")
+
+
+@model_app.command("set")
+def model_set(
+    name: Annotated[str, typer.Argument(help="Ollama model name, e.g. qwen3:14b or qwen3:8b.")],
+    vault: VaultOption = None,
+) -> None:
+    """Choose which Ollama model writes summaries (install it first: ollama pull NAME)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_llm_model(ctx.vault, name)
+    typer.echo(f"model is now {name.strip()}. Check it works with `rpipe model check`.")
+
+
+@model_app.command("check")
+def model_check(vault: VaultOption = None) -> None:
+    """Check that Ollama is running and the configured model is installed."""
+    ctx = _open(vault)
+    try:
+        typer.echo(build_llm(ctx.config).check())
+    except LlmError as exc:
+        raise _fail(str(exc)) from exc
 
 
 # ---------------------------------------------------------------- init wizard

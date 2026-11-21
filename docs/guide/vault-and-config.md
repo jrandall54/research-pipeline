@@ -33,6 +33,9 @@ Phase 1 only writes `vault.sqlite`, `digests/` and `cache/` (plus the two YAML f
 | `arxiv_max_results` | `1000` | Safety cap on arXiv papers fetched per run (at least 1). Paging stops earlier at the first page with an already-stored paper; hitting the cap first adds a warning to the health line (expected on the first run). See `sources.md`. |
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | Model that turns text into vectors for similarity (see `glossary.md`). |
 | `rss_feeds` | `[]` | Extra feed URLs (read but not used yet: RSS collection is a later phase). |
+| `llm_model` | `qwen3:14b` | Ollama model that writes summaries. Change with `rpipe model set NAME`. See `llm.md`. |
+| `llm_url` | `http://localhost:11434` | Where the Ollama server listens. |
+| `llm_num_ctx` | `32768` | Context window in tokens (at least 2048): how much text the model reads at once. See `llm.md`. |
 
 Both files reject unknown keys: a typo such as `keyword:` or `top-n:` stops the command with an error naming the file and the key, instead of being silently ignored.
 

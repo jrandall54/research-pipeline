@@ -245,3 +245,15 @@ def set_categories(vault: Path, cats: list[str]) -> None:
         return True
 
     _edit(path, Config, change)
+
+
+def set_llm_model(vault: Path, name: str) -> None:
+    name = name.strip()
+    if not name:
+        raise ValueError("model name must not be empty (for example qwen3:14b)")
+
+    def change(data) -> bool:
+        data["llm_model"] = name
+        return True
+
+    _edit(_config_path(vault), Config, change)

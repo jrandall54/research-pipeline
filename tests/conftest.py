@@ -32,3 +32,20 @@ class FakeEmbedder:
 @pytest.fixture
 def embedder() -> FakeEmbedder:
     return FakeEmbedder()
+
+
+class FakeLLM:
+    """Scripted stand-in for the local model: pops one response per generate call."""
+
+    model_name = "fake-llm"
+
+    def __init__(self, responses: list) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[str, str]] = []  # (system, user) per call
+
+    def generate(self, system: str, user: str, schema):
+        self.calls.append((system, user))
+        r = self.responses.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r

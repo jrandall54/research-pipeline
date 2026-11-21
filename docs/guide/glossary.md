@@ -27,3 +27,7 @@
 **Rate limit** — a cap on how often you may call a service. arXiv asks for at most one API request per 3 seconds; the arXiv source enforces that gap itself. See `sources.md`.
 
 **Pagination** — fetching a long result list in fixed-size chunks (pages) using an offset, instead of in one huge response. See `sources.md`.
+
+**Upvotes** — the count of Hugging Face users who endorsed a paper on Daily Papers. Stored as `hf_upvotes` and used as a small ranking boost. See `sources.md`.
+
+**Hugging Face Daily Papers** — a community-curated daily list of notable (mostly arXiv) papers with upvotes and optional GitHub links. See `sources.md`.

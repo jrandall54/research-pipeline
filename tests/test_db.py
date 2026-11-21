@@ -1,8 +1,10 @@
 import json
+from datetime import date
 
 from research_pipeline.db import (
     finish_run,
     get_paper,
+    mark_in_digest,
     open_db,
     papers_with_status,
     set_status,
@@ -125,3 +127,15 @@ def test_run_log_roundtrip(tmp_path):
     assert row["started_at"] and row["finished_at"]
     assert json.loads(row["counts"]) == {"collected": 5}
     assert json.loads(row["errors"]) == ["arxiv: boom"]
+
+
+def test_mark_in_digest_sets_status_and_date_only_for_given_ids(tmp_path):
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make(id="a"))
+    upsert_paper(conn, make(id="b"))
+    set_status(conn, "a", Status.triaged, score=0.5)
+    mark_in_digest(conn, ["a"], date(2026, 11, 21))
+    a, b = get_paper(conn, "a"), get_paper(conn, "b")
+    assert (a["status"], a["digest_date"], a["triage_score"]) == ("in_digest", "2026-11-21", 0.5)
+    assert (b["status"], b["digest_date"]) == ("new", None)
+    mark_in_digest(conn, [], date(2026, 11, 21))  # no-op, no error

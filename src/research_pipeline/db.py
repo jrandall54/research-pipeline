@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -183,6 +183,16 @@ def set_status(
             _now(),
             paper_id,
         ),
+    )
+    conn.commit()
+
+
+def mark_in_digest(conn: sqlite3.Connection, paper_ids: list[str], digest_date: date) -> None:
+    """Set the given papers to `in_digest` and record which day's digest listed them."""
+    now = _now()
+    conn.executemany(
+        "UPDATE papers SET status = ?, digest_date = ?, updated_at = ? WHERE id = ?",
+        [(Status.in_digest.value, digest_date.isoformat(), now, pid) for pid in paper_ids],
     )
     conn.commit()
 

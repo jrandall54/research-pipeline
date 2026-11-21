@@ -43,3 +43,9 @@
 **L2 normalisation** — scaling a vector so its length is 1. Done to embeddings so cosine similarity reduces to a dot product and text length does not matter.
 
 **Top-N** — keeping only the N highest-scoring items (here `top_n`, default 15 papers per night); the rest are marked `skipped` but stay searchable.
+
+**Digest** — the markdown file (`digests/YYYY-MM-DD.md`) listing the day's kept papers with reasons and abstracts. See `digest.md`.
+
+**Health line** — the first line of a digest: counts collected/kept/skipped and any source errors, so a failed night is visible. See `digest.md`.
+
+**Re-run (same day)** — running the pipeline again on the same date. The digest then rewrites the same file, still including papers already listed that day. See `digest.md`.

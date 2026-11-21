@@ -101,3 +101,11 @@
 **Accuracy check** — the human grading step of `rpipe eval`: for each gold paper you read the model's summary beside your key facts and answer yes or no to "is this accurate?". Done by a person on purpose, because a model judging itself shares its own blind spots. See `evaluation.md`.
 
 **Pass mark** — the share of gold papers that must be graded accurate for the model to pass the accuracy check: 90% (`PASS_MARK`), so 9 of 10. Ungraded papers count as not accurate. See `evaluation.md`.
+
+**VRAM** — the memory on your graphics card. Models run fast when everything they need is in VRAM. See "Choosing the model and context automatically" in `llm.md`.
+
+**GPU offload** — how much of a model Ollama keeps on the graphics card versus the CPU. "Fully offloaded" means all of it is on the GPU; a partial offload spills the rest to the CPU and is many times slower. See `llm.md`.
+
+**KV cache** — the working memory a model builds while reading the prompt (a "key" and "value" for each token so far). It grows with the context window, which is why a bigger context can stop a model fitting in VRAM. See `llm.md`.
+
+**Probe** — a test load: we load a model at a given context with an empty prompt and check whether it sits fully on the GPU, then unload it. See `llm.md`.

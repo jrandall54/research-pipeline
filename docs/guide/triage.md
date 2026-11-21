@@ -111,7 +111,7 @@ Vectors are stored in the `embeddings` table as raw float32 bytes, keyed by (pap
 - **Small additive boosts with named constants**: easy to read, explain and tune; no hidden learned model.
 - **Reasons from the same numbers as the score**: the explanation cannot disagree with the ranking.
 - **Skipped, not deleted**: triage is a cheap filter and may be wrong; skipped papers remain searchable.
-- **Model choice**: default `BAAI/bge-small-en-v1.5`: small (384 dimensions), good retrieval quality, runs on CPU. It is swappable via `embedding_model` in `config.yaml`. Open question: compare models (e.g. bge-base) by checking how well each ranks a gold set of papers you have judged relevant; until then bge-small is the default.
+- **Model choice**: default `BAAI/bge-small-en-v1.5`: small (384 dimensions), good retrieval quality, runs on CPU. The model name is the `embedding_model` setting (an advanced setting with no command yet; see the file reference in `vault-and-config.md`). Open question: compare models (e.g. bge-base) by checking how well each ranks a gold set of papers you have judged relevant; until then bge-small is the default.
 - The embedding library is an optional extra: `uv sync --extra embed`. Without it, `rpipe run` stops with that hint instead of crashing obscurely (see `running.md`).
 
 ## How to run / check it

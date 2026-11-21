@@ -25,7 +25,7 @@ from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.sources.hf_daily import HfDailySource
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
-    DEFAULT_CATEGORIES,
+    DEFAULT_TOPICS,
     ConfigError,
     init_vault,
     load_config,
@@ -79,24 +79,25 @@ def init(
         Path | None, typer.Option(help="Vault folder (default: $RESEARCH_VAULT or ~/research-vault).")
     ] = None,
 ) -> None:
-    """Create the vault folders, config.yaml, profile.yaml and database (safe to re-run)."""
+    """Create the vault, then (in a terminal) walk you through topics, categories and seed papers."""
     path = resolve_vault(vault)
-    topics = categories = None
-    if _is_tty():
-        entered = typer.prompt("Topics you care about (comma-separated, blank for examples)", default="")
-        topics = _split(entered) or None
-        entered = typer.prompt("arXiv categories (comma-separated)", default=", ".join(DEFAULT_CATEGORIES))
-        categories = _split(entered) or None
     existed = {n for n in ("config.yaml", "profile.yaml") if (path / n).exists()}
-    init_vault(path, topics=topics, categories=categories)
+    init_vault(path)
     typer.echo(f"Vault ready at {path}")
     for name in ("config.yaml", "profile.yaml"):
         typer.echo(f"  {name}: {'kept existing' if name in existed else 'created'}")
     typer.echo("  vault.sqlite, raw/, markdown/, summaries/, my_work/, gold/, digests/, cache/ ready")
-    typer.echo("\nNext steps:")
-    typer.echo("  1. Add 10-20 papers you like: rpipe profile add-seed <arXiv link, id or title>")
-    typer.echo("  2. Check your profile: rpipe profile show")
-    typer.echo("  3. Change topics, authors, keywords, top-N or categories: rpipe profile --help")
+    if not _is_tty():
+        typer.echo("\nNext steps:")
+        typer.echo("  1. Add 10-20 papers you like: rpipe profile add-seed <arXiv link, id or title>")
+        typer.echo("  2. Check your profile: rpipe profile show")
+        typer.echo("  3. Change topics, authors, keywords, top-N or categories: rpipe profile --help")
+        return
+    try:
+        _wizard(path, fresh_profile="profile.yaml" not in existed, fresh_config="config.yaml" not in existed)
+    except (typer.Abort, KeyboardInterrupt, EOFError):
+        typer.echo("\nSaved what you entered so far. Re-run rpipe init to continue.")
+        raise typer.Exit(code=130) from None
 
 
 @dataclass
@@ -334,8 +335,46 @@ def _choose(candidates: list[PaperMeta], yes: bool) -> PaperMeta | None:
     n = len(candidates)
     pick = typer.prompt(f"Pick 1-{n} or 0 to cancel", type=int)
     if not 0 <= pick <= n:
-        raise _fail(f"{pick} is not between 0 and {n}. Nothing was changed.")
+        raise _SeedProblem(f"{pick} is not between 0 and {n}. Nothing was changed.")
     return candidates[pick - 1] if pick else None
+
+
+class _SeedProblem(Exception):
+    """A seed could not be added; the message is shown to the user as one line."""
+
+
+def _add_seed(vault: Path, config: Config, text: str, yes: bool = False) -> str:
+    """Look up, confirm and save one seed. Returns the message to show; raises _SeedProblem.
+
+    Shared by `profile add-seed` and the `init` wizard. The cache is written first and the
+    profile second, so a failure in either step never leaves a profile entry without its text.
+    """
+    if not text.strip():
+        raise _SeedProblem("Seed input is empty: give an arXiv link, id or title.")
+    try:
+        profile = load_profile(vault / "profile.yaml")
+    except ConfigError as exc:
+        raise _SeedProblem(str(exc)) from exc
+    kind, value = parse_seed_input(text)
+    if kind == "id" and value in profile.seeds:
+        return f"{value} is already in your profile."
+    try:
+        candidates = find_seed_candidates(text, make_arxiv(config))
+    except SourceError as exc:
+        raise _SeedProblem(f"Could not reach arXiv: {exc}. Nothing was changed.") from exc
+    if not candidates:
+        raise _SeedProblem(f'No paper found for "{text.strip()}". Try the arXiv link or id.')
+    chosen = _choose(candidates, yes)
+    if chosen is None:
+        return "Cancelled. Nothing was changed."
+    if chosen.id in profile.seeds:
+        return f"{chosen.id} is already in your profile."
+    try:
+        cache_seed(vault / "cache" / "seeds.json", chosen)
+        changed = profile_edit.add_seed_id(vault, chosen.id)
+    except (ValueError, ConfigError, OSError) as exc:
+        raise _SeedProblem(f"Could not save the seed: {exc}. Nothing was changed.") from exc
+    return f"Added seed {chosen.id}: {chosen.title}" if changed else f"{chosen.id} is already in your profile."
 
 
 @profile_app.command("add-seed")
@@ -346,30 +385,10 @@ def profile_add_seed(
 ) -> None:
     """Add a seed paper from an arXiv link, id or title search."""
     ctx = _open(vault)
-    if not text.strip():
-        raise _fail("Seed input is empty: give an arXiv link, id or title.")
-    profile = _load_profile(ctx)
-    kind, value = parse_seed_input(text)
-    if kind == "id" and value in profile.seeds:
-        typer.echo(f"{value} is already in your profile.")
-        return
     try:
-        candidates = find_seed_candidates(text, make_arxiv(ctx.config))
-    except SourceError as exc:
-        raise _fail(f"Could not reach arXiv: {exc}. Nothing was changed.") from exc
-    if not candidates:
-        raise _fail(f'No paper found for "{text.strip()}". Try the arXiv link or id.')
-    chosen = _choose(candidates, yes)
-    if chosen is None:
-        typer.echo("Cancelled. Nothing was changed.")
-        return
-    with _clean_errors():
-        if chosen.id in profile.seeds:
-            typer.echo(f"{chosen.id} is already in your profile.")
-            return
-        cache_seed(ctx.vault / "cache" / "seeds.json", chosen)
-        changed = profile_edit.add_seed_id(ctx.vault, chosen.id)
-    typer.echo(f"Added seed {chosen.id}: {chosen.title}" if changed else f"{chosen.id} is already in your profile.")
+        typer.echo(_add_seed(ctx.vault, ctx.config, text, yes))
+    except _SeedProblem as exc:
+        raise _fail(str(exc)) from exc
 
 
 @profile_app.command("set-top-n")
@@ -393,3 +412,74 @@ def profile_set_categories(
     with _clean_errors():
         profile_edit.set_categories(ctx.vault, categories)
     typer.echo(f"arXiv categories are now: {', '.join(c.strip() for c in categories)}")
+
+
+# ---------------------------------------------------------------- init wizard
+
+
+def _ask(prompt: str) -> str:
+    """One line of input; blank returns "". Ctrl-C or end of input raises typer.Abort."""
+    return typer.prompt(prompt, default="", show_default=False).strip()
+
+
+def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
+    profile = load_profile(vault / "profile.yaml")
+    if not fresh_profile:
+        typer.echo(f"Your topics:\n{_numbered(profile.topics)}")
+        if not typer.confirm("Add more topics?", default=False):
+            return
+    else:
+        typer.echo("Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.")
+    examples = list(DEFAULT_TOPICS) if fresh_profile else []
+    while text := _ask("Topic (blank to finish)"):
+        try:
+            profile_edit.add_topic(vault, text)
+        except (ValueError, ConfigError, OSError) as exc:
+            typer.echo(f"Skipped: {exc}")
+            continue
+        typer.echo(f"Added topic: {profile_edit.normalise_text(text)}")
+        for example in examples:  # the first real topic replaces the template's examples
+            profile_edit.remove_topic(vault, example)
+        examples = []
+
+
+def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
+    current = ", ".join(config.arxiv_categories)
+    if not fresh_config:
+        typer.echo(f"arXiv categories: {current}")
+        if not typer.confirm("Change categories?", default=False):
+            return
+    entered = typer.prompt("arXiv categories (comma-separated)", default=current)
+    cats = _split(entered)
+    if cats and cats != config.arxiv_categories:
+        try:
+            profile_edit.set_categories(vault, cats)
+        except (ValueError, ConfigError, OSError) as exc:
+            typer.echo(f"Skipped: {exc}")
+
+
+def _wizard_seeds(vault: Path, config: Config) -> None:
+    typer.echo(
+        "Seed papers are papers you like; the ranker finds new papers similar to them."
+    )
+    while text := _ask("Paper link, arXiv id or title (blank to finish)"):
+        try:
+            typer.echo(_add_seed(vault, config, text))
+        except _SeedProblem as exc:
+            typer.echo(f"Skipped: {exc}")
+    if len(load_profile(vault / "profile.yaml").seeds) < 5:
+        typer.echo("Tip: 10-20 seeds work best; add more later with rpipe profile add-seed")
+
+
+def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
+    """Interactive setup. Every answer is saved as soon as it is confirmed."""
+    try:
+        config = load_config(vault / "config.yaml")
+        _wizard_topics(vault, fresh_profile)
+        _wizard_categories(vault, config, fresh_config)
+        _wizard_seeds(vault, load_config(vault / "config.yaml"))
+    except ConfigError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo("")
+    profile_show(vault)
+    typer.echo("\nNext step: rpipe run")

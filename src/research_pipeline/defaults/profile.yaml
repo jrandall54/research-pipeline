@@ -1,8 +1,10 @@
-# Your research profile. Edit freely; `rpipe init` never overwrites this file.
+# Your research profile. Change it with `rpipe profile ...` commands (see
+# `rpipe profile --help`); `rpipe init` never overwrites this file.
 
 # What you care about, in plain words. Each topic is embedded and papers are
 # ranked by how close they are to these phrases. Specific phrases work better than
-# single words. (The examples below are generic; replace them.)
+# single words. (The examples below are generic; add your own with
+# `rpipe profile add-topic`, or let `rpipe init` replace them.)
 topics: __TOPICS__
 
 # arXiv ids of 10-20 papers you really like. New papers are ranked by similarity

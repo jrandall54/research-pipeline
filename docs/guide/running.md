@@ -34,11 +34,11 @@ uv tool install --editable '.[embed]'
 uv run rpipe init
 ```
 
-In a terminal it asks for your topics and arXiv categories; it then creates the vault (default `~/research-vault`, or `--vault PATH`, or the `RESEARCH_VAULT` environment variable) with `config.yaml`, `profile.yaml`, `vault.sqlite` and the folders described in `vault-and-config.md`. It is safe to re-run.
+It creates the vault (default `~/research-vault`, or `--vault PATH`, or the `RESEARCH_VAULT` environment variable) with `config.yaml`, `profile.yaml`, `vault.sqlite` and the folders described in `vault-and-config.md`. In a terminal it then guides you through your topics, arXiv categories and seed papers (a sample session is in `vault-and-config.md`), saving each answer as you give it; Ctrl-C stops cleanly and keeps what you entered. It is safe to re-run: on an existing vault it shows your settings and asks before changing anything.
 
 ### Set up your profile
 
-You never need to open `profile.yaml`. Use the commands (details and sample output in `profile.md`):
+The `rpipe init` wizard covers steps 1 and 2 below the first time. You never need to open `profile.yaml`; use the commands any time later (details and sample output in `profile.md`):
 
 1. Add 10-20 papers you like as seeds. Paste an arXiv link, an id, or a title and confirm: `rpipe profile add-seed https://arxiv.org/abs/2307.15043` (`vault-and-config.md` has advice on choosing them).
 2. Make the topics specific phrases ("prompt injection attacks and defenses for LLM agents" beats "security"): `rpipe profile add-topic "..."`, and drop the examples with `rpipe profile remove-topic 1`.
@@ -139,13 +139,13 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 | Symptom | Cause and fix |
 | --- | --- |
 | `No vault found at ... (no config.yaml). Run rpipe init first.` (exit 1) | The vault does not exist yet, or you pointed `--vault` / `RESEARCH_VAULT` at the wrong folder. Run `init`, or fix the path. |
-| `invalid settings` / `invalid YAML` naming a file (exit 1) | A typo in `config.yaml` or `profile.yaml`; the message starts with the file path and says which field. |
+| `invalid settings` / `invalid YAML` naming a file (exit 1) | One of the two settings files holds an invalid value (this should not happen if you only use `rpipe profile ...`, which refuses bad input). The message starts with the file path and says which field; fix that value with the matching `rpipe profile` command, or see the file reference in `vault-and-config.md`. |
 | `sentence-transformers is not installed; run uv sync --extra embed` (exit 1) | Install the extra (see Install). |
 | Health line says `errors: arxiv: arXiv API returned HTTP 5xx` (or a timeout) | arXiv (or Hugging Face) was down. The digest was built from the other source. Re-run later: `run` is safe to repeat. |
 | Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, for example a mistyped id. Remove it with `rpipe profile remove-seed` and add the right one with `rpipe profile add-seed` (`rpipe profile show` numbers the seeds). Ranking continues using your topics and any seeds that did resolve. |
 | Health line says `seeds: could not fetch ...: <reason>` | The seed lookup failed (network). Ranking used the seeds it already had; it retries next run. |
 | Digest says "Nothing new matched your profile today." | No paper was `triaged`: either no new papers arrived since the last run (they are already in an earlier digest) or every source failed (check the health line). |
-| Health line says `arxiv: reached max_results (N) before already-seen papers; some may be missed` | arXiv paging hit `arxiv_max_results` without reaching a paper you already had. Expected on the first run (empty database). Otherwise you were away a long time: raise `arxiv_max_results` in `config.yaml`. |
+| Health line says `arxiv: reached max_results (N) before already-seen papers; some may be missed` | arXiv paging hit `arxiv_max_results` without reaching a paper you already had. Expected on the first run (empty database). Otherwise you were away a long time and the cap is too low; `arxiv_max_results` is an advanced setting with no command yet (see the file reference in `vault-and-config.md`). |
 | Health line says `written from stored papers` | You re-ran `digest` on its own; it replaced that day's original health line. The original errors remain in the `runs` table. |
 | `could not load embedding model <name>: ...` (exit 1) | The model failed to download or load (offline, disk, broken torch install). Fix the cause and re-run. |
 | The digest has fewer papers than `top_n` | Fewer than `top_n` new papers arrived since the previous run. |

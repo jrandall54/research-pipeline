@@ -94,7 +94,7 @@ def test_cli_init_tty_prompts(tmp_path, monkeypatch):
     result = CliRunner().invoke(
         app,
         ["init", "--vault", str(tmp_path / "v")],
-        input="agent security, kernels\ncs.CR, cs.OS\n",
+        input="agent security\nkernels\n\ncs.CR, cs.OS\n\n",
     )
     assert result.exit_code == 0, result.output
     assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["agent security", "kernels"]

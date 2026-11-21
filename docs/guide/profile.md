@@ -10,7 +10,7 @@ Each function takes the vault folder and changes one thing: `add_topic`, `remove
 
 Every edit is the same five steps:
 
-1. **Check the file as it is.** The normal loaders (`load_profile`, `load_config`) read it. If you hand-edited it into something invalid, the edit stops here with an error naming the file.
+1. **Check the file as it is.** The normal loaders (`load_profile`, `load_config`) read it. If the file is somehow invalid (for example damaged by another program), the edit stops here with an error naming the file.
 2. **Load it again for editing** with a round-trip YAML reader (see below), which remembers comments, blank lines and quoting.
 3. **Make the one change** in memory (append a topic, set `top_n`, ...). If nothing needs to change, stop and return `False`.
 4. **Validate the result** with the same `Profile` / `Config` models the pipeline uses. If it would be invalid, raise `ConfigError` naming the file; nothing was written.
@@ -129,9 +129,13 @@ How `add-seed` decides, in order:
 
 Other messages: adding something already there prints "already in your profile" (exit 0); removing something absent prints "not in your profile. Nothing was changed." (exit 0); an out-of-range number, `set-top-n 0`, a bad category, empty text, or an invalid `profile.yaml` print the error and exit 1. A missing vault says to run `rpipe init`.
 
+### The guided `rpipe init`
+
+In a terminal, `rpipe init` uses the same edit functions as the commands above to ask for topics, categories and seeds one at a time (see `vault-and-config.md` for a sample session). Its seed step is literally `rpipe profile add-seed`: both call one helper, `_add_seed`, so the look-up, confirm and pick flow, and the error messages, are identical. The cache is written before the profile entry, so if saving fails (for example a full disk) you get one line such as `Could not save the seed: ... Nothing was changed.` and no profile entry without its text; the wizard then skips that seed and continues.
+
 ## Why it's built this way
 
-* **Commands rather than editing.** The pipeline is for people with different interests (the AI club), most of whom should not need to know YAML. A typo in a hand-edited file stops the nightly run; a command refuses the typo up front. The files stay plain YAML so power users may still edit them.
+* **Commands rather than editing.** The pipeline is for people with different interests (the AI club), most of whom should not need to know YAML. A typo in a hand-edited file stops the nightly run; a command refuses the typo up front. The files stay plain YAML, which is only the storage format.
 * **Round-trip YAML instead of `pyyaml`.** Rejected: loading with `pyyaml` and dumping back, which deletes every comment. Rejected: editing the text with regular expressions, which breaks on any layout we did not predict.
 * **Validate with the real models.** One definition of "valid" (`Profile`, `Config`) for the pipeline and the editor, so the editor can never write a file the pipeline then refuses.
 * **Refuse an already-invalid file.** Editing on top of a broken file could hide the problem or make it worse; the user gets the original error instead.
@@ -154,4 +158,4 @@ Fresh vaults now start with `seeds: []` (the old placeholder ids are gone); `rpi
 
 ## Where the code is
 
-`src/research_pipeline/cli.py` (the `profile` sub-app, `make_arxiv`), `src/research_pipeline/profile_edit.py` (editing functions and normalisation), `src/research_pipeline/seed_input.py` (input parsing, candidate lookup), `src/research_pipeline/seeds.py` (`cache_seed`), `src/research_pipeline/sources/arxiv.py` (`search_title`), `src/research_pipeline/defaults/profile.yaml` (template), `src/research_pipeline/vault.py` (`load_profile`, `load_config`, `ConfigError`), `src/research_pipeline/models.py` (`Profile`, `Config`). Tests: `tests/test_profile_edit.py`, `tests/test_seed_input.py`, `tests/test_cli_profile.py` (offline; the title fixture is a real arXiv response trimmed to the fields we use, plus one hand-written entry).
+`src/research_pipeline/cli.py` (the `profile` sub-app, `make_arxiv`), `src/research_pipeline/profile_edit.py` (editing functions and normalisation), `src/research_pipeline/seed_input.py` (input parsing, candidate lookup), `src/research_pipeline/seeds.py` (`cache_seed`), `src/research_pipeline/sources/arxiv.py` (`search_title`), `src/research_pipeline/defaults/profile.yaml` (template), `src/research_pipeline/vault.py` (`load_profile`, `load_config`, `ConfigError`), `src/research_pipeline/models.py` (`Profile`, `Config`). Tests: `tests/test_profile_edit.py`, `tests/test_seed_input.py`, `tests/test_cli_profile.py`, `tests/test_init_wizard.py` (offline; the title fixture is a real arXiv response trimmed to the fields we use, plus one hand-written entry).

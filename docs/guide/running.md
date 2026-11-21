@@ -42,7 +42,7 @@ The `rpipe init` wizard covers steps 1 and 2 below the first time. You never nee
 
 1. Add 10-20 papers you like as seeds. Paste an arXiv link, an id, or a title and confirm: `rpipe profile add-seed https://arxiv.org/abs/2307.15043` (`vault-and-config.md` has advice on choosing them).
 2. Make the topics specific phrases ("prompt injection attacks and defenses for LLM agents" beats "security"): `rpipe profile add-topic "..."`, and drop the examples with `rpipe profile remove-topic 1`.
-3. Optionally follow authors (`add-author`), add keywords (`add-keyword`), and set `rpipe profile set-top-n 10` or `rpipe profile set-categories cs.CR cs.LG` (or `all` if you are not sure which categories fit; it fetches much more each night, see "Choosing categories" in `profile.md`).
+3. Optionally follow authors (`add-author`), add keywords (`add-keyword`), and set `rpipe profile set-top-n 10` or `rpipe profile set-categories cs.CR cs.LG` (or `all` for every computer-science category if you are not sure which fit; it fetches much more each night, see "Choosing categories" in `profile.md`).
 4. Check the result with `rpipe profile show`.
 
 ### The commands

@@ -73,7 +73,7 @@ The full list is at https://arxiv.org/category_taxonomy. The wizard prints this 
 
 **Trade-off.** Narrow means fewer papers to fetch, embed and rank each night, and a more focused digest, but a paper filed under a category you left out never appears. Broad means more coverage and more work every night.
 
-**`all`.** Not sure yet? `rpipe profile set-categories all` (or typing `all` in the wizard) stores `arxiv_categories: ["all"]` and removes the category filter: the nightly query asks only for the newest papers, in any category. The cost is real: arXiv receives well over a thousand new papers a day, so fetching takes more 3-second-spaced requests and far more papers get embedded and ranked. `arxiv_max_results` still bounds it (paging stops at the cap with the usual "reached max_results" warning, or at the first page containing an already-stored paper). **Planned, not built:** a later phase will use your ratings to suggest dropping categories that never produce papers you like, so `all` is meant as a starting point. `rpipe profile show` prints it as `all of arXiv`.
+**`all`.** Not sure yet? `rpipe profile set-categories all` (or typing `all` in the wizard) stores `arxiv_categories: ["all"]`, which means **every computer-science category (`cs.*`)**. The nightly query becomes `cat:cs.*`. Physics, maths, statistics and other fields are **not** included: to add, for example, `stat.ML`, list the categories explicitly instead (`rpipe profile set-categories cs.LG cs.CR stat.ML`); `all` cannot be combined with them. The cost is real: cs.* is roughly a few hundred new papers a day, so fetching takes more 3-second-spaced requests and more papers get embedded and ranked than with a handful of categories. `arxiv_max_results` still bounds it (paging stops at the cap with the usual "reached max_results" warning, or at the first page containing an already-stored paper). **Planned, not built:** a later phase will use your ratings to suggest dropping categories that never produce papers you like, so `all` is meant as a starting point. `rpipe profile show` prints it as `all computer science (cs.*)`.
 
 ### Adding a seed: link, id or title
 
@@ -109,7 +109,7 @@ Every command takes `--vault PATH` (same resolution as `init`). Messages are pla
 | `rpipe profile add-seed INPUT [--yes]` | Add a seed from an arXiv link, id or title (see "Adding a seed"). `--yes` skips the question and takes the only (or first) match. |
 | `rpipe profile remove-seed ID_OR_NUMBER` | Remove a seed by id or by its number in `show`. |
 | `rpipe profile set-top-n N` | Papers kept per digest (at least 1). |
-| `rpipe profile set-categories CAT [CAT ...]` | Replace the arXiv categories (`cs.CR stat.ML hep-th`), or give the single word `all` for every category. `--help` explains what a category is. |
+| `rpipe profile set-categories CAT [CAT ...]` | Replace the arXiv categories (`cs.CR stat.ML hep-th`), or give the single word `all` for every computer-science category (`cs.*`). `--help` explains what a category is. |
 
 Sample session (vault freshly made by `rpipe init`):
 

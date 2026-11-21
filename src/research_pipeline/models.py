@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 CATEGORY_RE = re.compile(r"^[a-z-]+(\.[A-Za-z-]+)?$")
-ALL_CATEGORIES = "all"  # sentinel: every arXiv category, i.e. no category filter
+ALL_CATEGORIES = "all"  # sentinel: every computer-science category (cs.*)
 
 
 class Status(StrEnum):

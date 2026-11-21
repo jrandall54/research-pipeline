@@ -232,11 +232,11 @@ def test_set_known_checker_installs_the_callable():
     assert src._is_known("x") is True
 
 
-ALL_QUERY = "submittedDate:[199101010000 TO 209912312359]"
+ALL_QUERY = "cat:cs.*"
 
 
 @respx.mock
-def test_all_categories_sends_date_range_query_not_cat_filter():
+def test_all_categories_sends_cs_wildcard_query():
     route = respx.get(API).mock(return_value=httpx.Response(200, text=feed(2)))
     src = ArxivSource(["all"], max_results=5, sleep=lambda s: None)
     assert len(src.fetch()) == 2

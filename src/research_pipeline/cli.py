@@ -277,7 +277,7 @@ def profile_show(vault: VaultOption = None) -> None:
 
 
 def _categories_text(cats: list[str]) -> str:
-    return "all of arXiv" if cats == ["all"] else ", ".join(cats)
+    return "all computer science (cs.*)" if cats == ["all"] else ", ".join(cats)
 
 
 CATEGORY_HELP = (
@@ -444,8 +444,9 @@ def profile_set_categories(
     cs.OS operating systems, cs.SE software engineering, cs.DC distributed computing,
     cs.NI networking, stat.ML statistical ML. Full list: https://arxiv.org/category_taxonomy
 
-    Not sure yet? Use `all` (alone) to collect every category. That fetches far more
-    papers each night (the arxiv_max_results cap still applies).
+    Not sure yet? Use `all` (alone) to collect every computer-science category (cs.*).
+    That fetches far more papers each night (the arxiv_max_results cap still applies).
+    Physics, maths and stat categories are not included: list those explicitly.
     """
     ctx = _open(vault)
     with _clean_errors():
@@ -509,7 +510,7 @@ def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
     typer.echo(CATEGORY_HELP)
     typer.echo(
         "Press Enter to keep the default, or type all if you are not sure (collects "
-        "everything; more to fetch and rank). Change it any time with "
+        "every computer-science category (cs.*); more to fetch and rank). Change it any time with "
         "rpipe profile set-categories."
     )
     entered = typer.prompt("arXiv categories (comma-separated)", default=current)

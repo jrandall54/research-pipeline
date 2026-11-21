@@ -230,7 +230,7 @@ def set_categories(vault: Path, cats: list[str]) -> None:
     cleaned = [ALL_CATEGORIES if c.lower() == ALL_CATEGORIES else c for c in cleaned]
     if ALL_CATEGORIES in cleaned and cleaned != [ALL_CATEGORIES]:
         raise ConfigError(
-            f"{path}: 'all' means every arXiv category, so it cannot be combined with "
+            f"{path}: 'all' means every computer-science category (cs.*), so it cannot be combined with "
             "others: give either all, or a list of categories"
         )
     bad = [c for c in cleaned if not CATEGORY_RE.match(c)]

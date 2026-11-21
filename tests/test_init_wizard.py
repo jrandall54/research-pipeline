@@ -247,4 +247,4 @@ def test_wizard_all_stores_all(tmp_path, tty, monkeypatch):
     result = init(tmp_path, "\nall\n\n")
     assert result.exit_code == 0, result.output
     assert load_config(tmp_path / "v" / "config.yaml").arxiv_categories == ["all"]
-    assert "all of arXiv" in result.output
+    assert "all computer science (cs.*)" in result.output

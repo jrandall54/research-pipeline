@@ -282,10 +282,10 @@ def test_one_arxiv_client_per_command_is_closed(vault, monkeypatch):
 
 def test_set_categories_all_and_show(vault):
     res = run(vault, "set-categories", "all")
-    assert res.exit_code == 0 and "all of arXiv" in res.output
+    assert res.exit_code == 0 and "all computer science (cs.*)" in res.output
     assert load_config(vault / "config.yaml").arxiv_categories == ["all"]
     res = run(vault, "show")
-    assert "arXiv categories: all of arXiv" in res.output
+    assert "arXiv categories: all computer science (cs.*)" in res.output
     res = run(vault, "set-categories", "all", "cs.CR")
     assert res.exit_code == 1 and "all" in res.output and "Traceback" not in res.output
     assert load_config(vault / "config.yaml").arxiv_categories == ["all"]

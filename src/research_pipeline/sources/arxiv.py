@@ -14,10 +14,10 @@ from research_pipeline.sources.base import SourceError
 API_URL = "https://export.arxiv.org/api/query"
 USER_AGENT = "research-pipeline/0.1"
 PAGE_SIZE = 100
-# The arXiv API has no "everything" query, so for category "all" we ask for papers
-# submitted in a date range that spans all of arXiv (1991 onward); with
-# sortBy=submittedDate descending this returns the newest papers first.
-ALL_QUERY = "submittedDate:[199101010000 TO 209912312359]"
+# For category "all" (every computer-science category, cs.*) we use arXiv's prefix
+# wildcard, which matches any cs.* subcategory; with sortBy=submittedDate descending
+# this returns the newest papers first. (Checked live: every entry carried a cs category.)
+ALL_QUERY = "cat:cs.*"
 MIN_SPACING = 3.0  # seconds between API calls, per arXiv's terms of use
 
 _ATOM = "{http://www.w3.org/2005/Atom}"

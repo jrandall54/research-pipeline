@@ -22,7 +22,7 @@ The API is a plain HTTPS GET that returns an **Atom feed**: an XML document with
    https://export.arxiv.org/api/query?search_query=cat:cs.LG+OR+cat:cs.CR&sortBy=submittedDate&sortOrder=descending&start=0&max_results=100
    ```
 
-   If `arxiv_categories` is `["all"]` there is no category filter. The API has no "everything" query (`all:*` is only a text-field wildcard and arXiv does not document it as match-everything, so it was not used), so the query becomes the date range `submittedDate:[199101010000 TO 209912312359]`, which spans every paper arXiv holds; the same `sortBy=submittedDate` descending then gives the newest first. A live check returned about 3.2 million matches, newest first. Paging, stopping at a known paper and the `arxiv_max_results` cap work exactly as above, but because all of arXiv arrives each night (well over a thousand papers a day) the cap is more likely to bind and more papers get embedded and ranked.
+   If `arxiv_categories` is `["all"]` (every computer-science category) the query is the prefix wildcard `cat:cs.*`, with the same `sortBy=submittedDate` descending. A live check returned about 985,000 matches, newest first, and every returned paper carried at least one `cs.*` category (some have a non-cs primary category such as `quant-ph` but are cross-listed to cs, exactly as with an explicit `cat:cs.CR` query). Physics, maths and stat categories are not included by `all`. Paging, stopping at a known paper and the `arxiv_max_results` cap work as above, but cs.* is a few hundred new papers a day, so the cap is more likely to bind and more papers get embedded and ranked than with a handful of categories.
 
 2. Parse each `<entry>` into a `PaperMeta`:
 

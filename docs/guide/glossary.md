@@ -7,3 +7,11 @@
 **Vault** — the folder (default `~/research-vault/`) holding everything personal: config, profile, database, digests. Kept outside the repo.
 
 **Seed** — an arXiv id of a paper you like; new papers are ranked by similarity to your seeds.
+
+**FTS5** — SQLite's full-text search module. It builds an index of the words in a table so you can find rows by word quickly (`MATCH 'attention'`) and rank them, instead of scanning every row.
+
+**Rowid** — SQLite's internal integer row number. We give `papers` an explicit one so the search index can point at the same row reliably.
+
+**WAL (write-ahead log)** — a SQLite journal mode where changes are appended to a log before being merged into the main file. Readers do not block the writer and crashes are safer.
+
+**Upsert** — "update or insert": add the record if it is new, otherwise merge it into the existing one. See `upsert_paper` in `data-model.md`.

@@ -1,14 +1,59 @@
 """Command line interface."""
 
+import sqlite3
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from research_pipeline.vault import DEFAULT_CATEGORIES, init_vault, resolve_vault
+from research_pipeline.collect import run_collect
+from research_pipeline.db import finish_run, open_db, start_run
+from research_pipeline.digest import write_digest
+from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
+from research_pipeline.models import Config, PaperMeta, Profile
+from research_pipeline.seeds import SeedFetchError, resolve_seed_texts
+from research_pipeline.sources.arxiv import ArxivSource
+from research_pipeline.sources.base import Source
+from research_pipeline.sources.hf_daily import HfDailySource
+from research_pipeline.triage import run_triage
+from research_pipeline.vault import (
+    DEFAULT_CATEGORIES,
+    ConfigError,
+    init_vault,
+    load_config,
+    load_profile,
+    resolve_vault,
+)
 
 app = typer.Typer(help="Nightly research paper pipeline.", no_args_is_help=True)
+
+VaultOption = Annotated[
+    Path | None,
+    typer.Option(help="Vault folder (default: $RESEARCH_VAULT or ~/research-vault)."),
+]
+
+
+@dataclass
+class Pipeline:
+    """The pieces that touch the outside world; tests swap them for stubs."""
+
+    sources: list[Source]
+    embedder: Embedder
+    seed_fetcher: Callable[[list[str]], list[PaperMeta]]
+
+
+def build_pipeline(config: Config) -> Pipeline:
+    """Real sources, the real embedding model, and arXiv lookup for seed papers."""
+    arxiv = ArxivSource(config.arxiv_categories)
+    return Pipeline(
+        sources=[arxiv, HfDailySource()],
+        embedder=SentenceTransformerEmbedder(config.embedding_model),
+        seed_fetcher=arxiv.fetch_by_ids,
+    )
 
 
 @app.callback()
@@ -47,3 +92,127 @@ def init(
     typer.echo("\nNext steps:")
     typer.echo(f"  1. Edit {path / 'profile.yaml'} (topics, followed authors, keywords).")
     typer.echo("  2. Replace the 3 placeholder seeds with 10-20 arXiv ids of papers you like.")
+
+
+@dataclass
+class _Context:
+    vault: Path
+    config: Config
+    conn: sqlite3.Connection
+
+
+def _fail(message: str) -> typer.Exit:
+    typer.echo(message, err=True)
+    return typer.Exit(code=1)
+
+
+def _open(vault: Path | None) -> _Context:
+    path = resolve_vault(vault)
+    if not (path / "config.yaml").exists():
+        raise _fail(f"No vault found at {path} (no config.yaml). Run `research-pipeline init` first.")
+    try:
+        config = load_config(path / "config.yaml")
+    except ConfigError as exc:
+        raise _fail(str(exc)) from exc
+    return _Context(path, config, open_db(path / "vault.sqlite"))
+
+
+def _load_profile(ctx: _Context) -> Profile:
+    try:
+        return load_profile(ctx.vault / "profile.yaml")
+    except ConfigError as exc:
+        raise _fail(str(exc)) from exc
+
+
+def _pipeline(config: Config) -> Pipeline:
+    try:
+        return build_pipeline(config)
+    except RuntimeError as exc:  # e.g. the `embed` extra is not installed
+        raise _fail(f"{exc}") from exc
+
+
+def _seed_texts(
+    ctx: _Context, profile: Profile, pipeline: Pipeline, errors: list[str]
+) -> dict[str, str]:
+    """Seed texts for triage; a failed lookup is appended to `errors`, never fatal."""
+    cache = ctx.vault / "cache" / "seeds.json"
+    try:
+        texts = resolve_seed_texts(ctx.conn, cache, profile.seeds, pipeline.seed_fetcher)
+    except SeedFetchError as exc:
+        errors.append(str(exc))
+        return exc.texts
+    unresolved = [s for s in profile.seeds if s not in texts]
+    if unresolved:
+        errors.append(f"seeds: no paper found for {', '.join(unresolved)}")
+    return texts
+
+
+def health_line(day: date, counts: dict[str, int], errors: list[str]) -> str:
+    return (
+        f"Run {day.isoformat()}: collected {counts.get('inserted', 0)} new, "
+        f"{counts.get('updated', 0)} updated · kept {counts.get('triaged', 0)} · "
+        f"skipped {counts.get('skipped', 0)} · errors: {'; '.join(errors) or 'none'}"
+    )
+
+
+def _report(counts: dict[str, int], errors: list[str]) -> None:
+    typer.echo("  " + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    for e in errors:
+        typer.echo(f"  error: {e}", err=True)
+
+
+@app.command()
+def run(vault: VaultOption = None) -> None:
+    """Collect, triage and write today's digest (the nightly command)."""
+    ctx = _open(vault)
+    profile = _load_profile(ctx)
+    pipeline = _pipeline(ctx.config)
+    run_id = start_run(ctx.conn)
+    counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
+    seeds = _seed_texts(ctx, profile, pipeline, errors)
+    counts |= run_triage(ctx.conn, pipeline.embedder, profile, seeds)
+    today = date.today()
+    out = write_digest(ctx.conn, ctx.vault, today, health_line(today, counts, errors))
+    finish_run(ctx.conn, run_id, counts, errors)
+    typer.echo(f"Digest written to {out}")
+    _report(counts, errors)
+
+
+@app.command()
+def collect(vault: VaultOption = None) -> None:
+    """Fetch new papers from every source into the database."""
+    ctx = _open(vault)
+    pipeline = _pipeline(ctx.config)
+    counts, errors = run_collect(ctx.conn, pipeline.sources, start_run(ctx.conn))
+    typer.echo("Collected:")
+    _report(counts, errors)
+
+
+@app.command()
+def triage(vault: VaultOption = None) -> None:
+    """Rank `new` papers against your profile; keep the top N."""
+    ctx = _open(vault)
+    profile = _load_profile(ctx)
+    pipeline = _pipeline(ctx.config)
+    errors: list[str] = []
+    seeds = _seed_texts(ctx, profile, pipeline, errors)
+    counts = run_triage(ctx.conn, pipeline.embedder, profile, seeds)
+    typer.echo("Triaged:")
+    _report(counts, errors)
+
+
+@app.command()
+def digest(
+    vault: VaultOption = None,
+    date_: Annotated[
+        str | None, typer.Option("--date", help="Digest date, YYYY-MM-DD (default: today).")
+    ] = None,
+) -> None:
+    """Write the markdown digest from papers already triaged."""
+    ctx = _open(vault)
+    try:
+        day = date.fromisoformat(date_) if date_ else date.today()
+    except ValueError as exc:
+        raise _fail(f"--date must be YYYY-MM-DD, got {date_!r}") from exc
+    out = write_digest(ctx.conn, ctx.vault, day, f"Digest {day.isoformat()}: written from stored papers (no collection run)")
+    typer.echo(f"Digest written to {out}")

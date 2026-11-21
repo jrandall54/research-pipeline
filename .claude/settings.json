@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest*)",
+      "Bash(uv sync*)",
+      "Bash(uv run research-pipeline*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git switch*)",
+      "Bash(git merge*)",
+      "Bash(git branch*)",
+      "Bash(curl*export.arxiv.org*)",
+      "Bash(curl*huggingface.co*)"
+    ]
+  }
+}

@@ -251,6 +251,8 @@ def set_llm_model(vault: Path, name: str) -> None:
     name = name.strip()
     if not name:
         raise ValueError("model name must not be empty (for example qwen3:14b, or auto)")
+    if name.lower() == "auto":
+        name = "auto"
 
     def change(data) -> bool:
         data["llm_model"] = name

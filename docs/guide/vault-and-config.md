@@ -29,7 +29,7 @@ The pipeline currently writes `vault.sqlite` (which also holds full texts and su
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `vault_path` | the vault's path (set by `init`) | Informational only: the vault actually used is chosen by `--vault`, then `$RESEARCH_VAULT`, then `~/research-vault`; this field is never read back. Required. |
+| `vault_path` | the vault's path (set by `init`) | Informational only: the vault actually used is chosen by `--vault`, then `$RESEARCH_VAULT`, then `~/research-vault`, and the folder that was opened is used instead of the value in the file (so a moved vault still works). Required. |
 | `arxiv_categories` | `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE` | arXiv categories collected each night, or `["all"]` for every computer-science category (`cs.*`; much more to fetch and rank, see "Choosing categories" in `profile.md`). Change with `rpipe profile set-categories`. |
 | `arxiv_max_results` | `1000` | Safety cap on arXiv papers fetched per run (at least 1). Paging stops earlier at the first page with an already-stored paper; hitting the cap first adds a warning to the health line (expected on the first run). See `sources.md`. |
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | Model that turns text into vectors for similarity (see `glossary.md`). |

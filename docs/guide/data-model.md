@@ -40,7 +40,7 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 | `arxiv_categories` | arXiv categories to collect. Default `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE`, or exactly `["all"]` for every computer-science category (`cs.*`). |
 | `embedding_model` | Model used to turn text into vectors. Default `BAAI/bge-small-en-v1.5`. |
 | `rss_feeds` | Extra RSS feed URLs; default none. |
-| `llm_model`, `llm_url`, `llm_num_ctx` | The local model for summaries (`llm.md`). `llm_num_ctx` defaults to 32768 and must be at least 8192. Change them with `rpipe model set`, `rpipe model set-url` and `rpipe model set-context`. |
+| `llm_model`, `llm_url`, `llm_num_ctx` | The local model for summaries (`llm.md`). `llm_model` and `llm_num_ctx` default to `auto`; a pinned `llm_num_ctx` (for example 32768) must be at least 8192. Change them with `rpipe model set`, `rpipe model set-url` and `rpipe model set-context`. |
 
 `Profile` and `Config` reject unknown keys (`extra="forbid"`).
 

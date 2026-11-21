@@ -69,7 +69,7 @@ Summarized:
   fetched=3, summarized=3, abstract_only=0, summary_failed=0
 ```
 
-Illustrative output; your numbers will differ.
+Illustrative output; your numbers will differ. The candidates are tried in order of parameter count, so an older but larger model (here `ds2-16b-20k`, 15.7B) can win over newer 14B ones; pin the one you prefer with `rpipe model set NAME`. The progress lines go to stderr, the final line to stdout. The context is the measured maximum (20480 here) less a 1024-token safety margin.
 
 Model commands (`rpipe model show`, `rpipe model set NAME|auto`, `rpipe model set-url URL`, `rpipe model set-context N|auto`, `rpipe model check`, `rpipe model fit`) view, change and test the local Ollama model used for summaries; see `llm.md`. By default the model and context are `auto`, so the first `rpipe run` after installing a model spends a few extra minutes probing which model and context fit your GPU; later runs reuse the cached answer. `rpipe model fit` re-probes on demand. `check` exits 1 with a fix hint if Ollama is not running or the model is not installed.
 
@@ -82,9 +82,9 @@ last choice: not probed yet; runs on first use, or `rpipe model fit`
 $ uv run rpipe model fit
 Probing Ollama: this loads and unloads models and can take a few minutes.
   trying q3.8-27b-34k at 16384 tokens
-  trying q2.5c-14b-32k at 16384 tokens
-  searching the largest context for q2.5c-14b-32k
-Using model q2.5c-14b-32k with a context of 32768 tokens
+  trying ds2-16b-20k at 16384 tokens
+  searching the largest context for ds2-16b-20k
+Using model ds2-16b-20k with a context of 19456 tokens
 $ uv run rpipe model set qwen3:8b
 model is now qwen3:8b. Check it works with `rpipe model check`.
 $ uv run rpipe model set-context 16384
@@ -206,8 +206,8 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 | Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, for example a mistyped id. Remove it with `rpipe profile remove-seed` and add the right one with `rpipe profile add-seed` (`rpipe profile show` numbers the seeds). Ranking continues using your topics and any seeds that did resolve. |
 | Health line says `seeds: could not fetch ...: <reason>` | The seed lookup failed (network). Ranking used the seeds it already had; it retries next run. |
 | Health line says `summaries skipped, model unavailable: cannot reach Ollama at ...` | Ollama is not running. Start it with `ollama serve` (or the desktop app), check the URL with `rpipe model show` (change it with `rpipe model set-url URL`) and test with `rpipe model check`. Tonight's digest was still written, with abstracts only. **To recover the same day:** start Ollama (`ollama serve`), then run `rpipe summarize` and `rpipe digest` (or just `rpipe run` again). The papers in today's digest get their summaries and the file is rewritten. If you wait until the next day, those papers are not summarised (accepted limitation); only newly kept papers are. |
-| Health line says `model unavailable: model 'qwen3:14b' is not installed: run ollama pull ...` | The model is not downloaded. Run the `ollama pull` command shown, or pick another with `rpipe model set NAME`. With the default `auto` this only appears if no usable model is installed. |
-| Health line says `no installed model fits fully in GPU memory` | Free GPU memory and run `rpipe model fit`, or pin a smaller model; see "Troubleshooting" in `llm.md`. |
+| Health line says `model unavailable: model 'qwen3:14b' is not installed: run ollama pull ...` | The model is not downloaded. Run the `ollama pull` command shown, or pick another with `rpipe model set NAME`. This is the message for a model you pinned. With the default `auto` you instead see `model unavailable: no usable model is installed in Ollama (embedding-only models cannot write summaries). Install one with ollama pull NAME, e.g. ollama pull qwen3:14b.` |
+| Health line says `no installed model fits fully in GPU memory` | Free GPU memory and run `rpipe model fit`, or pin **both** a smaller model and a context (`rpipe model set NAME`, `rpipe model set-context N`); see "Troubleshooting" in `llm.md`. The outcome is remembered, so it is reported at once each night until you change something or run `rpipe model fit`. |
 | Health line shows `summary failures N` or `abstract-only N` | `summary failures`: the model errored or timed out on N papers (see the `summarize <id>: ...` entries in the errors); they show abstracts only. `abstract-only`: N papers have no arXiv HTML version (non-arXiv ids, or too new), so their summary rests on the abstract and says so in the digest. |
 | Digest says "Nothing new matched your profile today." | No paper was `triaged`: either no new papers arrived since the last run (they are already in an earlier digest) or every source failed (check the health line). |
 | Health line says `arxiv: reached max_results (N) before already-seen papers; some may be missed` | arXiv paging hit `arxiv_max_results` without reaching a paper you already had. Expected on the first run (empty database). Otherwise you were away a long time and the cap is too low; `arxiv_max_results` is an advanced setting with no command yet (see the file reference in `vault-and-config.md`). |

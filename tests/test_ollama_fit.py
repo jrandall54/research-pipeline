@@ -191,8 +191,8 @@ def test_choose_picks_largest_model_that_fits_at_16k(mock):
     logs: list[str] = []
     fit = choose(URL, models, None, None, log=logs.append)
     assert fit.model == "mid"
-    # mid: 18 GB + 70k*ctx <= 20 GB -> ctx <= 28571 -> 27648 at step 1024
-    assert fit.num_ctx == 27648
+    # mid: 18 GB + 70k*ctx <= 20 GB -> ctx <= 28571 -> 27648 at step 1024, less one step of margin
+    assert fit.num_ctx == 26624
     assert any("big" in line for line in logs)
 
 
@@ -203,7 +203,7 @@ def test_choose_skips_embedding_only_models(mock):
     })
     fake.install(mock)
     fit = choose(URL, list_models(URL), None, None)
-    assert fit == Fit(model="gen", num_ctx=16384)
+    assert fit == Fit(model="gen", num_ctx=15360)  # 16384 less the safety margin
     assert all(p["model"] != "emb" for p in fake.generate_calls)
 
 
@@ -330,15 +330,130 @@ def test_resolve_corrupt_cache_is_ignored_and_rewritten(mock, tmp_path):
     assert json.loads(path.read_text())["model"] == "mid"
 
 
-def test_resolve_error_is_not_cached(mock, tmp_path):
+def test_resolve_nothing_fits_is_cached_and_reraised_without_probing(mock, tmp_path):
+    fake = three_models()
+    fake.free = 1 * GB
+    fake.install(mock)
+    with pytest.raises(LlmError) as first:
+        resolve(URL, tmp_path, "auto", "auto")
+    assert (tmp_path / "cache" / "llm_fit.json").exists()
+    fake.generate_calls.clear()
+    with pytest.raises(LlmError) as second:
+        resolve(URL, tmp_path, "auto", "auto")
+    assert str(second.value) == str(first.value)
+    assert fake.generate_calls == []
+
+
+def test_resolve_force_reprobes_a_cached_failure(mock, tmp_path):
     fake = three_models()
     fake.free = 1 * GB
     fake.install(mock)
     with pytest.raises(LlmError):
         resolve(URL, tmp_path, "auto", "auto")
+    fake.free = 20 * GB  # the card was freed
+    assert resolve(URL, tmp_path, "auto", "auto", force=True).model == "mid"
+    assert resolve(URL, tmp_path, "auto", "auto").model == "mid"
+
+
+def test_nothing_fits_message_says_to_pin_both(mock):
+    fake = three_models()
+    fake.free = 1 * GB
+    fake.install(mock)
+    with pytest.raises(LlmError) as e:
+        choose(URL, list_models(URL), None, None)
+    msg = str(e.value)
+    assert "rpipe model set NAME" in msg and "rpipe model set-context N" in msg
+    assert "both" in msg
+
+
+def test_auto_context_is_one_step_below_the_measured_maximum(mock):
+    boundary_fake(22528).install(mock)
+    assert choose(URL, list_models(URL), None, None).num_ctx == 21504
+
+
+def test_margin_never_goes_below_8192_for_a_pinned_model(mock):
+    boundary_fake(8192).install(mock)
+    assert choose(URL, list_models(URL), "m", None).num_ctx == 8192
+
+
+def test_margin_is_not_applied_to_a_pinned_context(mock):
+    boundary_fake(30000).install(mock)
+    assert choose(URL, list_models(URL), None, 20000).num_ctx == 20000
+
+
+def test_known_fitting_lower_bound_is_not_probed_twice(mock):
+    fake = boundary_fake(22528)
+    fake.install(mock)
+    choose(URL, list_models(URL), None, None)
+    ctxs = [p["options"]["num_ctx"] for p in fake.probes()]
+    assert ctxs.count(16384) == 1
+
+
+def preloaded_fake() -> FakeOllama:
+    fake = FakeOllama({
+        "busy": {"size": 2 * GB, "params": 1 * GB, "ctx": 40960},
+        "m": {"size": 4 * GB, "params": 8 * GB, "ctx": 40960},
+    }, free=20 * GB, kv_per_token=100_000)
+    fake.loaded["busy"] = 8192
+    return fake
+
+
+def test_resolve_never_unloads_a_model_that_was_loaded_before_probing(mock, tmp_path):
+    fake = preloaded_fake()
+    fake.install(mock)
+    resolve(URL, tmp_path, "busy", "auto")
+    assert [c for c in fake.generate_calls if c["keep_alive"] == 0 and c["model"] == "busy"] == []
+    assert "busy" in fake.loaded
+    # the probe's own model is still unloaded
+    resolve(URL, tmp_path, "m", "auto", force=True)
+    assert any(c["keep_alive"] == 0 and c["model"] == "m" for c in fake.generate_calls)
+
+
+def test_resolve_notes_and_skips_cache_when_other_models_were_loaded(mock, tmp_path):
+    fake = preloaded_fake()
+    fake.install(mock)
+    logs: list[str] = []
+    resolve(URL, tmp_path, "m", "auto", log=logs.append)
+    assert any("busy" in l and "rpipe model fit" in l for l in logs)
     assert not (tmp_path / "cache" / "llm_fit.json").exists()
 
 
+def test_resolve_does_not_cache_a_failure_found_on_a_busy_card(mock, tmp_path):
+    fake = preloaded_fake()
+    fake.free = 1 * GB
+    fake.install(mock)
+    with pytest.raises(LlmError):
+        resolve(URL, tmp_path, "m", "auto")
+    assert not (tmp_path / "cache" / "llm_fit.json").exists()
+
+
+def test_resolve_caches_when_the_gpu_is_idle(mock, tmp_path):
+    fake = preloaded_fake()
+    fake.loaded.clear()
+    fake.install(mock)
+    logs: list[str] = []
+    resolve(URL, tmp_path, "m", "auto", log=logs.append)
+    assert (tmp_path / "cache" / "llm_fit.json").exists()
+    assert not any("was loaded" in l for l in logs)
+
+
+def test_list_models_malformed_tags_json_is_an_llmerror(mock):
+    mock.get(f"{URL}/api/tags").mock(return_value=httpx.Response(200, content=b"<html>"))
+    with pytest.raises(LlmError):
+        list_models(URL)
+
+
+def test_cached_fit_only_when_key_still_matches(mock, tmp_path):
+    from research_pipeline.ollama_fit import cached_fit
+
+    fake = three_models()
+    fake.install(mock)
+    assert cached_fit(URL, tmp_path, "auto", "auto") is None
+    fit = resolve(URL, tmp_path, "auto", "auto")
+    assert cached_fit(URL, tmp_path, "auto", "auto") == fit
+    assert cached_fit(URL, tmp_path, "small", "auto") is None
+    fake.models["mid"]["digest"] = "new"
+    assert cached_fit(URL, tmp_path, "auto", "auto") is None
 
 
 def test_list_models_skips_a_model_with_a_broken_show_and_logs_it(mock):

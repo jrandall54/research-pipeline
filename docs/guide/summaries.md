@@ -66,13 +66,13 @@ Any `<paper>` or `</paper>` written inside the paper's own text is defused (its 
 
 ### The context budget
 
-A model can only read so much at once (its *context window*, `llm_num_ctx`, default 32768 tokens). The rule:
+A model can only read so much at once (its *context window*, `llm_num_ctx`: `auto`, which the pipeline measures, or a number you pinned). The rule:
 
 ```
 budget (characters) = (num_ctx - 4000) * 3
 ```
 
-4000 tokens are kept free for the instructions and the answer. A token is roughly 4 characters of English; we count 3 to stay safely under. With the default: `(32768 - 4000) * 3 = 86,304` characters, a typical 25 to 40 page paper.
+4000 tokens are kept free for the instructions and the answer. A token is roughly 4 characters of English; we count 3 to stay safely under. For example, with a context of 32768 tokens (whatever `auto` chose, or a pin): `(32768 - 4000) * 3 = 86,304` characters, a typical 25 to 40 page paper.
 
 If the sections (titles plus text) fit, they are used unchanged and `truncated` is `False`. Otherwise:
 

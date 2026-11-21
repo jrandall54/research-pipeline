@@ -423,8 +423,8 @@ def test_e2e_default_vault_auto_picks_model_and_sends_resolved_values(vault, mon
         assert route.call_count > 0
         bodies = [json.loads(c.request.content) for c in route.calls]
         assert {b["model"] for b in bodies} == {"mid"}
-        # mid fits until 8 GB + 100_000 * n <= 20 GB, i.e. n = 120000 -> 117 * 1024 = 119808, ceiling 40960
-        assert {b["options"]["num_ctx"] for b in bodies} == {40960}
+        # mid fits until 8 GB + 100_000 * n <= 20 GB, i.e. n = 120000 -> 117 * 1024 = 119808, ceiling 40960, less one step of margin -> 39936
+        assert {b["options"]["num_ctx"] for b in bodies} == {39936}
         assert "summarized 2" in next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
         probes_after_first = len(fake.probes())
         assert probes_after_first > 0
@@ -466,14 +466,19 @@ def test_model_fit_prints_choice_and_writes_cache_and_show_reports_it(vault):
         fake.install(m)
         res = run_cli("model", "fit", "--vault", str(vault))
         assert res.exit_code == 0, res.output
-        assert "Using model mid with a context of 40960 tokens" in res.output
+        assert "Using model mid with a context of 39936 tokens" in res.output
         assert "big" in res.output  # what was tried
         n = len(fake.probes())
         run_cli("model", "fit", "--vault", str(vault))
         assert len(fake.probes()) > n  # fit always re-probes
     assert (vault / "cache" / "llm_fit.json").exists()
-    after = run_cli("model", "show", "--vault", str(vault)).output
-    assert "mid" in after and "40960" in after and "not probed yet" not in after
+    with respx.mock(assert_all_called=False) as m:
+        fake.install(m)
+        after = run_cli("model", "show", "--vault", str(vault)).output
+        fake.models["mid"]["digest"] = "new"  # the installed models changed: the cache is stale
+        stale = run_cli("model", "show", "--vault", str(vault)).output
+    assert "not probed yet" in stale and "last choice: mid" not in stale
+    assert "mid" in after and "39936" in after and "not probed yet" not in after
 
 
 def test_model_fit_with_no_models_exits_1_with_pull_hint(vault):
@@ -482,3 +487,101 @@ def test_model_fit_with_no_models_exits_1_with_pull_hint(vault):
         FakeOllama({}).install(m)
         res = run_cli("model", "fit", "--vault", str(vault))
     assert res.exit_code == 1 and "ollama pull" in res.output and "Traceback" not in res.output
+
+
+def test_run_releases_the_embedder_before_the_llm_is_resolved(vault, monkeypatch):
+    import gc
+    import sys
+    import types
+    import weakref
+
+    events: list[str] = []
+    made: list[weakref.ref] = []
+
+    def make_embedder():
+        e = FakeEmbedder()
+        made.append(weakref.ref(e))
+        return e
+
+    fake_torch = types.SimpleNamespace(cuda=types.SimpleNamespace(
+        is_available=lambda: True, empty_cache=lambda: events.append("empty_cache")))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    def llm():
+        gc.collect()
+        events.append("embedder gone" if made[0]() is None else "embedder alive")
+        events.append("llm resolved")
+        return AlwaysSummary([])
+
+    arxiv = parse_arxiv_atom((FIXTURES / "arxiv_atom.xml").read_text())
+    monkeypatch.setattr(
+        cli, "build_pipeline",
+        lambda config: Pipeline([FixtureSource("arxiv", arxiv)], make_embedder, seed_fetcher, llm, fetch_text),
+    )
+    assert run_cli("run", "--vault", str(vault)).exit_code == 0
+    assert events == ["empty_cache", "embedder gone", "llm resolved"]
+
+
+def test_release_gpu_memory_does_not_import_torch(monkeypatch):
+    import sys
+
+    monkeypatch.delitem(sys.modules, "torch", raising=False)
+    cli._release_gpu_memory()
+    assert "torch" not in sys.modules
+
+
+def test_model_fit_progress_goes_to_stderr_and_result_to_stdout(vault):
+    assert run_cli("model", "set-url", OLLAMA, "--vault", str(vault)).exit_code == 0
+    with respx.mock(assert_all_called=False) as m:
+        two_model_fake().install(m)
+        res = runner.invoke(cli.app, ["model", "fit", "--vault", str(vault)])
+    assert res.exit_code == 0
+    assert "trying big at 16384 tokens" in res.stderr
+    assert "trying" not in res.stdout and "Using model mid" in res.stdout
+
+
+def test_model_fit_with_both_pinned_says_pinned_and_checks_installed(vault):
+    assert run_cli("model", "set-url", OLLAMA, "--vault", str(vault)).exit_code == 0
+    assert run_cli("model", "set", "mid", "--vault", str(vault)).exit_code == 0
+    assert run_cli("model", "set-context", "16384", "--vault", str(vault)).exit_code == 0
+    fake = two_model_fake()
+    with respx.mock(assert_all_called=False) as m:
+        fake.install(m)
+        res = run_cli("model", "fit", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert "pinned: mid at 16384 tokens" in res.output
+    assert "probing" not in res.output.lower() and fake.probes() == []
+    assert "installed" in res.output
+
+
+def test_model_fit_with_both_pinned_and_model_missing_exits_1(vault):
+    assert run_cli("model", "set-url", OLLAMA, "--vault", str(vault)).exit_code == 0
+    assert run_cli("model", "set", "ghost", "--vault", str(vault)).exit_code == 0
+    assert run_cli("model", "set-context", "16384", "--vault", str(vault)).exit_code == 0
+    with respx.mock(assert_all_called=False) as m:
+        two_model_fake().install(m)
+        res = run_cli("model", "fit", "--vault", str(vault))
+    assert res.exit_code == 1 and "ghost" in res.output and "Traceback" not in res.output
+
+
+def test_model_fit_and_check_turn_odd_failures_into_one_clean_line(vault, monkeypatch):
+    assert run_cli("model", "set-url", OLLAMA, "--vault", str(vault)).exit_code == 0
+    with respx.mock(assert_all_called=False) as m:
+        m.get(f"{OLLAMA}/api/tags").mock(return_value=httpx.Response(200, content=b"<html>"))
+        for cmd in ("fit", "check"):
+            res = run_cli("model", cmd, "--vault", str(vault))
+            assert res.exit_code == 1 and "Traceback" not in res.output and res.output.strip()
+    with respx.mock(assert_all_called=False) as m:
+        two_model_fake().install(m)
+
+        def boom(*a, **k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cli.ollama_fit, "_write_cache", boom)
+        res = run_cli("model", "fit", "--vault", str(vault))
+    assert res.exit_code == 1 and "disk full" in res.output and "Traceback" not in res.output
+
+
+def test_model_check_help_mentions_probing():
+    res = run_cli("model", "check", "--help")
+    assert "probe" in res.output.lower()

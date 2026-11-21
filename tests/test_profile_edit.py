@@ -220,3 +220,10 @@ def test_set_categories_accepts_hyphenated_subcategories_rejects_uppercase_prefi
     for bad in (["CS.CR"], ["cs."], ["cs_CR"]):
         with pytest.raises(ConfigError):
             pe.set_categories(vault, bad)
+
+
+def test_set_llm_model_auto_is_stored_lowercase(vault):
+    for spelling in ("Auto", "AUTO", " auto "):
+        pe.set_llm_model(vault, "qwen3:14b")
+        pe.set_llm_model(vault, spelling)
+        assert load_config(vault / "config.yaml").llm_model == "auto"

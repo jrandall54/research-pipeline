@@ -111,3 +111,5 @@
 **`auto`** — the default for `llm_model` and `llm_num_ctx`: the pipeline picks the largest installed model that fits fully on the GPU and the largest context it can hold, caches the answer, and re-checks with `rpipe model fit`. See `llm.md`.
 
 **Probe** — a test load: we load a model at a given context with an empty prompt and check whether it sits fully on the GPU, then unload it. See `llm.md`.
+
+**Safety margin** — the 1024 tokens (one search step) subtracted from the largest context a probe measured, so the nightly run still fits if slightly less GPU memory is free than during the probe. Never applied to a context you pinned. See `llm.md`.

@@ -1,5 +1,6 @@
 """Command line interface."""
 
+import gc
 import json
 import sqlite3
 import sys
@@ -46,6 +47,19 @@ VaultOption = Annotated[
 ]
 
 
+def _progress(line: str) -> None:
+    """Short progress lines (e.g. which model is being probed) go to stderr."""
+    typer.echo(f"  {line}", err=True)
+
+
+def _release_gpu_memory() -> None:
+    """Hand back GPU memory the embedding model held (never imports torch just for this)."""
+    gc.collect()
+    torch = sys.modules.get("torch")
+    if torch is not None and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 @dataclass
 class Pipeline:
     """The pieces that touch the outside world; tests swap them for stubs."""
@@ -64,7 +78,7 @@ def build_pipeline(config: Config) -> Pipeline:
         sources=[arxiv, HfDailySource()],
         make_embedder=lambda: SentenceTransformerEmbedder(config.embedding_model),
         seed_fetcher=arxiv.fetch_by_ids,
-        make_llm=lambda: build_llm(config, config.vault_path),
+        make_llm=lambda: build_llm(config, config.vault_path, log=_progress),
         fulltext_fetcher=fetch_fulltext,
     )
 
@@ -216,6 +230,10 @@ def run(vault: VaultOption = None) -> None:
     counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
     seeds = _seed_texts(ctx, profile, pipeline, errors)
     counts |= run_triage(ctx.conn, embedder, profile, seeds)
+    # Triage is done with the embedder; free its GPU memory before the model probe measures
+    # what is free (the nightly summaries run without it).
+    del embedder
+    _release_gpu_memory()
     try:
         llm = _ready_llm(pipeline)
     except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
@@ -728,9 +746,10 @@ def model_show(vault: VaultOption = None) -> None:
     typer.echo(f"server: {cfg.llm_url}")
     typer.echo(f"context window (num_ctx): {cfg.llm_num_ctx}")
     if cfg.llm_model == "auto" or cfg.llm_num_ctx == "auto":
-        last = ollama_fit.last_choice(ctx.vault)
+        last = ollama_fit.cached_fit(cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
         if last is None:
-            typer.echo("last choice: not probed yet; runs on first use, or `rpipe model fit`")
+            typer.echo("last choice: not probed yet for these settings and installed models; "
+                       "it is probed on next use (or now with `rpipe model fit`)")
         else:
             typer.echo(f"last choice: {last.model} with a context of {last.num_ctx} tokens")
 
@@ -777,27 +796,27 @@ def model_fit(vault: VaultOption = None) -> None:
     """Probe Ollama now: choose the best installed model and the largest context that fits in GPU memory."""
     ctx = _open(vault)
     cfg = ctx.config
-    if cfg.llm_model != "auto" and cfg.llm_num_ctx != "auto":
-        typer.echo("Both the model and the context are pinned, so there is nothing to probe.")
-    else:
-        typer.echo("Probing Ollama: this loads and unloads models and can take a few minutes.")
     try:
+        if cfg.llm_model != "auto" and cfg.llm_num_ctx != "auto":
+            typer.echo(f"pinned: {cfg.llm_model} at {cfg.llm_num_ctx} tokens (nothing to probe)")
+            typer.echo(build_llm(cfg, ctx.vault).check())
+            return
+        typer.echo("Probing Ollama: this loads and unloads models and can take a few minutes.")
         fit = ollama_fit.resolve(
-            cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True,
-            log=lambda line: typer.echo(f"  {line}"),
+            cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True, log=_progress,
         )
-    except LlmError as exc:
+    except (LlmError, OSError, ValueError) as exc:
         raise _fail(str(exc)) from exc
     typer.echo(f"Using model {fit.model} with a context of {fit.num_ctx} tokens")
 
 
 @model_app.command("check")
 def model_check(vault: VaultOption = None) -> None:
-    """Check that Ollama is running and the configured model is installed."""
+    """Check that Ollama is running and the model is installed. With `auto` settings this may probe the GPU (slow the first time)."""
     ctx = _open(vault)
     try:
-        typer.echo(build_llm(ctx.config, ctx.vault).check())
-    except LlmError as exc:
+        typer.echo(build_llm(ctx.config, ctx.vault, log=_progress).check())
+    except (LlmError, OSError, ValueError) as exc:
         raise _fail(str(exc)) from exc
 
 

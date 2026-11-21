@@ -168,7 +168,7 @@ def test_model_check_cli(vault, monkeypatch):
         def check(self):
             return "ready"
 
-    monkeypatch.setattr(cli, "build_llm", lambda cfg, vault: Ok())
+    monkeypatch.setattr(cli, "build_llm", lambda cfg, vault, log=None: Ok())
     res = model(vault, "check")
     assert res.exit_code == 0 and "ready" in res.output
 
@@ -176,7 +176,7 @@ def test_model_check_cli(vault, monkeypatch):
         def check(self):
             raise LlmError("start it with `ollama serve`")
 
-    monkeypatch.setattr(cli, "build_llm", lambda cfg, vault: Bad())
+    monkeypatch.setattr(cli, "build_llm", lambda cfg, vault, log=None: Bad())
     res = model(vault, "check")
     assert res.exit_code == 1 and "ollama serve" in res.output
 

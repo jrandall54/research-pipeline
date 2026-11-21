@@ -97,3 +97,7 @@
 **Gold set** — a small collection (we aim for 10) of papers you know well, each with a list of key facts a correct summary must contain. It is the answer key we grade the model against. See `evaluation.md`.
 
 **Ground truth** — the known-correct answer that a measurement is compared with. Here it is your key facts: you wrote them from your own understanding of the paper, not from the model's output. See `evaluation.md`.
+
+**Accuracy check** — the human grading step of `rpipe eval`: for each gold paper you read the model's summary beside your key facts and answer yes or no to "is this accurate?". Done by a person on purpose, because a model judging itself shares its own blind spots. See `evaluation.md`.
+
+**Pass mark** — the share of gold papers that must be graded accurate for the model to pass the accuracy check: 90% (`PASS_MARK`), so 9 of 10. Ungraded papers count as not accurate. See `evaluation.md`.

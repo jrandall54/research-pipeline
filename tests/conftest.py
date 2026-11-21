@@ -78,3 +78,11 @@ def critique(cite: str = "3 Results") -> Critique:
         weaknesses=[Claim(text="One dataset only.", sections=[cite])],
         questions=["Does it generalise?"],
     )
+
+
+class AlwaysSummary(FakeLLM):
+    """Answers every request with a valid summary or critique, whatever the order."""
+
+    def generate(self, system, user, schema):
+        self.calls.append((system, user))
+        return summary() if schema.__name__ == "Summary" else critique()

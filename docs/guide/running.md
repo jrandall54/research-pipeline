@@ -65,6 +65,8 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 Model commands (`rpipe model show`, `rpipe model set NAME`, `rpipe model check`) view, change and test the local Ollama model used for summaries; see `llm.md`. `check` exits 1 with a fix hint if Ollama is not running or the model is not installed.
 
+Evaluation commands (`rpipe eval run`, `rpipe eval grade`, `rpipe eval report`) check summary accuracy against your gold set; see `evaluation.md`. `eval run` exits 1 if the gold set is empty or the model is unavailable.
+
 Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
 **Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, or `--date` is not a date.
@@ -169,4 +171,5 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 - `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `summarize`, `digest`, `build_pipeline`, `health_line` (the `profile` commands are in `profile.md`)
 - `src/research_pipeline/seeds.py`: seed text lookup and cache
 - `src/research_pipeline/summarize.py`: `run_summarize` (the per-paper loop)
+- `src/research_pipeline/evaluate.py`: `rpipe eval` (see `evaluation.md`)
 - `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`

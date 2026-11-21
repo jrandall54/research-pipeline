@@ -15,6 +15,7 @@ import typer
 from research_pipeline.collect import run_collect
 from research_pipeline.db import finish_run, open_db, papers_given_up_on, papers_to_summarize, start_run
 from research_pipeline.digest import write_digest
+from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
 from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, has_gold, load_gold, remove_gold
 from research_pipeline.llm import LLM, LlmError, OllamaClient
@@ -619,6 +620,93 @@ def gold_add_fact(
         if not add_fact(ctx.vault, paper_id, fact):
             raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
     typer.echo(f"Added a fact to {paper_id}.")
+
+
+eval_app = typer.Typer(help="Check summary accuracy against your gold set: run, grade, report.", no_args_is_help=True)
+app.add_typer(eval_app, name="eval")
+
+
+def _latest_eval(vault: Path) -> date:
+    day = latest_day(vault)
+    if day is None:
+        raise _fail("No eval yet. Run `rpipe eval run` first (it needs a gold set: `rpipe gold add`).")
+    return day
+
+
+@eval_app.command("run")
+def eval_run(vault: VaultOption = None) -> None:
+    """Summarize every gold-set paper with the local model and write a report to grade."""
+    ctx = _open(vault)
+    with _clean_errors():
+        papers = load_gold(ctx.vault)
+    if not papers:
+        raise _fail("Your gold set is empty. Add papers you know well with `rpipe gold add` first.")
+    if len(papers) < GOLD_TARGET:
+        typer.echo(f"Warning: the gold set has {len(papers)} papers; {GOLD_TARGET} make a fair test (rpipe gold add).")
+    pipeline = build_pipeline(ctx.config)
+    try:
+        llm = _ready_llm(pipeline)
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(f"model unavailable: {exc}") from exc
+
+    def abstract_for(paper_id: str) -> str:
+        found = pipeline.seed_fetcher([paper_id])
+        return found[0].abstract if found else ""
+
+    today = date.today()
+    if eval_exists(ctx.vault, today):
+        typer.echo(f"Replacing today's earlier eval ({today.isoformat()}); its grades are cleared.")
+    typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
+    with _clean_errors():
+        md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, ctx.config.llm_num_ctx, today, abstract_for)
+    typer.echo(f"Report written: {md}")
+    typer.echo("Next: rpipe eval grade")
+
+
+@eval_app.command("grade")
+def eval_grade(vault: VaultOption = None) -> None:
+    """Grade each summary of the latest eval against your key facts (y/n). Grades are saved one by one."""
+    ctx = _open(vault)
+    day = _latest_eval(ctx.vault)
+    with _clean_errors():
+        data = load_eval(ctx.vault, day)
+        gold = {g.paper_id: g for g in load_gold(ctx.vault)}
+    todo = ungraded(data)
+    if not todo:
+        typer.echo("Nothing left to grade. See the result with: rpipe eval report")
+        return
+    typer.echo(f"Grading eval {day.isoformat()}: {len(todo)} paper(s) to go. Ctrl-C stops; grades given are kept.")
+    try:
+        for e in todo:
+            assert e.summary is not None
+            typer.echo(f"\n{e.paper_id}  {e.title}")
+            for fact in gold[e.paper_id].key_facts if e.paper_id in gold else []:
+                typer.echo(f"  key fact: {fact}")
+            s = e.summary.summary
+            typer.echo(f"\n  {s.one_line}")
+            for label, c in (("Problem", s.problem), ("Approach", s.approach), ("Results", s.results), ("Limitations", s.limitations)):
+                typer.echo(f"  {label}: {c.text} [{', '.join(c.sections)}]")
+            while True:
+                answer = typer.prompt("Is this summary accurate? [y/n]").strip().lower()
+                if answer in ("y", "n"):
+                    break
+                typer.echo("Please answer y or n.")
+            note = typer.prompt("Note (optional)", default="", show_default=False).strip()
+            with _clean_errors():
+                save_grade(ctx.vault, day, Grade(paper_id=e.paper_id, accurate=answer == "y", note=note))
+    except (typer.Abort, KeyboardInterrupt, EOFError):
+        typer.echo("\nStopped. Grades already given are saved; run `rpipe eval grade` to continue.")
+        return
+    typer.echo("\nAll graded. See the result with: rpipe eval report")
+
+
+@eval_app.command("report")
+def eval_report_cmd(vault: VaultOption = None) -> None:
+    """Show the accuracy result of the latest eval against the pass mark."""
+    ctx = _open(vault)
+    day = _latest_eval(ctx.vault)
+    with _clean_errors():
+        typer.echo(eval_report(ctx.vault, day))
 
 
 model_app = typer.Typer(help="Show, change and check the local summary model.", no_args_is_help=True)

@@ -2,7 +2,7 @@
 
 ## What it does
 
-Every night the pipeline collects new computer-science, security and AI papers, scores them against your personal profile, and writes a short digest of the best ones into your vault (a folder of your own files, kept outside this repo). Each paper in the digest says why it was picked and carries a short summary and critique written by a local model (Ollama) from the paper's full text, with every claim citing the section it came from; code checks the citations and flags any that do not exist. If a paper has no full text, the summary uses the abstract and says so; if Ollama is down, the digest is still written with abstracts. Later phases add voting and note-linking.
+Every night the pipeline collects new computer-science, security and AI papers, scores them against your personal profile, and writes a short digest of the best ones into your vault (a folder of your own files, kept outside this repo). Each paper in the digest says why it was picked and carries a short summary and critique written by a local model (Ollama) from the paper's full text, with every claim citing the section it came from; code checks the citations and flags any that do not exist. If a paper has no full text, the summary uses the abstract and says so; if Ollama is down, the digest is still written with abstracts. Phase 2 is done when the summaries pass your own accuracy check: at least 9 of your 10 gold papers graded accurate with `rpipe eval` (see [evaluation.md](evaluation.md)). Later phases add voting and note-linking.
 
 ## How it works
 
@@ -44,11 +44,11 @@ New to the project? Read in this order:
 8. [llm.md](llm.md): the local model client and `rpipe model` commands
 9. [fulltext.md](fulltext.md): fetching arXiv HTML full text and stripping hidden text
 10. [summaries.md](summaries.md): cited summaries and critiques, the citation check and the context budget
-11. [evaluation.md](evaluation.md): the gold set and the `rpipe gold` commands
+11. [evaluation.md](evaluation.md): the gold set, the `rpipe gold` commands and the `rpipe eval` accuracy check
 12. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.

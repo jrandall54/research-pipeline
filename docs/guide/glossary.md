@@ -6,6 +6,8 @@
 
 **Vault** — the folder (default `~/research-vault/`) holding everything personal: config, profile, database, digests. Kept outside the repo.
 
+**arXiv category** — the subject tag every arXiv paper carries, such as `cs.CR` (security) or `cs.LG` (machine learning). Only papers in your configured categories are collected; the single value `all` means every category. See "Choosing categories" in `profile.md`.
+
 **Seed** — an arXiv id of a paper you like; new papers are ranked by similarity to your seeds. You can add one from an arXiv link, an id or a title search (see `profile.md`).
 
 **FTS5** — SQLite's full-text search module. It builds an index of the words in a table so you can find rows by word quickly (`MATCH 'attention'`) and rank them, instead of scanning every row.

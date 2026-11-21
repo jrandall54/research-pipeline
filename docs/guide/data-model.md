@@ -37,7 +37,7 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 | --- | --- |
 | `vault_path` | Informational (required): the vault used is set by `--vault` / `$RESEARCH_VAULT` / the default, not by this field. |
 | `arxiv_max_results` | Cap on arXiv papers fetched per run. Default 1000, at least 1. |
-| `arxiv_categories` | arXiv categories to collect. Default `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE`. |
+| `arxiv_categories` | arXiv categories to collect. Default `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE`, or exactly `["all"]` for every category. |
 | `embedding_model` | Model used to turn text into vectors. Default `BAAI/bge-small-en-v1.5`. |
 | `rss_feeds` | Extra RSS feed URLs; default none. |
 

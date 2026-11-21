@@ -16,10 +16,13 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
-from research_pipeline.models import Config, Profile
+from research_pipeline.models import ALL_CATEGORIES, CATEGORY_RE, Config, Profile
 from research_pipeline.vault import ConfigError, load_config, load_profile
 
-CATEGORY_RE = re.compile(r"^[a-z-]+(\.[A-Z]{2})?$")
+CATEGORY_HELP = (
+    "use names like cs.CR, stat.ML or hep-th (full list: https://arxiv.org/category_taxonomy), "
+    "or the single word all"
+)
 _NEW_ID_RE = re.compile(r"^\d{4}\.\d{4,5}$")
 _OLD_ID_RE = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}$")
 
@@ -224,11 +227,17 @@ def set_top_n(vault: Path, n: int) -> None:
 def set_categories(vault: Path, cats: list[str]) -> None:
     path = _config_path(vault)
     cleaned = [c.strip() for c in cats]
+    cleaned = [ALL_CATEGORIES if c.lower() == ALL_CATEGORIES else c for c in cleaned]
+    if ALL_CATEGORIES in cleaned and cleaned != [ALL_CATEGORIES]:
+        raise ConfigError(
+            f"{path}: 'all' means every arXiv category, so it cannot be combined with "
+            "others: give either all, or a list of categories"
+        )
     bad = [c for c in cleaned if not CATEGORY_RE.match(c)]
     if bad or not cleaned:
         raise ConfigError(
-            f"{path}: invalid arXiv categories {bad or cats!r}: "
-            "use names like cs.CR, stat.ML or hep-th, and give at least one"
+            f"{path}: invalid arXiv categories {bad or cats!r}: {CATEGORY_HELP}; "
+            "give at least one"
         )
 
     def change(data) -> bool:

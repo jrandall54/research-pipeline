@@ -278,3 +278,26 @@ def test_one_arxiv_client_per_command_is_closed(vault, monkeypatch):
     monkeypatch.setattr(cli, "make_arxiv", lambda config: made.append(1) or stub)
     run(vault, "add-seed", "2307.15043", "--yes")
     assert len(made) == 1 and closed == [1]
+
+
+def test_set_categories_all_and_show(vault):
+    res = run(vault, "set-categories", "all")
+    assert res.exit_code == 0 and "all of arXiv" in res.output
+    assert load_config(vault / "config.yaml").arxiv_categories == ["all"]
+    res = run(vault, "show")
+    assert "arXiv categories: all of arXiv" in res.output
+    res = run(vault, "set-categories", "all", "cs.CR")
+    assert res.exit_code == 1 and "all" in res.output and "Traceback" not in res.output
+    assert load_config(vault / "config.yaml").arxiv_categories == ["all"]
+
+
+def test_set_categories_help_explains_categories():
+    res = runner.invoke(cli.app, ["profile", "set-categories", "--help"])
+    assert res.exit_code == 0
+    for text in ("cs.CR", "category_taxonomy", "all"):
+        assert text in res.output
+
+
+def test_invalid_category_error_points_at_taxonomy(vault):
+    res = run(vault, "set-categories", "CS-cr")
+    assert res.exit_code == 1 and "https://arxiv.org/category_taxonomy" in res.output

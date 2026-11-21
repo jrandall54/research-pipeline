@@ -4,6 +4,7 @@
 vault_path: __VAULT_PATH__
 
 # arXiv categories to collect from each night.
+# Use ["all"] for every category (no filter; far more papers per night).
 # cs.LG machine learning, cs.CL language, cs.CR security, cs.OS operating systems, cs.SE software engineering.
 arxiv_categories: __CATEGORIES__
 

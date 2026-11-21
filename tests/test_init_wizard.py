@@ -231,3 +231,20 @@ class _FakeClient:
 
     def close(self):
         pass
+
+
+def test_wizard_explains_categories_before_asking(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    result = init(tmp_path, "\n\n\n")
+    out = result.output
+    assert "subject tag" in out and "cs.CR" in out and "https://arxiv.org/category_taxonomy" in out
+    assert "rpipe profile set-categories" in out and "all" in out
+    assert out.index("subject tag") < out.index("arXiv categories (comma-separated)")
+
+
+def test_wizard_all_stores_all(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    result = init(tmp_path, "\nall\n\n")
+    assert result.exit_code == 0, result.output
+    assert load_config(tmp_path / "v" / "config.yaml").arxiv_categories == ["all"]
+    assert "all of arXiv" in result.output

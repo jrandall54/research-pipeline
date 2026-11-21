@@ -273,7 +273,21 @@ def profile_show(vault: VaultOption = None) -> None:
     typer.echo(f"Followed authors:\n{_numbered(profile.followed_authors)}")
     typer.echo(f"Keywords:\n{_numbered(profile.keywords)}")
     typer.echo(f"Top N: {profile.top_n}")
-    typer.echo(f"arXiv categories: {', '.join(ctx.config.arxiv_categories)}")
+    typer.echo(f"arXiv categories: {_categories_text(ctx.config.arxiv_categories)}")
+
+
+def _categories_text(cats: list[str]) -> str:
+    return "all of arXiv" if cats == ["all"] else ", ".join(cats)
+
+
+CATEGORY_HELP = (
+    "An arXiv category is the subject tag every paper carries (cs.CR = security). "
+    "Only papers in your categories are collected.\n"
+    "Common ones: cs.CR security, cs.LG machine learning, cs.AI AI, cs.CL language/LLMs, "
+    "cs.OS operating systems, cs.SE software engineering, cs.DC distributed computing, "
+    "cs.NI networking, stat.ML statistical ML.\n"
+    "Full list: https://arxiv.org/category_taxonomy"
+)
 
 
 def _a(word: str) -> str:
@@ -418,14 +432,26 @@ def profile_set_top_n(
 
 @profile_app.command("set-categories")
 def profile_set_categories(
-    categories: Annotated[list[str], typer.Argument(help="arXiv categories, e.g. cs.CR stat.ML hep-th.")],
+    categories: Annotated[list[str], typer.Argument(help="arXiv categories, e.g. cs.CR stat.ML, or the single word all.")],
     vault: VaultOption = None,
 ) -> None:
-    """Replace the arXiv categories the pipeline collects from."""
+    """Replace the arXiv categories the pipeline collects from.
+
+    An arXiv category is the subject tag every paper carries (cs.CR = security).
+    Only papers in your categories are collected.
+
+    Common ones: cs.CR security, cs.LG machine learning, cs.AI AI, cs.CL language/LLMs,
+    cs.OS operating systems, cs.SE software engineering, cs.DC distributed computing,
+    cs.NI networking, stat.ML statistical ML. Full list: https://arxiv.org/category_taxonomy
+
+    Not sure yet? Use `all` (alone) to collect every category. That fetches far more
+    papers each night (the arxiv_max_results cap still applies).
+    """
     ctx = _open(vault)
     with _clean_errors():
         profile_edit.set_categories(ctx.vault, categories)
-    typer.echo(f"arXiv categories are now: {', '.join(c.strip() for c in categories)}")
+    cleaned = ["all" if c.strip().lower() == "all" else c.strip() for c in categories]
+    typer.echo(f"arXiv categories are now: {_categories_text(cleaned)}")
 
 
 # ---------------------------------------------------------------- init wizard
@@ -477,11 +503,17 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
 def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
     current = ", ".join(config.arxiv_categories)
     if not fresh_config:
-        typer.echo(f"arXiv categories: {current}")
+        typer.echo(f"arXiv categories: {_categories_text(config.arxiv_categories)}")
         if not typer.confirm("Change categories?", default=False):
             return
+    typer.echo(CATEGORY_HELP)
+    typer.echo(
+        "Press Enter to keep the default, or type all if you are not sure (collects "
+        "everything; more to fetch and rank). Change it any time with "
+        "rpipe profile set-categories."
+    )
     entered = typer.prompt("arXiv categories (comma-separated)", default=current)
-    cats = _split(entered)
+    cats = ["all" if c.lower() == "all" else c for c in _split(entered)]
     if cats and cats != config.arxiv_categories:
         try:
             profile_edit.set_categories(vault, cats)

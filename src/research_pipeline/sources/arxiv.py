@@ -14,6 +14,10 @@ from research_pipeline.sources.base import SourceError
 API_URL = "https://export.arxiv.org/api/query"
 USER_AGENT = "research-pipeline/0.1"
 PAGE_SIZE = 100
+# The arXiv API has no "everything" query, so for category "all" we ask for papers
+# submitted in a date range that spans all of arXiv (1991 onward); with
+# sortBy=submittedDate descending this returns the newest papers first.
+ALL_QUERY = "submittedDate:[199101010000 TO 209912312359]"
 MIN_SPACING = 3.0  # seconds between API calls, per arXiv's terms of use
 
 _ATOM = "{http://www.w3.org/2005/Atom}"
@@ -114,7 +118,10 @@ class ArxivSource:
         without seeing a known id sets ``last_warning``.
         """
         self.last_warning = None
-        query = " OR ".join(f"cat:{c}" for c in self.categories)
+        if self.categories == ["all"]:
+            query = ALL_QUERY
+        else:
+            query = " OR ".join(f"cat:{c}" for c in self.categories)
         papers: list[PaperMeta] = []
         while len(papers) < self.max_results:
             size = min(PAGE_SIZE, self.max_results - len(papers))

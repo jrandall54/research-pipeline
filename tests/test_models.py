@@ -43,3 +43,13 @@ def test_config_default_arxiv_max_results_and_floor():
     assert Config(vault_path="/v").arxiv_max_results == 1000
     with pytest.raises(ValidationError):
         Config(vault_path="/v", arxiv_max_results=0)
+
+
+def test_config_accepts_all_but_not_mixed_or_bad_categories():
+    from research_pipeline.models import Config
+
+    assert Config(vault_path="/v", arxiv_categories=["all"]).arxiv_categories == ["all"]
+    assert Config(vault_path="/v", arxiv_categories=["cs.CR", "hep-th"]).arxiv_categories == ["cs.CR", "hep-th"]
+    for bad in (["all", "cs.CR"], ["ALL"], ["CS-cr"], []):
+        with pytest.raises(ValidationError):
+            Config(vault_path="/v", arxiv_categories=bad)

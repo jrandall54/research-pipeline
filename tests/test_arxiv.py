@@ -230,3 +230,38 @@ def test_set_known_checker_installs_the_callable():
     src = ArxivSource(["cs.LG"])
     src.set_known_checker(lambda pid: True)
     assert src._is_known("x") is True
+
+
+ALL_QUERY = "submittedDate:[199101010000 TO 209912312359]"
+
+
+@respx.mock
+def test_all_categories_sends_date_range_query_not_cat_filter():
+    route = respx.get(API).mock(return_value=httpx.Response(200, text=feed(2)))
+    src = ArxivSource(["all"], max_results=5, sleep=lambda s: None)
+    assert len(src.fetch()) == 2
+    params = route.calls[0].request.url.params
+    assert params["search_query"] == ALL_QUERY
+    assert params["sortBy"] == "submittedDate"
+    assert params["sortOrder"] == "descending"
+
+
+@respx.mock
+def test_all_categories_pages_and_warns_at_cap():
+    route = respx.get(API).mock(
+        side_effect=[httpx.Response(200, text=feed(100, 0)), httpx.Response(200, text=feed(50, 100))]
+    )
+    src = ArxivSource(["all"], max_results=150, sleep=lambda s: None, is_known=_known(set()))
+    assert len(src.fetch()) == 150
+    assert [c.request.url.params["search_query"] for c in route.calls] == [ALL_QUERY] * 2
+    assert [c.request.url.params["start"] for c in route.calls] == ["0", "100"]
+    assert src.last_warning is not None and "max_results (150)" in src.last_warning
+
+
+@respx.mock
+def test_all_categories_stops_at_known_paper():
+    route = respx.get(API).mock(return_value=httpx.Response(200, text=feed(100, 0)))
+    src = ArxivSource(["all"], max_results=1000, sleep=lambda s: None,
+                      is_known=_known({"2601.00050"}))
+    assert len(src.fetch()) == 100
+    assert len(route.calls) == 1 and src.last_warning is None

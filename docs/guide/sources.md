@@ -22,6 +22,8 @@ The API is a plain HTTPS GET that returns an **Atom feed**: an XML document with
    https://export.arxiv.org/api/query?search_query=cat:cs.LG+OR+cat:cs.CR&sortBy=submittedDate&sortOrder=descending&start=0&max_results=100
    ```
 
+   If `arxiv_categories` is `["all"]` there is no category filter. The API has no "everything" query (`all:*` is only a text-field wildcard and arXiv does not document it as match-everything, so it was not used), so the query becomes the date range `submittedDate:[199101010000 TO 209912312359]`, which spans every paper arXiv holds; the same `sortBy=submittedDate` descending then gives the newest first. A live check returned about 3.2 million matches, newest first. Paging, stopping at a known paper and the `arxiv_max_results` cap work exactly as above, but because all of arXiv arrives each night (well over a thousand papers a day) the cap is more likely to bind and more papers get embedded and ranked.
+
 2. Parse each `<entry>` into a `PaperMeta`:
 
    | Atom element | `PaperMeta` field | Notes |

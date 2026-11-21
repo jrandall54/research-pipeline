@@ -195,3 +195,18 @@ def test_edit_of_block_list_keeps_two_space_indent(vault):
     path.write_text(HAND_WRITTEN)
     pe.add_topic(vault, "third")
     assert "topics:\n  - a topic  # why\n  - another\n  - third\n" in path.read_text()
+
+
+def test_set_categories_all_normalised_and_exclusive(vault):
+    pe.set_categories(vault, ["ALL"])
+    assert load_config(vault / "config.yaml").arxiv_categories == ["all"]
+    before = (vault / "config.yaml").read_bytes()
+    for bad in (["all", "cs.CR"], ["cs.CR", "All"]):
+        with pytest.raises(ConfigError, match="all"):
+            pe.set_categories(vault, bad)
+    assert (vault / "config.yaml").read_bytes() == before
+
+
+def test_set_categories_error_points_at_examples_and_taxonomy(vault):
+    with pytest.raises(ConfigError, match="category_taxonomy"):
+        pe.set_categories(vault, ["CS-cr"])

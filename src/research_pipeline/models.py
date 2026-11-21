@@ -1,10 +1,14 @@
 """Core data models shared by every stage of the pipeline."""
 
+import re
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+CATEGORY_RE = re.compile(r"^[a-z-]+(\.[A-Z]{2})?$")
+ALL_CATEGORIES = "all"  # sentinel: every arXiv category, i.e. no category filter
 
 
 class Status(StrEnum):
@@ -58,3 +62,15 @@ class Config(BaseModel):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     rss_feeds: list[str] = Field(default_factory=list)
     arxiv_max_results: int = Field(default=1000, ge=1)
+
+    @field_validator("arxiv_categories")
+    @classmethod
+    def _check_categories(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("give at least one arXiv category, or 'all'")
+        if ALL_CATEGORIES in v and v != [ALL_CATEGORIES]:
+            raise ValueError("'all' cannot be combined with other categories")
+        bad = [c for c in v if not CATEGORY_RE.match(c)]
+        if bad:
+            raise ValueError(f"invalid arXiv categories {bad}")
+        return v

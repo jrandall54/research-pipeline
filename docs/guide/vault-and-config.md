@@ -29,7 +29,7 @@ Phase 1 only writes `vault.sqlite`, `digests/` and `cache/` (plus the two YAML f
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `vault_path` | the vault's path (set by `init`) | Informational only: the vault actually used is chosen by `--vault`, then `$RESEARCH_VAULT`, then `~/research-vault`; this field is never read back. Required. |
-| `arxiv_categories` | `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE` | arXiv categories collected each night. |
+| `arxiv_categories` | `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE` | arXiv categories collected each night, or `["all"]` for every category (no filter; much more to fetch and rank, see "Choosing categories" in `profile.md`). Change with `rpipe profile set-categories`. |
 | `arxiv_max_results` | `1000` | Safety cap on arXiv papers fetched per run (at least 1). Paging stops earlier at the first page with an already-stored paper; hitting the cap first adds a warning to the health line (expected on the first run). See `sources.md`. |
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | Model that turns text into vectors for similarity (see `glossary.md`). |
 | `rss_feeds` | `[]` | Extra feed URLs (read but not used yet: RSS collection is a later phase). |
@@ -59,7 +59,7 @@ Seed ids may be written with or without quotes (`2301.10000` or `"2301.10000"`);
 **Part 2, only in a terminal (the wizard):**
 
 1. **Topics.** On a new vault it explains what a topic is and asks `Topic (blank to finish)` repeatedly. Each topic is saved the moment you press Enter. Once you enter a topic of your own, the template examples you did not type are removed; enter none and the examples stay. A topic you type is never removed, even if it happens to match an example (typing only an example keeps all three examples). On an existing vault it shows your topics and asks `Add more topics? [y/N]`; the default is no, so Enter changes nothing. Whether the topics are still the template examples is decided from their content, not from whether this run created the file: if an earlier run was interrupted before any topic (or `init` first ran outside a terminal), the list is labelled "these are the template examples, not topics of your own", and the first topic of your own replaces them exactly as on a new vault. A profile whose topics differ from the template at all is treated as yours and nothing is removed.
-2. **Categories.** On a new vault it asks for the arXiv categories (default shown). On an existing vault it shows them and asks `Change categories? [y/N]`.
+2. **Categories.** On a new vault it first explains in a few lines what an arXiv category is (with common examples, the taxonomy URL, `all` for "not sure", and the command to change it later), then asks for the categories (default shown; Enter keeps it, `all` collects everything). On an existing vault it shows them and asks `Change categories? [y/N]`.
 3. **Seeds.** It explains in a line what a seed paper is, then asks `Paper link, arXiv id or title (blank to finish)` repeatedly. Each entry goes through the same look-up, confirm and pick flow as `rpipe profile add-seed` and is saved at once. If arXiv cannot be reached, or the seed cannot be saved, that entry is skipped with a one-line message and the wizard carries on. Fewer than 5 seeds prints a tip to add more later.
 4. **Summary.** It prints the `rpipe profile show` view and the next step, `rpipe run`.
 
@@ -74,6 +74,10 @@ Topics are short phrases for what you care about, e.g. prompt injection attacks 
 Topic (blank to finish): > prompt injection attacks on LLM agents
 Added topic: prompt injection attacks on LLM agents
 Topic (blank to finish): > 
+An arXiv category is the subject tag every paper carries (cs.CR = security). Only papers in your categories are collected.
+Common ones: cs.CR security, cs.LG machine learning, cs.AI AI, cs.CL language/LLMs, cs.OS operating systems, cs.SE software engineering, cs.DC distributed computing, cs.NI networking, stat.ML statistical ML.
+Full list: https://arxiv.org/category_taxonomy
+Press Enter to keep the default, or type all if you are not sure (collects everything; more to fetch and rank). Change it any time with rpipe profile set-categories.
 arXiv categories (comma-separated) [cs.LG, cs.CL, cs.CR, cs.OS, cs.SE]: > 
 Seed papers are papers you like; the ranker finds new papers similar to them.
 Paper link, arXiv id or title (blank to finish): > https://arxiv.org/abs/2307.15043

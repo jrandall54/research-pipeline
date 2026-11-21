@@ -81,3 +81,11 @@
 **Hidden-text attack** — a prompt injection that a human reader cannot see: white text on a white page, a zero-size font, a box moved off-screen, or invisible Unicode characters. We strip all of these before a model reads a paper. See `fulltext.md`.
 
 **LaTeXML / arXiv HTML** — LaTeXML is the tool arXiv uses to convert a paper's LaTeX source into a web page (`arxiv.org/html/<id>`) with real headings and paragraphs. Not every paper has one, mostly older ones. See `fulltext.md`.
+
+**Hallucination** — when a language model states something fluent and confident that is not in its source (or not true at all), for example a result the paper never reports. See `summaries.md`.
+
+**Grounding** — tying each statement a model makes to the source text it came from, so a reader (or code) can check it. Our summaries are grounded by citing paper sections. See `summaries.md`.
+
+**Citation check** — code comparing every section title a summary claim cites with the paper's real section titles. A title that matches none triggers one retry; if it is still wrong the claim is flagged "unverified". It proves the section exists, not that it says what the claim says. See `summaries.md`.
+
+**Truncation** — cutting text so it fits the model's context window. We drop references and appendices first, then trim every section by the same fraction, and mark the summary `truncated`. See `summaries.md`.

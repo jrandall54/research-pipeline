@@ -41,10 +41,11 @@ New to the project? Read in this order:
 7. [profile.md](profile.md): the `rpipe profile` commands and how they edit safely
 8. [llm.md](llm.md): the local model client and `rpipe model` commands
 9. [fulltext.md](fulltext.md): fetching arXiv HTML full text and stripping hidden text
-10. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+10. [summaries.md](summaries.md): cited summaries and critiques, the citation check and the context budget
+11. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `fulltext.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `fulltext.py`, `prompts.py`, `summarize.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.

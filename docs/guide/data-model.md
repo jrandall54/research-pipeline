@@ -112,12 +112,12 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 
 ### Other tables
 
-Created now so later phases need no migration; unused in Phase 1 except `runs` and `embeddings`.
+Created now so later phases need no migration. Phase 1 uses `runs` and `embeddings`; Phase 2 adds helpers for `fulltexts` and `summaries`.
 
 | Table | Columns | Purpose |
 | --- | --- | --- |
 | `embeddings` | `item_id`, `embedding_model`, `vector` (BLOB), `dim`; primary key (`item_id`, `embedding_model`) | Cached vectors, one per item per model, so changing the model never mixes vectors. |
-| `summaries` | `paper_id`, `kind`, `text`, `model`, `created_at`; primary key (`paper_id`, `kind`) | LLM summaries (later phase). |
+| `summaries` | `paper_id`, `kind`, `text`, `model`, `created_at`; primary key (`paper_id`, `kind`) | A paper's model-written summary and critique ([summaries.md](summaries.md)): one row with `kind = summary` and one with `kind = critique`, `text` holding JSON and `model` the model name. The summary row's JSON also carries `basis` (`full_text` or `abstract`), `truncated` and `unverified`. `save_summary()` replaces both rows (no commit; the caller commits); `get_summary()` returns a `PaperSummary`, or `None` unless both rows exist. |
 | `fulltexts` | `paper_id` (primary key, references `papers`), `sections` (JSON list of `{title, text}`), `fetched_at` | A paper's arXiv HTML full text, hidden text already removed, split into titled sections (`fulltext.md`). `save_fulltext()` replaces any earlier copy; `get_fulltext()` returns `Section` objects or `None`. |
 | `votes` | `id`, `paper_id`, `vote` (+1/-1), `created_at` | Your thumbs up/down (later phase). |
 | `links` | `src_id`, `dst_id`, `kind`, `created_at`; primary key (all three) | Relations between items, e.g. a paper and a note (later phase). |

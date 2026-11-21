@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from research_pipeline.models import PaperMeta, Section, Status
+from research_pipeline.summarize import Critique, PaperSummary, Summary
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -236,3 +237,48 @@ def get_fulltext(conn: sqlite3.Connection, paper_id: str) -> list[Section] | Non
     if row is None:
         return None
     return [Section(**d) for d in json.loads(row["sections"])]
+
+
+def save_summary(
+    conn: sqlite3.Connection, paper_id: str, result: PaperSummary, model: str
+) -> None:
+    """Store (or replace) a paper's summary and critique rows. Does not commit.
+
+    The `summary` row's JSON also carries `basis`, `truncated` and `unverified`.
+    """
+    now = _now()
+    summary_json = {
+        **result.summary.model_dump(),
+        "basis": result.basis,
+        "truncated": result.truncated,
+        "unverified": result.unverified,
+    }
+    conn.executemany(
+        "INSERT OR REPLACE INTO summaries (paper_id, kind, text, model, created_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        [
+            (paper_id, "summary", json.dumps(summary_json), model, now),
+            (paper_id, "critique", result.critique.model_dump_json(), model, now),
+        ],
+    )
+
+
+def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
+    """The stored summary and critique for a paper, or None unless both rows exist."""
+    rows = {
+        r["kind"]: json.loads(r["text"])
+        for r in conn.execute(
+            "SELECT kind, text FROM summaries WHERE paper_id = ? AND kind IN"
+            " ('summary', 'critique')",
+            (paper_id,),
+        )
+    }
+    if set(rows) != {"summary", "critique"}:
+        return None
+    s = rows["summary"]
+    meta = {k: s.pop(k) for k in ("basis", "truncated", "unverified")}
+    return PaperSummary(
+        summary=Summary.model_validate(s),
+        critique=Critique.model_validate(rows["critique"]),
+        **meta,
+    )

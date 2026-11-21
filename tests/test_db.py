@@ -154,3 +154,31 @@ def test_fulltext_round_trip_and_unknown(tmp_path):
     save_fulltext(conn, "2401.00001", secs[:1])  # overwrite
     assert get_fulltext(conn, "2401.00001") == secs[:1]
     assert get_fulltext(conn, "nope") is None
+
+
+def test_summary_round_trip_and_absent(tmp_path):
+    from research_pipeline.db import get_summary, save_summary
+    from research_pipeline.summarize import Claim, Critique, PaperSummary, Summary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    assert get_summary(conn, "2401.00001") is None
+    c = Claim(text="t", sections=["1 Intro"])
+    result = PaperSummary(
+        summary=Summary(one_line="o", problem=c, approach=c, results=c, limitations=c),
+        critique=Critique(strengths=[c], weaknesses=[], questions=["q?"]),
+        basis="abstract",
+        truncated=True,
+        unverified=["t"],
+    )
+    save_summary(conn, "2401.00001", result, "qwen3:14b")
+    assert get_summary(conn, "2401.00001") == result
+    rows = conn.execute(
+        "SELECT kind, model FROM summaries WHERE paper_id = ? ORDER BY kind", ("2401.00001",)
+    ).fetchall()
+    assert [(r["kind"], r["model"]) for r in rows] == [
+        ("critique", "qwen3:14b"), ("summary", "qwen3:14b")
+    ]
+    save_summary(conn, "2401.00001", result.model_copy(update={"unverified": []}), "m2")
+    assert get_summary(conn, "2401.00001").unverified == []
+    assert get_summary(conn, "nope") is None

@@ -143,3 +143,10 @@ class ArxivSource:
                 self._get({"id_list": ",".join(batch), "max_results": len(batch)})
             )
         return papers
+
+    def search_title(self, query: str, max_results: int = 5) -> list[PaperMeta]:
+        """Papers whose title matches `query` (used to find a seed by name)."""
+        quoted = query.replace('"', " ")
+        return self._get(
+            {"search_query": f'ti:"{quoted}"', "start": 0, "max_results": max_results}
+        )

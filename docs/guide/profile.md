@@ -53,18 +53,38 @@ Normal YAML libraries (including the `pyyaml` the pipeline reads with) throw com
 
 Categories must match `^[a-z-]+(\.[A-Z]{2})?$`: `cs.CR`, `stat.ML`, `math.OC` and `hep-th` are accepted; `CS-cr` and the empty string are not, and the list cannot be empty.
 
+### Adding a seed: link, id or title
+
+A **seed** is a paper you already like; the ranker looks for new papers close to it. You should not have to dig out an id, so `rpipe profile add-seed` (arriving with the profile commands) accepts whatever you have, and `seed_input.py` works out what it is.
+
+| You type | Treated as | What happens |
+| --- | --- | --- |
+| `https://arxiv.org/abs/2307.15043` | id `2307.15043` | Looked up by id. |
+| `arxiv.org/pdf/2307.15043v2.pdf` | id `2307.15043` | Scheme optional; `vN` and `.pdf` removed. |
+| `http://arxiv.org/html/2307.15043v1` | id `2307.15043` | `abs`, `pdf` and `html` links all work. |
+| `2307.15043` or `arXiv:2307.15043` | id `2307.15043` | Bare new-style id. |
+| `hep-th/9901001` | id `hep-th/9901001` | Old-style id. |
+| `Universal and Transferable Adversarial Attacks` | title | Searched on arXiv; you pick from up to 5 results. |
+
+Steps: (1) `parse_seed_input` returns `("id", ...)` or `("title", ...)`, reusing `normalise_arxiv_id` so there is one definition of an id. (2) `find_seed_candidates` asks arXiv: an id gives 0 or 1 paper, a title gives up to 5. (3) The user confirms one. (4) `cache_seed` stores its `title\nabstract` in `<vault>/cache/seeds.json` and `add_seed_id` adds the id to `profile.yaml`.
+
+Why the text is cached at once: we already fetched the abstract to show you the choice, so storing it means the next `rpipe run` does not need the network to embed that seed (`resolve_seed_texts` reads this cache before fetching). The cache is written atomically, like the profile, and merging keeps the other seeds already in it.
+
+Limits: title search matches words in the title, so the exact title or its distinctive words work best; vague descriptions ("that jailbreak paper") will not. If nothing matches, use the arXiv link or id.
+
 ## Why it's built this way
 
 * **Commands rather than editing.** The pipeline is for people with different interests (the AI club), most of whom should not need to know YAML. A typo in a hand-edited file stops the nightly run; a command refuses the typo up front. The files stay plain YAML so power users may still edit them.
 * **Round-trip YAML instead of `pyyaml`.** Rejected: loading with `pyyaml` and dumping back, which deletes every comment. Rejected: editing the text with regular expressions, which breaks on any layout we did not predict.
 * **Validate with the real models.** One definition of "valid" (`Profile`, `Config`) for the pipeline and the editor, so the editor can never write a file the pipeline then refuses.
 * **Refuse an already-invalid file.** Editing on top of a broken file could hide the problem or make it worse; the user gets the original error instead.
+* **Accept links, ids and titles.** Rejected: id only, because club members rarely know ids but always have a link or a title. Rejected: auto-picking the top title hit, because a wrong seed silently skews every ranking; the user confirms instead.
 * **Atomic write instead of overwrite in place.** A crash during a plain write can leave a truncated file, which would break every later run.
 
 ## How to run / check it
 
 ```
-uv run pytest tests/test_profile_edit.py -q
+uv run pytest tests/test_profile_edit.py tests/test_seed_input.py -q
 ```
 
 The tests build a throwaway vault with `init_vault`, make edits and assert on the loaded result, including that comments survive, that an invalid file is left byte-for-byte unchanged, and that a failing `os.replace` leaves no temporary file behind.
@@ -73,4 +93,4 @@ Fresh vaults now start with `seeds: []` (the old placeholder ids are gone); `rpi
 
 ## Where the code is
 
-`src/research_pipeline/profile_edit.py` (editing functions and normalisation), `src/research_pipeline/defaults/profile.yaml` (template), `src/research_pipeline/vault.py` (`load_profile`, `load_config`, `ConfigError`), `src/research_pipeline/models.py` (`Profile`, `Config`). Tests: `tests/test_profile_edit.py`.
+`src/research_pipeline/profile_edit.py` (editing functions and normalisation), `src/research_pipeline/seed_input.py` (input parsing, candidate lookup), `src/research_pipeline/seeds.py` (`cache_seed`), `src/research_pipeline/sources/arxiv.py` (`search_title`), `src/research_pipeline/defaults/profile.yaml` (template), `src/research_pipeline/vault.py` (`load_profile`, `load_config`, `ConfigError`), `src/research_pipeline/models.py` (`Profile`, `Config`). Tests: `tests/test_profile_edit.py`, `tests/test_seed_input.py` (offline; the title fixture is a real arXiv response trimmed to the fields we use, plus one hand-written entry).

@@ -2,7 +2,9 @@
 
 import json
 import logging
+import os
 import sqlite3
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,6 +31,28 @@ def _read_cache(path: Path) -> dict[str, str]:
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _write_cache(path: Path, cache: dict[str, str]) -> None:
+    """Write the cache atomically: temp file in the same folder, then rename over."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(cache, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def cache_seed(cache_path: Path, meta: PaperMeta) -> None:
+    """Merge one paper's `title\\nabstract` into the seed cache."""
+    cache = _read_cache(cache_path)
+    cache[meta.id] = _text(meta.title, meta.abstract)
+    _write_cache(cache_path, cache)
 
 
 def resolve_seed_texts(
@@ -67,7 +91,6 @@ def resolve_seed_texts(
     new = {p.id: _text(p.title, p.abstract) for p in fetched if p.id in missing}
     if new:
         cache.update(new)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+        _write_cache(cache_path, cache)
         texts.update(new)
     return texts

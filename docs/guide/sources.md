@@ -62,6 +62,10 @@ The API returns at most a page of results per call. We ask for pages of 100: `st
 
 `fetch_by_ids(["1706.03762", ...])` sends `id_list=<comma-separated ids>` instead of a search query, up to 100 ids per call, with the same spacing. It returns one `PaperMeta` per id arXiv knows. Seeds are not stored in the `papers` table (they would show up in triage and the digest); `resolve_seed_texts` in `seeds.py` caches them in `<vault>/cache/seeds.json` (see `triage.md`).
 
+#### Seed lookup by title
+
+`search_title("Universal and Transferable")` sends `search_query=ti:"Universal and Transferable"` and `max_results=5` (the `ti:` prefix restricts matching to the title field; the quotes ask for the words as a phrase). Results come back in arXiv's relevance order, parsed like any other response, and the same 3-second spacing and `SourceError` handling apply. It exists so `rpipe profile add-seed` can turn a title into candidate papers for the user to choose from (see `profile.md`). Limit: it matches title words, so exact or distinctive titles work best.
+
 #### Errors
 
 Every failure raises `SourceError` (from `sources/base.py`) with a message saying what happened:

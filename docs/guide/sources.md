@@ -1,6 +1,6 @@
 # Sources
 
-A source is something that can list recent papers. Phase 1 has two: arXiv and Hugging Face Daily Papers (both below). A third piece (Task 6) combines them.
+A source is something that can list recent papers. Phase 1 has two: arXiv and Hugging Face Daily Papers (both below). The collect stage (last section) combines them.
 
 ## arXiv
 
@@ -68,7 +68,7 @@ Every failure raises `SourceError` (from `sources/base.py`) with a message sayin
 - timeouts and connection failures (`arXiv API request failed: ...`)
 - a response that is not valid XML or has malformed entries (`could not parse arXiv response: ...`)
 
-Callers catch `SourceError` to log the failure and keep other sources running (Task 6).
+Callers catch `SourceError` to log the failure and keep other sources running (see the last section).
 
 ### Why it's built this way
 
@@ -173,6 +173,73 @@ Tests are offline: HTTP is mocked with `respx` and `tests/fixtures/hf_daily.json
 - `src/research_pipeline/sources/hf_daily.py`: `HfDailySource`, `parse_hf_daily`
 - `tests/test_hf_daily.py`, `tests/fixtures/hf_daily.json`
 
-## How collection combines sources (Task 6)
+## How collection combines sources
 
-_To be written in Task 6._
+### What it does
+
+The collect stage (`run_collect`) takes the list of sources, asks each one for its recent papers and stores them in the database. It is the only place that knows there is more than one source. It returns two things: a dict of counts and a list of error strings.
+
+### How it works
+
+1. **Order.** Sources run one after another, in the order they are given. The nightly run passes arXiv first, then Hugging Face Daily Papers. Order matters for one reason: the first source to see a paper creates its row (title, abstract, version, `source`), and later sources only merge into it.
+2. **One source at a time.** For each source: call `fetch()`, upsert every returned paper with `upsert_paper` (see `data-model.md`), then commit. Committing per source means that if the program dies during a later source, the earlier sources' papers are already saved.
+3. **Isolation.** Each source is wrapped in its own `try`. If `fetch()` raises (normally `SourceError`, but any exception is caught), the stage records `"<source name>: <message>"`, adds 1 to `source_errors`, rolls back anything half-written for that source, and carries on with the next one.
+4. **Result.** `(counts, errors)`. The stage does not close the `runs` row; the caller combines these with the counts from triage and digest and calls `finish_run` once.
+
+#### Example: one source fails
+
+arXiv is down (HTTP 500), Hugging Face is fine and returns 50 papers, 3 of them new:
+
+```
+errors = ["arxiv: arXiv API returned HTTP 500"]
+counts = {"inserted": 3, "updated": 12, "unchanged": 35, "source_errors": 1}
+```
+
+The Hugging Face papers are still stored (the 12 updates are upvote changes on papers already in the database). The error string ends up in the `runs` row and in the digest's health line, so you see the gap instead of a silent empty night.
+
+#### Example: the same paper from two sources
+
+Paper `2501.01234` is both a new arXiv submission and featured on Hugging Face today with 9 upvotes and a GitHub repo.
+
+| Step | Source | What `upsert_paper` does | Count |
+| --- | --- | --- | --- |
+| 1 | arXiv returns the paper (`version` 1, 0 upvotes, no repos) | no row with that id: insert, `source = "arxiv"` | `inserted` +1 |
+| 2 | HF returns the same id (9 upvotes, repo) | row exists, same version: keep the higher upvotes (9), union the repos; text and `source` stay as arXiv wrote them | `updated` +1 |
+
+Result: one row with arXiv's text and 9 upvotes plus the repo. This works because both sources use the arXiv id as the canonical id. The collect stage does no merging itself; it relies on `upsert_paper`.
+
+#### What the counts mean
+
+| Key | Meaning |
+| --- | --- |
+| `inserted` | papers not seen before (new rows) |
+| `updated` | existing rows that changed: a higher `version`, or new upvotes / repos from a source. A paper counted `inserted` by arXiv and then merged by HF in the same run also adds an `updated` |
+| `unchanged` | papers returned but already stored identically; this is most of the list on a second run |
+| `source_errors` | number of sources that failed (not number of papers) |
+
+Because the same paper can appear in two sources, the first three counts add up to the number of papers *returned*, which can exceed the number of distinct papers.
+
+#### Where errors go
+
+Errors are plain strings `"<source name>: <message>"` returned to the caller. They are not raised, so a failure never stops the run. The caller stores them in `runs.errors` (JSON list) via `finish_run` and shows them in the digest health line (Tasks 8 and 9).
+
+### Why it's built this way
+
+- **Catch everything per source, not just `SourceError`**: a parsing bug in one source should cost that source's papers, not the whole night's digest.
+- **Commit per source**: bounds the loss from a crash to one source.
+- **Return errors instead of finishing the run**: the run row covers all stages, so only the caller can write it once with combined counts and errors. Rejected: having `run_collect` call `finish_run`, which would close the run before triage and digest.
+- **No merge logic here**: duplicates are the database's job (one rule, one place), so adding a third source needs no change to collect.
+- **`run_id` accepted but unused**: reserved for tagging papers with the run that found them, without changing the signature later.
+
+### How to run / check it
+
+```
+uv run pytest tests/test_collect.py -q
+```
+
+Tests use stub source classes (no network): cross-source dedupe with upvote merge, a failing source not stopping the others, a second run inserting nothing, and a version bump counting as updated.
+
+### Where the code is
+
+- `src/research_pipeline/collect.py`: `run_collect`
+- `tests/test_collect.py`

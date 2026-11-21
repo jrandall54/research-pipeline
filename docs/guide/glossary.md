@@ -31,3 +31,5 @@
 **Upvotes** — the count of Hugging Face users who endorsed a paper on Daily Papers. Stored as `hf_upvotes` and used as a small ranking boost. See `sources.md`.
 
 **Hugging Face Daily Papers** — a community-curated daily list of notable (mostly arXiv) papers with upvotes and optional GitHub links. See `sources.md`.
+
+**Source isolation** — one source failing (network error, bad response) is logged and skipped while the other sources still run, so a single outage never empties the whole night's run. See `sources.md`.

@@ -23,7 +23,12 @@ _ARXIV_ID = re.compile(r"^(\d{4}\.\d{4,5}|[a-z-]+(\.[A-Z]{2})?/\d{7})$")
 _ALWAYS_REMOVED = ["script", "style", "noscript", "template", "svg"]
 # Zero-width characters and the Unicode "tag" block (invisible, can spell hidden text).
 _INVISIBLE = re.compile("[​-‏⁠﻿\U000e0000-\U000e007f]")
-_WHITE = {"#fff", "#ffffff", "white", "rgb(255,255,255)"}
+_WHITE = {"#fff", "#ffffff", "white", "rgb(255,255,255)", "rgba(255,255,255,1)", "transparent"}
+_BLOCKS = {
+    "p", "div", "section", "article", "header", "footer", "li", "ul", "ol", "dl", "dt",
+    "dd", "br", "table", "tr", "td", "th", "blockquote", "pre", "figure", "figcaption",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+}
 _LENGTH = re.compile(r"^(-?\d*\.?\d+)([a-z%]*)$")
 
 # Request spacing is module-level so the 3 s gap holds across separate calls.
@@ -46,7 +51,7 @@ def _style_props(style: str) -> dict[str, str]:
     for part in style.lower().replace(" ", "").split(";"):
         if ":" in part:
             k, v = part.split(":", 1)
-            props[k] = v
+            props[k] = v.replace("!important", "")
     return props
 
 
@@ -60,6 +65,8 @@ def _px(value: str) -> float | None:
         return 0.0
     if unit in ("px", "pt"):
         return num
+    if unit in ("em", "rem", "ex", "vw", "vh"):
+        return num * 10  # roughly px; so -100em counts as far off-screen
     return None
 
 
@@ -77,7 +84,8 @@ def _style_hides(style: str) -> bool:
     size = _px(p.get("font-size", ""))
     if size is not None and size <= 2:
         return True
-    if p.get("color", "") in _WHITE:
+    color = p.get("color", "")
+    if color in _WHITE or re.fullmatch(r"rgba\(255,255,255,(1|1\.0+)\)", color):
         return True
     for prop in ("left", "top", "text-indent"):
         v = _px(p.get(prop, ""))
@@ -112,6 +120,16 @@ def strip_hidden(html: str) -> str:
     return str(soup)
 
 
+def _is_heading(tag: Tag) -> bool:
+    """h2/h3 start sections; LaTeXML's abstract title is an h6 (or any heading "Abstract")."""
+    if tag.name in ("h2", "h3"):
+        return True
+    if tag.name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+        classes = tag.get("class") or []
+        return "ltx_title_abstract" in classes or _norm(tag.get_text(" ")).lower() == "abstract"
+    return False
+
+
 def _norm(text: str) -> str:
     return " ".join(text.split())
 
@@ -127,18 +145,23 @@ def parse_sections(html: str) -> list[Section]:
         nonlocal current
         for child in node.children:
             if isinstance(child, Tag):
-                if child.name in ("h2", "h3"):
+                if _is_heading(child):
                     title = _norm(child.get_text(" "))
                     if title:
                         current = []
                         sections.append((title, current))
                 else:
+                    block = child.name in _BLOCKS
+                    if block and current is not None:
+                        current.append(" ")
                     walk(child)
+                    if block and current is not None:
+                        current.append(" ")
             elif current is not None:
                 current.append(str(child))
 
     walk(root)
-    return [Section(title=t, text=_norm(" ".join(parts))) for t, parts in sections]
+    return [Section(title=t, text=_norm("".join(parts))) for t, parts in sections]
 
 
 def _wait_for_spacing(sleep: Callable[[float], None]) -> None:

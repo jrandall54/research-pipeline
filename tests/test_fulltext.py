@@ -105,3 +105,39 @@ def test_fetch_rejects_oversized_response():
     respx.get(URL).respond(200, content=b"x" * (5 * 1024 * 1024 + 1))
     with pytest.raises(SourceError, match="too large"):
         fetch_fulltext("2401.00001", sleep=lambda s: None)
+
+
+@pytest.mark.parametrize(
+    "style",
+    [
+        "display:none!important",
+        "display: none ! important",
+        "color:#fff!important",
+        "color:rgba(255,255,255,1)",
+        "color:transparent",
+        "position:absolute;left:-9999px!important",
+        "position:absolute;left:-9999em",
+    ],
+)
+def test_strip_hidden_handles_evasive_styles(style):
+    out = strip_hidden(f'<body><p>ok</p><span style="{style}">INJECTED-X</span></body>')
+    assert "INJECTED" not in out and "ok" in out
+
+
+def test_parse_sections_recognises_latexml_abstract_h6():
+    html = (
+        '<body><div class="ltx_abstract"><h6 class="ltx_title ltx_title_abstract">'
+        "Abstract</h6><p>Short abstract.</p></div>"
+        "<section><h2>1 Intro</h2><p>Body.</p></section></body>"
+    )
+    secs = parse_sections(html)
+    assert [s.title for s in secs] == ["Abstract", "1 Intro"]
+    assert secs[0].text == "Short abstract."
+
+
+def test_parse_sections_inline_markup_does_not_split_words():
+    html = (
+        "<body><h2>1 Intro</h2><p><em>foo</em>, and <span>H</span>ello world.</p>"
+        "<p>Next para.</p></body>"
+    )
+    assert parse_sections(html)[0].text == "foo, and Hello world. Next para."

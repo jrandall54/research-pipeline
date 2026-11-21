@@ -116,7 +116,7 @@ Vectors are stored in the `embeddings` table as raw float32 bytes, keyed by (pap
 
 ## How to run / check it
 
-- Tuning: edit weights in `rank.py`; edit `top_n`, topics, seeds, authors and keywords in `profile.yaml`. Add a few seeds that are truly representative (10 to 20 is plenty); too-broad topics make everything look similar.
+- Tuning: edit weights in `rank.py`; change `top_n`, topics, seeds, authors and keywords with `rpipe profile ...` (see `profile.md`). Add a few seeds that are truly representative (10 to 20 is plenty); too-broad topics make everything look similar.
 - Inspect results: a paper's `triage_score` and `triage_reasons` columns show exactly why it ranked (also for `skipped` ones, to see what just missed the cut).
 - Tests: `uv run pytest tests/test_rank.py tests/test_triage.py tests/test_seeds.py -q`. They use a fake hashed bag-of-words embedder, so no model is downloaded.
 

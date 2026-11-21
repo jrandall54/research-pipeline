@@ -36,13 +36,14 @@ uv run rpipe init
 
 In a terminal it asks for your topics and arXiv categories; it then creates the vault (default `~/research-vault`, or `--vault PATH`, or the `RESEARCH_VAULT` environment variable) with `config.yaml`, `profile.yaml`, `vault.sqlite` and the folders described in `vault-and-config.md`. It is safe to re-run.
 
-### Edit your profile
+### Set up your profile
 
-Open `<vault>/profile.yaml` and:
+You never need to open `profile.yaml`. Use the commands (details and sample output in `profile.md`):
 
-1. Replace the three placeholder seeds with the arXiv ids of 10-20 papers you like (`vault-and-config.md` has advice on choosing them).
-2. Make the topics specific phrases ("prompt injection attacks and defenses for LLM agents" beats "security").
-3. Optionally add followed authors and keywords, and set `top_n`.
+1. Add 10-20 papers you like as seeds. Paste an arXiv link, an id, or a title and confirm: `rpipe profile add-seed https://arxiv.org/abs/2307.15043` (`vault-and-config.md` has advice on choosing them).
+2. Make the topics specific phrases ("prompt injection attacks and defenses for LLM agents" beats "security"): `rpipe profile add-topic "..."`, and drop the examples with `rpipe profile remove-topic 1`.
+3. Optionally follow authors (`add-author`), add keywords (`add-keyword`), and set `rpipe profile set-top-n 10` or `rpipe profile set-categories cs.CR cs.LG`.
+4. Check the result with `rpipe profile show`.
 
 ### The commands
 
@@ -57,7 +58,7 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
-**Exit codes.** `0` normally, **including when a source failed** (the failure is recorded, see below). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, the `embed` extra is missing, or `--date` is not a date.
+**Exit codes.** `0` normally, **including when a source failed** (the failure is recorded, see below). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, or `--date` is not a date.
 
 ### A real run, step by step
 
@@ -141,7 +142,7 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 | `invalid settings` / `invalid YAML` naming a file (exit 1) | A typo in `config.yaml` or `profile.yaml`; the message starts with the file path and says which field. |
 | `sentence-transformers is not installed; run uv sync --extra embed` (exit 1) | Install the extra (see Install). |
 | Health line says `errors: arxiv: arXiv API returned HTTP 5xx` (or a timeout) | arXiv (or Hugging Face) was down. The digest was built from the other source. Re-run later: `run` is safe to repeat. |
-| Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, for example a mistyped id. Remove it with `rpipe profile remove-seed` and add the right one with `rpipe profile add-seed` (both arrive in Phase 1.5; until then edit `profile.yaml`). Ranking continues using your topics and any seeds that did resolve. |
+| Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, for example a mistyped id. Remove it with `rpipe profile remove-seed` and add the right one with `rpipe profile add-seed` (`rpipe profile show` numbers the seeds). Ranking continues using your topics and any seeds that did resolve. |
 | Health line says `seeds: could not fetch ...: <reason>` | The seed lookup failed (network). Ranking used the seeds it already had; it retries next run. |
 | Digest says "Nothing new matched your profile today." | No paper was `triaged`: either no new papers arrived since the last run (they are already in an earlier digest) or every source failed (check the health line). |
 | Health line says `arxiv: reached max_results (N) before already-seen papers; some may be missed` | arXiv paging hit `arxiv_max_results` without reaching a paper you already had. Expected on the first run (empty database). Otherwise you were away a long time: raise `arxiv_max_results` in `config.yaml`. |
@@ -152,6 +153,6 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 
 ## Where the code is
 
-- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `digest`, `build_pipeline`, `health_line`
+- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `digest`, `build_pipeline`, `health_line` (the `profile` commands are in `profile.md`)
 - `src/research_pipeline/seeds.py`: seed text lookup and cache
 - `tests/test_e2e.py`, `tests/test_seeds.py`

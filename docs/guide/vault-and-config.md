@@ -46,7 +46,7 @@ Both files reject unknown keys: a typo such as `keyword:` or `top-n:` stops the 
 | `keywords` | `[]` | Words in a title/abstract that give a small boost. |
 | `top_n` | 15 | Papers kept per digest (at least 1). |
 
-The commands that edit these files without opening them (and how comments are kept) are described in [profile.md](profile.md).
+Normal use needs no editing: `rpipe profile show` prints these settings and the `rpipe profile ...` commands change them, validating every change (see [profile.md](profile.md), which also explains how your comments are kept). The files stay plain YAML, so power users may edit them by hand; a mistake is reported with the file name and field the next time any command reads it.
 
 Seed ids may be written with or without quotes (`2301.10000` or `"2301.10000"`); both load as the text `"2301.10000"`. See the YAML note under "Why it's built this way".
 

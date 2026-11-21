@@ -59,3 +59,7 @@
 **Round-trip YAML** — loading a YAML file in a way that remembers comments, blank lines and layout, so saving it back keeps them. Plain YAML loaders discard comments. We use `ruamel.yaml` for edits. See `profile.md`.
 
 **Atomic write** — saving a file so it is either fully the old version or fully the new one, never half-written: write to a temporary file in the same folder, then rename it over the original in one step. See `profile.md`.
+
+**Sub-command** — a command inside a command group: `rpipe profile add-topic` is the `add-topic` sub-command of `profile`. `rpipe profile --help` lists them. See `profile.md`.
+
+**Exit code** — the number a command returns to the shell: `0` means success, non-zero means it failed. The `rpipe profile` commands exit 1 on bad input or an invalid file, and 0 for harmless no-ops like "already in your profile".

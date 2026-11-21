@@ -1,8 +1,10 @@
 """Command line interface."""
 
+import json
 import sqlite3
 import sys
-from collections.abc import Callable
+from contextlib import contextmanager
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -15,9 +17,11 @@ from research_pipeline.db import finish_run, open_db, start_run
 from research_pipeline.digest import write_digest
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile
-from research_pipeline.seeds import SeedFetchError, resolve_seed_texts
+from research_pipeline import profile_edit
+from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
+from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.sources.arxiv import ArxivSource
-from research_pipeline.sources.base import Source
+from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.sources.hf_daily import HfDailySource
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
@@ -90,8 +94,9 @@ def init(
         typer.echo(f"  {name}: {'kept existing' if name in existed else 'created'}")
     typer.echo("  vault.sqlite, raw/, markdown/, summaries/, my_work/, gold/, digests/, cache/ ready")
     typer.echo("\nNext steps:")
-    typer.echo(f"  1. Edit {path / 'profile.yaml'} (topics, followed authors, keywords).")
-    typer.echo("  2. Replace the 3 placeholder seeds with 10-20 arXiv ids of papers you like.")
+    typer.echo("  1. Add 10-20 papers you like: rpipe profile add-seed <arXiv link, id or title>")
+    typer.echo("  2. Check your profile: rpipe profile show")
+    typer.echo("  3. Change topics, authors, keywords, top-N or categories: rpipe profile --help")
 
 
 @dataclass
@@ -221,3 +226,170 @@ def digest(
         raise _fail(f"--date must be YYYY-MM-DD, got {date_!r}") from exc
     out = write_digest(ctx.conn, ctx.vault, day, f"Digest {day.isoformat()}: written from stored papers (no collection run)")
     typer.echo(f"Digest written to {out}")
+
+
+# ---------------------------------------------------------------- profile commands
+
+profile_app = typer.Typer(help="View and change your profile without editing files.", no_args_is_help=True)
+app.add_typer(profile_app, name="profile")
+
+
+def make_arxiv(config: Config) -> ArxivSource:
+    """The arXiv client used by `profile add-seed`; tests replace this with a stub."""
+    return ArxivSource(config.arxiv_categories, max_results=config.arxiv_max_results)
+
+
+@contextmanager
+def _clean_errors() -> Iterator[None]:
+    """Show bad input and invalid files as one message and exit 1, never a traceback."""
+    try:
+        yield
+    except (ValueError, ConfigError) as exc:
+        raise _fail(str(exc)) from exc
+
+
+def _seed_titles(vault: Path) -> dict[str, str]:
+    try:
+        cache = json.loads((vault / "cache" / "seeds.json").read_text("utf-8"))
+        return {k: v.split("\n", 1)[0] for k, v in cache.items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _numbered(items: list[str]) -> str:
+    return "\n".join(f"  {i}. {x}" for i, x in enumerate(items, 1)) or "  (none)"
+
+
+@profile_app.command("show")
+def profile_show(vault: VaultOption = None) -> None:
+    """Print your topics, seeds, authors, keywords, top-N and categories."""
+    ctx = _open(vault)
+    profile = _load_profile(ctx)
+    titles = _seed_titles(ctx.vault)
+    seeds = [f"{s}  {titles.get(s, '(title not cached)')}" for s in profile.seeds]
+    typer.echo(f"Topics:\n{_numbered(profile.topics)}")
+    typer.echo(f"Seeds:\n{_numbered(seeds)}")
+    typer.echo(f"Followed authors:\n{_numbered(profile.followed_authors)}")
+    typer.echo(f"Keywords:\n{_numbered(profile.keywords)}")
+    typer.echo(f"Top N: {profile.top_n}")
+    typer.echo(f"arXiv categories: {', '.join(ctx.config.arxiv_categories)}")
+
+
+def _a(word: str) -> str:
+    return ("an " if word[0] in "aeiou" else "a ") + word  # "an author", "a topic"
+
+
+def _add_command(kind: str, add: Callable[[Path, str], bool]) -> None:
+    def command(text: Annotated[str, typer.Argument(help=f"The {kind} to add.")], vault: VaultOption = None) -> None:
+        ctx = _open(vault)
+        with _clean_errors():
+            changed = add(ctx.vault, text)
+        shown = profile_edit.normalise_text(text)
+        typer.echo(f"Added {kind}: {shown}" if changed else f'"{shown}" is already in your profile ({kind}s).')
+
+    command.__doc__ = f"Add {_a(kind)} to your profile."
+    profile_app.command(f"add-{kind}")(command)
+
+
+def _remove_command(kind: str, remove: Callable[[Path, str], bool]) -> None:
+    def command(
+        text_or_number: Annotated[str, typer.Argument(help=f"The {kind} text, or its number from `rpipe profile show`.")],
+        vault: VaultOption = None,
+    ) -> None:
+        ctx = _open(vault)
+        with _clean_errors():
+            changed = remove(ctx.vault, text_or_number)
+        if changed:
+            typer.echo(f"Removed {kind}: {text_or_number.strip()}")
+        else:
+            typer.echo(f'"{text_or_number.strip()}" is not in your profile ({kind}s). Nothing was changed.')
+
+    command.__doc__ = f"Remove a {kind} by its text or its number from `rpipe profile show`."
+    profile_app.command(f"remove-{kind}")(command)
+
+
+_add_command("topic", profile_edit.add_topic)
+_add_command("author", profile_edit.add_author)
+_add_command("keyword", profile_edit.add_keyword)
+_remove_command("topic", profile_edit.remove_topic)
+_remove_command("author", profile_edit.remove_author)
+_remove_command("keyword", profile_edit.remove_keyword)
+_remove_command("seed", profile_edit.remove_seed)
+
+
+def _describe(meta: PaperMeta) -> str:
+    first = meta.authors[0] if meta.authors else "unknown author"
+    year = meta.published.year if meta.published else "year unknown"
+    return f"{meta.title} ({first}, {year})"
+
+
+def _choose(candidates: list[PaperMeta], yes: bool) -> PaperMeta | None:
+    if yes:
+        return candidates[0]
+    if len(candidates) == 1:
+        typer.echo(_describe(candidates[0]))
+        return candidates[0] if typer.confirm("Add this paper?", default=True) else None
+    for i, meta in enumerate(candidates, 1):
+        typer.echo(f"  {i}. {_describe(meta)}")
+    n = len(candidates)
+    pick = typer.prompt(f"Pick 1-{n} or 0 to cancel", type=int)
+    if not 0 <= pick <= n:
+        raise _fail(f"{pick} is not between 0 and {n}. Nothing was changed.")
+    return candidates[pick - 1] if pick else None
+
+
+@profile_app.command("add-seed")
+def profile_add_seed(
+    text: Annotated[str, typer.Argument(help="An arXiv link, an arXiv id, or (part of) a title.")],
+    vault: VaultOption = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Do not ask; take the only (or first) match.")] = False,
+) -> None:
+    """Add a seed paper from an arXiv link, id or title search."""
+    ctx = _open(vault)
+    if not text.strip():
+        raise _fail("Seed input is empty: give an arXiv link, id or title.")
+    profile = _load_profile(ctx)
+    kind, value = parse_seed_input(text)
+    if kind == "id" and value in profile.seeds:
+        typer.echo(f"{value} is already in your profile.")
+        return
+    try:
+        candidates = find_seed_candidates(text, make_arxiv(ctx.config))
+    except SourceError as exc:
+        raise _fail(f"Could not reach arXiv: {exc}. Nothing was changed.") from exc
+    if not candidates:
+        raise _fail(f'No paper found for "{text.strip()}". Try the arXiv link or id.')
+    chosen = _choose(candidates, yes)
+    if chosen is None:
+        typer.echo("Cancelled. Nothing was changed.")
+        return
+    with _clean_errors():
+        if chosen.id in profile.seeds:
+            typer.echo(f"{chosen.id} is already in your profile.")
+            return
+        cache_seed(ctx.vault / "cache" / "seeds.json", chosen)
+        changed = profile_edit.add_seed_id(ctx.vault, chosen.id)
+    typer.echo(f"Added seed {chosen.id}: {chosen.title}" if changed else f"{chosen.id} is already in your profile.")
+
+
+@profile_app.command("set-top-n")
+def profile_set_top_n(
+    n: Annotated[int, typer.Argument(help="Papers kept per digest (at least 1).")], vault: VaultOption = None
+) -> None:
+    """Set how many papers each digest keeps."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_top_n(ctx.vault, n)
+    typer.echo(f"top_n is now {n}.")
+
+
+@profile_app.command("set-categories")
+def profile_set_categories(
+    categories: Annotated[list[str], typer.Argument(help="arXiv categories, e.g. cs.CR stat.ML hep-th.")],
+    vault: VaultOption = None,
+) -> None:
+    """Replace the arXiv categories the pipeline collects from."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_categories(ctx.vault, categories)
+    typer.echo(f"arXiv categories are now: {', '.join(c.strip() for c in categories)}")

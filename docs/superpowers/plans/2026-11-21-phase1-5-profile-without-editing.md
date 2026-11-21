@@ -61,7 +61,7 @@ docs/guide/profile.md (new), vault-and-config.md, running.md, README.md, glossar
   - `normalise_arxiv_id(s: str) -> str` (strips a `vN` suffix; raises `ValueError` for non-ids)
   - `remove_*` accepts the 1-based number shown by `rpipe profile show`, or the exact value.
   - Every function raises `ConfigError` (naming the file) when the result would fail validation, or when the file on disk is already invalid.
-- Category format accepted: `^[a-z-]+(\.[A-Z]{2})?$` (e.g. `cs.CR`, `stat.ML`, `math.OC`, `hep-th`). Empty strings are rejected.
+- Category format accepted: `^[a-z-]+(\.[A-Za-z-]+)?$` (widened later to allow subcategories like `physics.comp-ph`) (e.g. `cs.CR`, `stat.ML`, `math.OC`, `hep-th`). Empty strings are rejected.
 
 - [ ] **Step 1: Write failing tests**
   - `test_add_topic_appends_and_is_idempotent`: a second add of `"  LLM   Security "` after `"llm security"` returns False, and there is one entry.

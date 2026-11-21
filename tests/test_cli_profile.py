@@ -301,3 +301,14 @@ def test_set_categories_help_explains_categories():
 def test_invalid_category_error_points_at_taxonomy(vault):
     res = run(vault, "set-categories", "CS-cr")
     assert res.exit_code == 1 and "https://arxiv.org/category_taxonomy" in res.output
+
+
+def test_lowercase_subcategory_config_loads_and_set_categories_repairs_it(vault):
+    cfg = vault / "config.yaml"
+    cfg.write_text(cfg.read_text().replace("arxiv_categories:", "arxiv_categories: [physics.comp-ph]\n#", 1))
+    assert load_config(cfg).arxiv_categories == ["physics.comp-ph"]
+    assert run(vault, "show").exit_code == 0
+    res = run(vault, "set-categories", "cs.CR")
+    assert res.exit_code == 0
+    assert load_config(cfg).arxiv_categories == ["cs.CR"]
+    assert run(vault, "set-categories", "cond-mat.stat-mech").exit_code == 0

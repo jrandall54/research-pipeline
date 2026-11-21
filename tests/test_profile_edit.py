@@ -210,3 +210,13 @@ def test_set_categories_all_normalised_and_exclusive(vault):
 def test_set_categories_error_points_at_examples_and_taxonomy(vault):
     with pytest.raises(ConfigError, match="category_taxonomy"):
         pe.set_categories(vault, ["CS-cr"])
+
+
+def test_set_categories_accepts_hyphenated_subcategories_rejects_uppercase_prefix(vault):
+    pe.set_categories(vault, ["physics.comp-ph", "cond-mat.mes-hall", "math-ph"])
+    assert load_config(vault / "config.yaml").arxiv_categories == [
+        "physics.comp-ph", "cond-mat.mes-hall", "math-ph"
+    ]
+    for bad in (["CS.CR"], ["cs."], ["cs_CR"]):
+        with pytest.raises(ConfigError):
+            pe.set_categories(vault, bad)

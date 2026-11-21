@@ -51,7 +51,7 @@ Normal YAML libraries (including the `pyyaml` the pipeline reads with) throw com
 
 `remove_*` accepts either the exact value (compared the same way) or the 1-based number that `rpipe profile show` prints. An exact match wins over a number. A number that is out of range raises `ValueError`; a value that is not present returns `False`.
 
-Categories must match `^[a-z-]+(\.[A-Z]{2})?$`: `cs.CR`, `stat.ML`, `math.OC` and `hep-th` are accepted; `CS-cr` and the empty string are not, and the list cannot be empty. The one extra value is `all` (any capitalisation is stored as lowercase `all`): it must be given alone, and `set-categories all cs.CR` is refused. The same rule is enforced by the `Config` model, so a hand-edited `config.yaml` is checked too. An invalid category error points at the taxonomy URL below.
+Categories must match `^[a-z-]+(\.[A-Za-z-]+)?$` (lowercase archive, optional subcategory in any case, with hyphens): `cs.CR`, `stat.ML`, `math.OC`, `hep-th`, `physics.comp-ph` and `cond-mat.stat-mech` are accepted; `CS.CR`, `CS-cr`, `cs.`, names with spaces or underscores, and the empty string are not, and the list cannot be empty. The one extra value is `all` (any capitalisation is stored as lowercase `all`): it must be given alone, and `set-categories all cs.CR` is refused. The same rule is enforced by the `Config` model, so a hand-edited `config.yaml` is checked too. An invalid category error points at the taxonomy URL below.
 
 ### Choosing categories
 

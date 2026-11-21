@@ -53,3 +53,18 @@ def test_config_accepts_all_but_not_mixed_or_bad_categories():
     for bad in (["all", "cs.CR"], ["ALL"], ["CS-cr"], []):
         with pytest.raises(ValidationError):
             Config(vault_path="/v", arxiv_categories=bad)
+
+
+@pytest.mark.parametrize("good", ["physics.comp-ph", "cond-mat.stat-mech", "cs.CR", "stat.ML", "math-ph", "hep-th"])
+def test_config_accepts_real_arxiv_categories(good):
+    from research_pipeline.models import Config
+
+    assert Config(vault_path="/v", arxiv_categories=[good]).arxiv_categories == [good]
+
+
+@pytest.mark.parametrize("bad", ["", "cs.", ".CR", "CS.CR", "Cs.CR", "CS-cr", "cs_CR", "cs CR", "123", "cs.C R"])
+def test_config_rejects_malformed_categories(bad):
+    from research_pipeline.models import Config
+
+    with pytest.raises(ValidationError):
+        Config(vault_path="/v", arxiv_categories=[bad])

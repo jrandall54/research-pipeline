@@ -19,7 +19,7 @@ research-vault/
   markdown/        PDFs converted to markdown   (Phase 2)
   summaries/       generated summaries          (Phase 2)
   my_work/         your own writing, used to bias ranking (Phase 4)
-  gold/            papers you rated, for tuning (Phase 3)
+  gold/            gold.json: papers you know well plus the facts a summary must get right (Phase 2, see evaluation.md)
 ```
 
 Phase 1 only writes `vault.sqlite`, `digests/` and `cache/` (plus the two YAML files); the other folders are created now so the layout never changes later.
@@ -133,4 +133,4 @@ uv run pytest tests/test_vault.py tests/test_init_wizard.py -q
 
 ## Where the code is
 
-`src/research_pipeline/vault.py` (layout, `resolve_vault`, loaders, `ConfigError`), `src/research_pipeline/cli.py` (`init`, `_wizard*`, and `_add_seed` shared with `rpipe profile add-seed`), `src/research_pipeline/defaults/` (templates), `tests/test_vault.py`, `tests/test_init_wizard.py`.
+`src/research_pipeline/vault.py` (layout, `resolve_vault`, loaders, `ConfigError`), `src/research_pipeline/gold.py` (the `gold/gold.json` file), `src/research_pipeline/cli.py` (`init`, `_wizard*`, and `_add_seed` shared with `rpipe profile add-seed`), `src/research_pipeline/defaults/` (templates), `tests/test_vault.py`, `tests/test_init_wizard.py`.

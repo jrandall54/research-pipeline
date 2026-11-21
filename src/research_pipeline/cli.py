@@ -16,6 +16,7 @@ from research_pipeline.collect import run_collect
 from research_pipeline.db import finish_run, open_db, papers_given_up_on, papers_to_summarize, start_run
 from research_pipeline.digest import write_digest
 from research_pipeline.fulltext import fetch_fulltext
+from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, has_gold, load_gold, remove_gold
 from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
@@ -507,6 +508,117 @@ def profile_set_categories(
         profile_edit.set_categories(ctx.vault, categories)
     cleaned = ["all" if c.strip().lower() == "all" else c.strip() for c in categories]
     typer.echo(f"arXiv categories are now: {_categories_text(cleaned)}")
+
+
+# ---------------------------------------------------------------- gold commands
+
+gold_app = typer.Typer(help="Manage the gold set: papers with the facts a correct summary must contain.", no_args_is_help=True)
+app.add_typer(gold_app, name="gold")
+
+
+def _ask_facts() -> list[str]:
+    """Read key facts one per line until a blank line. Ctrl-C/EOF aborts before anything is saved."""
+    typer.echo("Key facts a correct summary must get right (specific and checkable).")
+    typer.echo("Type one per line; press Enter on an empty line to finish. Aim for 3 or more.")
+    facts: list[str] = []
+    while True:
+        line = typer.prompt(f"Fact {len(facts) + 1}", default="", show_default=False).strip()
+        if not line:
+            return facts
+        facts.append(line)
+
+
+@gold_app.command("add")
+def gold_add(
+    text: Annotated[str | None, typer.Argument(help="An arXiv link, id or (part of) a title.")] = None,
+    vault: VaultOption = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Do not ask; take the only (or first) match.")] = False,
+) -> None:
+    """Add a paper to the gold set, then enter the key facts about it."""
+    ctx = _open(vault)
+    if text is None:
+        text = typer.prompt("arXiv link, id or title")
+    if not text.strip():
+        raise _fail("Input is empty: give an arXiv link, id or title.")
+    with _clean_errors():
+        existing = load_gold(ctx.vault)
+        try:
+            kind, value = parse_seed_input(text)
+        except ValueError as exc:
+            raise _fail(str(exc)) from exc
+        if kind == "id" and has_gold(existing, value):
+            typer.echo(f"{value} is already in your gold set. Add facts with: rpipe gold add-fact {value} \"...\"")
+            return
+        arxiv = make_arxiv(ctx.config)
+        try:
+            try:
+                candidates = find_seed_candidates(text, arxiv)
+            except SourceError as exc:
+                raise _fail(f"Could not reach arXiv: {exc}. Nothing was changed.") from exc
+            if not candidates:
+                raise _fail(f'No paper found for "{text.strip()}". Try the arXiv link or id.')
+            try:
+                chosen = _choose(candidates, yes)
+            except _SeedProblem as exc:
+                raise _fail(str(exc)) from exc
+        finally:
+            _close(arxiv)
+        if chosen is None:
+            typer.echo("Cancelled. Nothing was changed.")
+            return
+        if has_gold(existing, chosen.id):
+            typer.echo(f"{chosen.id} is already in your gold set.")
+            return
+        facts = _ask_facts()
+        if not facts:
+            typer.echo("At least one key fact is needed, so nothing was saved. Run the command again.")
+            return
+        if len(facts) < 3:
+            typer.echo(f"Saved with {len(facts)} fact(s); 3 or more make a better test (rpipe gold add-fact).")
+        add_gold(ctx.vault, GoldPaper(paper_id=chosen.id, title=chosen.title, key_facts=facts))
+        typer.echo(f"Added {chosen.id}: {chosen.title}")
+
+
+@gold_app.command("list")
+def gold_list(vault: VaultOption = None) -> None:
+    """Show the gold set and its key facts."""
+    ctx = _open(vault)
+    with _clean_errors():
+        papers = load_gold(ctx.vault)
+    typer.echo(f"Gold set: {len(papers)}/{GOLD_TARGET} papers")
+    for p in papers:
+        typer.echo(f"\n{p.paper_id}  {p.title}")
+        for fact in p.key_facts:
+            typer.echo(f"  - {fact}")
+
+
+@gold_app.command("remove")
+def gold_remove(
+    paper_id: Annotated[str, typer.Argument(help="The arXiv id of the paper to remove.")],
+    vault: VaultOption = None,
+) -> None:
+    """Remove a paper from the gold set."""
+    ctx = _open(vault)
+    with _clean_errors():
+        if not remove_gold(ctx.vault, paper_id):
+            raise _fail(f"{paper_id} is not in your gold set.")
+    typer.echo(f"Removed {paper_id}.")
+
+
+@gold_app.command("add-fact")
+def gold_add_fact(
+    paper_id: Annotated[str, typer.Argument(help="The arXiv id of a paper in the gold set.")],
+    fact: Annotated[str, typer.Argument(help="A specific, checkable fact a correct summary must contain.")],
+    vault: VaultOption = None,
+) -> None:
+    """Add one more key fact to a paper already in the gold set."""
+    ctx = _open(vault)
+    if not fact.strip():
+        raise _fail("The fact is empty.")
+    with _clean_errors():
+        if not add_fact(ctx.vault, paper_id, fact):
+            raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
+    typer.echo(f"Added a fact to {paper_id}.")
 
 
 model_app = typer.Typer(help="Show, change and check the local summary model.", no_args_is_help=True)

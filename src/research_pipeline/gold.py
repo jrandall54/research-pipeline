@@ -1,0 +1,101 @@
+"""The gold set: papers you know well, with the facts a correct summary must get right.
+
+Stored as `<vault>/gold/gold.json`. See docs/guide/evaluation.md.
+"""
+
+import json
+import os
+import tempfile
+from pathlib import Path
+
+from pydantic import BaseModel, ValidationError
+
+from research_pipeline.profile_edit import normalise_arxiv_id
+from research_pipeline.vault import ConfigError
+
+GOLD_TARGET = 10
+
+
+class GoldPaper(BaseModel):
+    paper_id: str
+    title: str
+    key_facts: list[str]  # what a correct summary must get right, written by the owner
+
+
+def _path(vault: Path) -> Path:
+    return vault / "gold" / "gold.json"
+
+
+def _key(paper_id: str) -> str:
+    """Comparison key: the bare arXiv id if it is one (so 2307.15043v2 == 2307.15043)."""
+    try:
+        return normalise_arxiv_id(paper_id)
+    except ValueError:
+        return paper_id.strip()
+
+
+def load_gold(vault: Path) -> list[GoldPaper]:
+    path = _path(vault)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except OSError as e:
+        raise ConfigError(f"{path}: cannot read file ({e.strerror or e})") from e
+    try:
+        data = json.loads(text)
+        if not isinstance(data, list):
+            raise ValueError("expected a list of papers")
+        return [GoldPaper.model_validate(item) for item in data]
+    except (ValueError, ValidationError) as e:  # JSONDecodeError and pydantic errors are ValueErrors
+        raise ConfigError(f"{path}: not a valid gold set: {e}") from e
+
+
+def _save(vault: Path, papers: list[GoldPaper]) -> None:
+    """Write atomically: temp file in the same folder, then rename over."""
+    path = _path(vault)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps([p.model_dump() for p in papers], indent=2))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def has_gold(papers: list[GoldPaper], paper_id: str) -> bool:
+    return any(_key(p.paper_id) == _key(paper_id) for p in papers)
+
+
+def add_gold(vault: Path, paper: GoldPaper) -> bool:
+    """Add a paper; False (nothing written) if one with the same id is already there."""
+    papers = load_gold(vault)
+    if has_gold(papers, paper.paper_id):
+        return False
+    paper = paper.model_copy(update={"paper_id": _key(paper.paper_id)})
+    _save(vault, [*papers, paper])
+    return True
+
+
+def remove_gold(vault: Path, paper_id: str) -> bool:
+    papers = load_gold(vault)
+    kept = [p for p in papers if _key(p.paper_id) != _key(paper_id)]
+    if len(kept) == len(papers):
+        return False
+    _save(vault, kept)
+    return True
+
+
+def add_fact(vault: Path, paper_id: str, fact: str) -> bool:
+    """Append a key fact to a paper in the gold set; False if the paper is not there."""
+    papers = load_gold(vault)
+    for p in papers:
+        if _key(p.paper_id) == _key(paper_id):
+            p.key_facts.append(fact.strip())
+            _save(vault, papers)
+            return True
+    return False

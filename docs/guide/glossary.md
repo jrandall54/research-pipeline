@@ -93,3 +93,7 @@
 **abstract-only summary** — a summary written from the abstract because the paper has no arXiv HTML full text. The digest says so under the summary and the health line counts them as `abstract-only N`. See `digest.md`.
 
 **unverified claim** — a summary or critique claim that cites a section title the paper does not have; the digest prefixes it with `⚠ unverified`. See `summaries.md`.
+
+**Gold set** — a small collection (we aim for 10) of papers you know well, each with a list of key facts a correct summary must contain. It is the answer key we grade the model against. See `evaluation.md`.
+
+**Ground truth** — the known-correct answer that a measurement is compared with. Here it is your key facts: you wrote them from your own understanding of the paper, not from the model's output. See `evaluation.md`.

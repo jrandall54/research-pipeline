@@ -233,3 +233,9 @@
 **Fixture** — a small fixed sample input kept for tests (for example a saved paper page), so tests run offline and give the same result every time. See `running.md`.
 
 **Progress event** — a small record saying what a stage is doing: `start`, `step` (one item finished, with `current` of `total` and the time so far), `note` (a message while waiting) or `done` (with its outcome). Stages create these and hand them to a reporter; they never print. See `progress.py` in the module map of `README.md`.
+
+**TTY** — a "teletype": a real interactive terminal. A program can ask whether its output is a TTY; if so it may redraw lines in place with colours, otherwise (a pipe, a file, the systemd journal) it should write plain lines. `make_reporter()` uses this to choose the display. See `running.md`, Progress.
+
+**stderr** — the second output channel of a program, meant for messages about what it is doing rather than its results. Progress goes there so that stdout (the results) stays clean when piped. See `running.md`, Progress.
+
+**Heartbeat** — a "still waiting: ..." line printed every 30 seconds of silence while a long step runs, so a slow model call is visibly alive and not frozen. See `running.md`, Progress.

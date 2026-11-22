@@ -64,6 +64,7 @@ from research_pipeline.gold import (
 from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
 from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
+from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, review_queue
 from research_pipeline.run_lock import RunLocked, run_lock
@@ -94,6 +95,16 @@ VaultOption = Annotated[
 def _progress(line: str) -> None:
     """Short progress lines (e.g. which model is being probed) go to stderr."""
     typer.echo(f"  {line}", err=True)
+
+
+@contextmanager
+def _reporter() -> Iterator[LineRenderer | LiveRenderer]:
+    """A progress reporter on stderr (live on a terminal, plain lines otherwise), always closed."""
+    reporter = make_reporter()
+    try:
+        yield reporter
+    finally:
+        reporter.close()
 
 
 def _paper_progress(echo: Callable[[str], None]) -> Callable[..., None]:

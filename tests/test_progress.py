@@ -63,3 +63,11 @@ def test_progress_event_is_frozen():
     ev = ProgressEvent(stage="x", kind="start")
     with pytest.raises(AttributeError):
         ev.label = "changed"  # type: ignore[misc]
+
+
+def test_stage_failure_with_empty_message_uses_exception_name():
+    rep = ListReporter()
+    with pytest.raises(KeyboardInterrupt):
+        with stage(rep, "collect"):
+            raise KeyboardInterrupt
+    assert rep.events[-1].detail == "KeyboardInterrupt"

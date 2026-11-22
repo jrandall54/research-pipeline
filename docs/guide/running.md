@@ -261,6 +261,22 @@ Lint is `ruff` (a fast Python linter, installed with the dev group by `uv sync`)
 
 `tests/test_e2e.py` runs the real CLI on a temporary vault with fixture sources and the test embedder, and checks: the digest is written and the top paper is the on-topic one; the `runs` row is finished; a second run the same day adds no duplicates; an uninitialised vault exits 1; a failing source exits 0 with the error recorded; a failed seed lookup does not stop the run; a missing `embed` extra gives a clear error; with a scripted fake model the digest contains a cited summary; with the model unavailable `run` still exits 0, writes the digest and names the cause in the health line; `rpipe summarize` runs the stage alone.
 
+### Progress
+
+**What it does.** Long steps (collecting, ranking, summarising) tell you what they are doing, so a quiet terminal never means "frozen". Progress always goes to stderr; what a command prints on stdout is unchanged.
+
+**How it works.** Stages do not print. They emit small progress events (`start`, `step`, `note`, `done`; see `progress.py`) to a reporter, and the CLI picks how to show them with `make_reporter()`:
+
+- On a terminal (stderr is a TTY) `LiveRenderer` redraws one line in place: a spinner, the elapsed time and, only when the number of items is known, a bar. Finished items (for example each paper) are printed above it as normal lines.
+- Anywhere else (`journalctl --user -u research-pipeline`, a pipe, a file) `LineRenderer` writes plain lines with no colour codes and no carriage returns, for example `collect: arXiv…`, `  [2/3] 2611.25005 done`, `collect done (3s)`. The per-paper summarize line keeps its exact form: `[2/3] 2611.25005 done (summary + critique, 41s)`.
+- Heartbeat: if nothing has been written for 30 seconds while a stage is open, a background thread prints `still waiting: writing the critique for 2611.25005 (1m30s)`. A single model call can take minutes; the heartbeat shows the job is alive. Elapsed time reads `41s` under a minute, then `1m30s`.
+
+**Why it's built this way.** Events are plain data, so the same events can later drive a different display (the planned app) and tests can check them without any terminal. Rejected: printing from inside the stages (hard to test, and no way to change the display) and a progress bar always on (carriage returns and colour codes make journals unreadable). The heartbeat thread is a daemon and is stopped by `close()` (called by `cli._reporter()` even after an error or Ctrl-C), so it can never keep the process alive.
+
+**How to run / check it.** `uv run pytest tests/test_progress_render.py -q`. By eye: run a command on a terminal, then again with `2>&1 | cat` to see the plain form.
+
+**Where the code is.** `src/research_pipeline/progress_render.py` (`format_line`, `LineRenderer`, `LiveRenderer`, `make_reporter`), `cli._reporter()`, and `tests/test_progress_render.py`.
+
 ### Troubleshooting
 
 | Symptom | Cause and fix |

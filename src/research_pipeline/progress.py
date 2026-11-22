@@ -122,7 +122,7 @@ def stage(
                 total=total,
                 elapsed=handle.elapsed,
                 outcome="failed",
-                detail=str(exc),
+                detail=str(exc) or type(exc).__name__,
             ),
         )
         raise

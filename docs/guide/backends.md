@@ -90,6 +90,8 @@ Worked example: a failed night where the login expired. `claude` prints `{"is_er
 
 **Why it exists (measured on 2026-11-22 with Haiku).** Without the flag the critique call made Haiku produce about 13,000 hidden thinking tokens: 70 to 127 seconds and roughly 17,000 output tokens per critique. With `--effort low` the same call took about 9 seconds and about 2,000 output tokens. The summary call was already fast. A paper took about two minutes before the change; the output tokens are also what a subscription's usage allowance is spent on, so low effort is cheaper as well as faster.
 
+**It is a hint, not a cap.** Even at `--effort low`, Haiku occasionally still thinks for thousands of tokens on a call. We tried `MAX_THINKING_TOKENS=0` and `CLAUDE_CODE_DISABLE_THINKING=1`; neither reliably stopped it, so they are not used. What did make calls fast and steady was bounding the answer size in the prompt (see "Size limits" in `summaries.md`: 8 to 127 s down to steady short runs, measured 2026-11-22).
+
 **The trade-off.** Less thinking can mean a shallower critique. The summary and critique are still checked by code (every cited section must exist, see `summaries.md`), so a shallow answer cannot invent sections, but it may miss subtler weaknesses. If you care more about depth than speed, try `rpipe model set-effort medium` or `high`, then run `rpipe eval run` and compare the accuracy with the earlier result (see `evaluation.md`); keep whichever setting scores acceptably for the time and quota it costs.
 
 **Rejected alternatives.** Leaving the flag off (what we had: slow and costly for little visible benefit); hard-coding `low` with no setting (users with different needs could not change it, and CLAUDE.md requires every setting to have a command); offering `xhigh` and `max` (they only make the slow behaviour worse for this job).
@@ -102,9 +104,18 @@ These flags exist because paper text is untrusted. A paper could contain a *prom
 
 If `ANTHROPIC_API_KEY` is set in your shell, Claude Code would silently bill that API account instead of using your subscription. The adapter removes it, and `ANTHROPIC_AUTH_TOKEN` (an API bearer token with the same billing effect), from the child process's environment (`ANTHROPIC_BASE_URL` is left alone: it is a proxy address, not a credential) (your own shell is untouched). rpipe never reads or stores any credential; the login belongs to Claude Code.
 
-### Usage limits
+### Failures: usage limit versus everything else
 
-If the reply is an error (`is_error`, or a non-zero exit) mentioning a "limit" or "credit", the adapter raises `LlmLimitReached`. A run stops calling the model on it without counting a failure; remaining papers go in abstracts-only. Other failures: not logged in, a Claude Code too old to know a flag ("update Claude Code"), a missing binary (the error names `rpipe model setup`; the nightly timer often lacks `~/.local/bin` on its PATH), and a timeout after 600 s.
+When the reply is an error (`is_error`, or a non-zero exit) the adapter looks at the envelope (the JSON Claude Code prints: `subtype`, `is_error`, `result`, `stop_reason`, `num_turns`, `api_error_status`) and decides which kind of failure it is. The order matters.
+
+| What the envelope shows | Raised | What a run does |
+|---|---|---|
+| `subtype` starting `error_max` (`error_max_turns`, `error_max_structured_output_retries`), or `stop_reason: "tool_use"`, or more than 2 turns, and no HTTP 429 | `LlmError` ("could not produce valid structured output") | that paper is recorded as a failure and retried on a later run; the others carry on |
+| `api_error_status` 429, or `result`/stderr text such as "usage limit reached", "5-hour limit", "weekly limit", "session limit", "credit balance is too low", "out of credits", "hit your ... limit" | `LlmLimitReached` | the run stops calling the model without counting a failure; remaining papers go in abstracts-only |
+| not logged in; a Claude Code too old to know a flag ("update Claude Code"); a missing binary (names `rpipe model setup`; the nightly timer often lacks `~/.local/bin` on its PATH) | `LlmError` | per-paper failure (or the run's health line says the backend is unavailable) |
+| nothing finishes in 600 s | `LlmTimeout` | recorded, the loop stops |
+
+**Why it changed.** The old rule matched any "limit" or "credit" anywhere in the message. A real run returned `is_error: true`, `num_turns: 6`, `stop_reason: "tool_use"` (a structured-output failure, not quota) and was reported as "usage limit reached", which stopped the whole run for the day and told the user their quota was gone. Now only genuine quota wording or an actual HTTP 429 counts, "rate limit" in plain text alone does not, and the raw stdout is no longer searched for quota words when an envelope exists. The cost of being strict: an unfamiliar quota message becomes an ordinary per-paper failure, so a run may try more papers before giving up; that is the safer mistake.
 
 Anything printed before the JSON (an update notice) is ignored: the adapter takes the whole output if it parses, otherwise the last line that does.
 

@@ -12,7 +12,7 @@ from research_pipeline.models import Section
 
 # Stamped on every stored summary (its provenance). Bump it whenever SUMMARY_SYSTEM or
 # CRITIQUE_SYSTEM change, so old summaries can be told apart from new ones.
-PROMPT_VERSION = "2026-11-p3"
+PROMPT_VERSION = "2026-11-p4"
 
 # Tokens kept free for the instructions and the model's answer.
 RESERVED_TOKENS = 4000
@@ -45,6 +45,7 @@ You summarise research papers for a busy reader.
 Fill these fields: one_line (one sentence on what the paper does), problem, approach, results,
 limitations. Each of the last four is a claim: a short text plus the sections it comes from.
 Limitations are the ones the paper itself states; if it states none, say so.
+Length limits: one_line is one sentence. Each claim text is at most two sentences.
 
 {_SHARED_RULES}"""
 
@@ -53,6 +54,7 @@ You are a careful, fair peer reviewer.
 Fill these fields: strengths and weaknesses (lists of claims, each a short text plus the
 sections it is based on) and questions (open questions a reader should ask the authors).
 Base every strength and weakness on what the paper shows or fails to show.
+Length limits: give 3 to 5 strengths, 3 to 5 weaknesses and 3 to 5 questions. Each claim text is at most two sentences.
 
 {_SHARED_RULES}"""
 

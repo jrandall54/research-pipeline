@@ -99,9 +99,34 @@ def _parse_envelope(stdout: str) -> dict | None:
     return None
 
 
-def _classify(message: str) -> LlmError:
+# Genuine plan/quota messages only. A bare "limit" or "credit" is far too broad: envelopes
+# carry words like "limit" in unrelated fields and error text.
+_QUOTA = re.compile(
+    r"usage limit|(?:session|weekly|daily|monthly|5-hour|five-hour|opus|extra usage) limit"
+    r"|hit your \w+(?: \w+)? limit|credit balance|out of credits|exceeded your .*(?:quota|limit)"
+)
+_STRUCTURED_FAILURE = "Claude Code could not produce valid structured output"
+
+
+def _structured_failure(envelope: dict | None) -> str | None:
+    """Why a failed envelope is an ordinary structured-output / turn-budget failure, else None."""
+    if not envelope:
+        return None
+    subtype = str(envelope.get("subtype") or "")
+    if subtype.startswith("error_max"):  # error_max_turns, error_max_structured_output_retries
+        return f"{_STRUCTURED_FAILURE} ({subtype})"
+    if envelope.get("stop_reason") == "tool_use" or (envelope.get("num_turns") or 0) > 2:
+        return f"{_STRUCTURED_FAILURE} (stopped after {envelope.get('num_turns')} turns)"
+    return None
+
+
+def _classify(message: str, envelope: dict | None = None) -> LlmError:
+    """Turn a failed call into the right error. Quota is recognised by wording or HTTP 429."""
     low = message.lower()
-    if re.search(r"limit|credit", low):
+    structured = _structured_failure(envelope)
+    if structured and (envelope or {}).get("api_error_status") != 429:
+        return LlmError(structured)
+    if (envelope or {}).get("api_error_status") == 429 or _QUOTA.search(low):
         return LlmLimitReached(f"Claude Code usage limit reached: {message[:200]}")
     if re.search(r"log ?in|logged|authenticat", low):
         return LlmError(f"Claude Code is not logged in: {LOGIN_HINT}")
@@ -167,8 +192,12 @@ class ClaudeCodeClient:
         failed = done.returncode != 0 or bool(envelope and envelope.get("is_error"))
         if failed:
             message = str((envelope or {}).get("result") or "")
-            message = message or (done.stderr or "").strip() or (done.stdout or "").strip()
-            raise _classify(message or f"exit code {done.returncode}")
+            message = message or (done.stderr or "").strip()
+            if not message and envelope is None:
+                message = (done.stdout or "").strip()  # plain-text failure; no envelope to trust
+            if not message and envelope:
+                message = f"no result text (subtype {envelope.get('subtype')!r})"
+            raise _classify(message or f"exit code {done.returncode}", envelope)
         if envelope is None:
             raise ValueError("no JSON in Claude Code output")
         return envelope

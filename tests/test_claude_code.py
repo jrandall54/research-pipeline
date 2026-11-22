@@ -213,3 +213,54 @@ def test_effort_does_not_remove_any_safety_flag():
 
 def _flag(argv, name):
     return argv[argv.index(name) + 1]
+
+
+# --- failure classification: genuine quota versus structured-output failures ---
+
+def _env(**kw):
+    return ok(json.dumps({"type": "result", "is_error": True, **kw}), 1)
+
+
+def test_structured_output_failure_with_tool_use_is_not_a_limit():
+    # Shape seen in a real run: is_error, 6 turns, stopped on tool_use. Not quota.
+    env = _env(subtype="error_during_execution", num_turns=6, stop_reason="tool_use",
+               result="", rate_limit_info={"limit": "none"}, usage={"limit": 0})
+    with pytest.raises(LlmError) as e:
+        client(FakeRunner(env)).generate("S", "U", Out)
+    assert not isinstance(e.value, LlmLimitReached)
+    assert "structured" in str(e.value).lower()
+
+
+@pytest.mark.parametrize("subtype", ["error_max_turns", "error_max_structured_output_retries"])
+def test_max_turns_and_structured_retries_are_plain_errors(subtype):
+    env = _env(subtype=subtype, num_turns=5, result="reached the limit of retries")
+    with pytest.raises(LlmError) as e:
+        client(FakeRunner(env)).generate("S", "U", Out)
+    assert not isinstance(e.value, LlmLimitReached)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Claude AI usage limit reached|1760000000",
+        "5-hour limit reached - resets 3pm",
+        "You've hit your weekly limit",
+        "Credit balance is too low",
+    ],
+)
+def test_real_usage_limit_messages_still_limit(text):
+    with pytest.raises(LlmLimitReached):
+        client(FakeRunner(_env(subtype="success", result=text))).generate("S", "U", Out)
+
+
+def test_http_429_status_is_limit():
+    env = _env(subtype="error_during_execution", api_error_status=429, result="Too many requests")
+    with pytest.raises(LlmLimitReached):
+        client(FakeRunner(env)).generate("S", "U", Out)
+
+
+def test_rate_limit_words_without_429_are_not_quota():
+    env = _env(subtype="error_during_execution", result="rate limit parsing failed in output")
+    with pytest.raises(LlmError) as e:
+        client(FakeRunner(env)).generate("S", "U", Out)
+    assert not isinstance(e.value, LlmLimitReached)

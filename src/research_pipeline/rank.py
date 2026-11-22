@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 
+from research_pipeline.db import shelf_chunk_rows, shelf_embedding_id
 from research_pipeline.embed import Embedder
 from research_pipeline.models import Profile
 
@@ -23,7 +24,6 @@ HF_UPVOTE_WEIGHT = 0.01  # x log1p(upvotes): 1 vote ~0.007, 42 votes ~0.038 (abo
 AUTHOR_BOOST = 0.02  # per followed author on the paper: a clear nudge, about half a std
 KEYWORD_BOOST = 0.01  # per keyword found in title/abstract: weak, keywords are blunt
 KEYWORD_BOOST_CAP = 0.04  # many keywords must not swamp similarity
-MY_WORK_WEIGHT = 0.0  # TODO(phase4): similarity to the user's own notes in my_work/
 # Implicit profile (votes and saves). The term is FEEDBACK x max over your liked papers of
 # (decay weight x cosine): the NEAREST neighbour only, so 20 diverse likes do not dilute the
 # pull of the one that matches. A paper identical to one fresh like gains the full 0.20; one at
@@ -36,6 +36,14 @@ FEEDBACK_PENALTY = 0.15
 # A "liked/disliked similar" reason is only written when the RAW cosine of the neighbour (before decay) reaches this floor:
 # about two similarity standard deviations (0.045) above the 0.6 typical for unrelated papers.
 FEEDBACK_REASON_FLOOR = 0.70
+# The shelf (your own notes in my_work/): SHELF_BOOST x the cosine to the NEAREST shelf chunk,
+# clamped at 0. Same shape and size as the liked-paper term, with no decay (your own work does not
+# go stale the way a vote does). A paper identical to a chunk gains 0.20; one at the typical 0.6
+# gains 0.12, so a near neighbour beats an average paper by ~0.2 x 0.2 = ~0.04, about one standard
+# deviation of similarity: it reorders close calls but cannot override a clear topical gap.
+SHELF_BOOST = 0.20
+# A "near your shelf" reason needs a raw cosine of at least this (same floor as feedback reasons).
+SHELF_REASON_FLOOR = 0.70
 
 
 @dataclass
@@ -52,6 +60,14 @@ class FeedbackVectors:
 
     liked: list[tuple[str, np.ndarray, float]] = field(default_factory=list)
     disliked: list[tuple[str, np.ndarray, float]] = field(default_factory=list)
+
+
+@dataclass
+class ShelfVectors:
+    """Chunks of your own work: the item name of each chunk and its (n, d) unit vectors."""
+
+    names: list[str] = field(default_factory=list)
+    vecs: np.ndarray = field(default_factory=lambda: np.zeros((0, 0), dtype=np.float32))
 
 
 @dataclass
@@ -117,6 +133,24 @@ def _feedback_term(
     return max(0.0, best), best_id, raw
 
 
+def build_shelf_vectors(conn: sqlite3.Connection, embedder: Embedder) -> ShelfVectors:
+    """Load the stored vector of every shelf chunk for this embedder's model; skip chunks without one."""
+    stored = {
+        r["item_id"]: np.frombuffer(r["vector"], dtype=np.float32)
+        for r in conn.execute(
+            "SELECT item_id, vector FROM embeddings WHERE embedding_model = ? AND item_id LIKE 'shelf:%'",
+            (embedder.model_name,),
+        )
+    }
+    names, vecs = [], []
+    for r in shelf_chunk_rows(conn):
+        v = stored.get(shelf_embedding_id(r["item_name"], r["chunk_idx"]))
+        if v is not None:
+            names.append(r["item_name"])
+            vecs.append(v)
+    return ShelfVectors(names, np.stack(vecs)) if vecs else ShelfVectors()
+
+
 def build_profile_vectors(
     embedder: Embedder, profile: Profile, seed_texts: dict[str, str]
 ) -> ProfileVectors:
@@ -154,6 +188,7 @@ def score_papers(
     profile: Profile,
     profile_vecs: ProfileVectors,
     feedback: FeedbackVectors | None = None,
+    shelf: ShelfVectors | None = None,
 ) -> list[ScoredPaper]:
     """Score papers; best first, ties broken by id for determinism."""
     followed = {a.lower(): a for a in profile.followed_authors}
@@ -179,7 +214,12 @@ def score_papers(
                 reasons.append(f"keyword: {kw}")
         score += min(kw_boost, KEYWORD_BOOST_CAP)
 
-        score += MY_WORK_WEIGHT * 0.0  # TODO(phase4)
+        if shelf is not None and shelf.names:
+            sims = shelf.vecs @ vec
+            i = int(np.argmax(sims))
+            score += SHELF_BOOST * max(0.0, float(sims[i]))
+            if sims[i] >= SHELF_REASON_FLOOR:
+                reasons.append(f"near your shelf: {shelf.names[i]}")
         if feedback:
             liked, liked_id, liked_raw = _feedback_term(vec, feedback.liked)
             disliked, disliked_id, disliked_raw = _feedback_term(vec, feedback.disliked)

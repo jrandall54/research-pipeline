@@ -2,13 +2,20 @@
 
 import sqlite3
 from datetime import UTC, datetime
+from pathlib import Path
 
 import numpy as np
 
 from research_pipeline.db import current_votes, list_saved, papers_with_status, set_status
 from research_pipeline.embed import Embedder
 from research_pipeline.models import Profile, Status
-from research_pipeline.rank import build_feedback_vectors, build_profile_vectors, score_papers
+from research_pipeline.rank import (
+    build_feedback_vectors,
+    build_profile_vectors,
+    build_shelf_vectors,
+    score_papers,
+)
+from research_pipeline.shelf import sync_shelf
 
 
 def _text(row: sqlite3.Row) -> str:
@@ -20,8 +27,13 @@ def run_triage(
     embedder: Embedder,
     profile: Profile,
     seed_texts: dict[str, str],
+    my_work: Path | None = None,
 ) -> dict[str, int]:
-    """Rank `new` papers; top `profile.top_n` become triaged, the rest skipped."""
+    """Rank `new` papers; top `profile.top_n` become triaged, the rest skipped.
+
+    With `my_work`, the shelf is synced first (new or edited notes are embedded) and papers near
+    your own notes get a boost.
+    """
     papers = papers_with_status(conn, Status.new)
     if not papers:
         return {"triaged": 0, "skipped": 0, "embedded": 0}
@@ -52,7 +64,11 @@ def run_triage(
         votes, saves, {k: v for k, v in stored.items() if k in wanted},
         profile.feedback_halflife_days, datetime.now(UTC),
     )
-    ranked = score_papers(papers, paper_vecs, profile, pv, feedback)
+    shelf = None
+    if my_work is not None:
+        sync_shelf(conn, my_work, embedder)
+        shelf = build_shelf_vectors(conn, embedder)
+    ranked = score_papers(papers, paper_vecs, profile, pv, feedback, shelf)
 
     for i, s in enumerate(ranked):
         if i < profile.top_n:

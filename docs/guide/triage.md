@@ -56,7 +56,7 @@ score = max over seeds & topics of cosine(paper, profile item)
       + 0.01 × ln(1 + hf_upvotes)
       + 0.02 × (number of followed authors on the paper)
       + min(0.04, 0.01 × (number of keywords found in title/abstract))
-      + 0.0  (my_work similarity, Phase 4)
+      + 0.20 × max(0, cosine to your nearest shelf chunk)
       + 0.20 × max over liked papers of (decay weight × cosine)
       − 0.15 × max over disliked papers of (decay weight × cosine)
 ```
@@ -69,7 +69,7 @@ score = max over seeds & topics of cosine(paper, profile item)
 | HF upvotes | 0.01 × ln(1 + n) | ln compresses: 1 vote gives 0.007, 10 gives 0.024, 42 gives 0.038, 100 gives 0.046. Community interest helps break ties; a similarity gap larger than about 0.04 to 0.05 outweighs even a very popular paper, but a small gap does not. |
 | Followed author | 0.02 each | Worth about half a standard deviation of similarity: a clear nudge, not decisive. Case-insensitive exact name match (no fuzzy matching, so "Ada Lovelace Jr" does not match "Ada Lovelace"). |
 | Keyword | 0.01 each, capped at 0.04 | Keywords are blunt (a word can appear in an unrelated paper), so each is a nudge and four of them are the most you can get. Each keyword counts once; matching is case-insensitive substring in title or abstract. |
-| my_work | 0.0 (stub) | `TODO(phase4)`: similarity to your own notes. |
+| Shelf (my_work) | +0.20 × nearest | Similarity to your own notes in `my_work/` (see `shelf.md`). Only the *nearest* chunk of your own work counts, so a big shelf does not dilute it, and it is clamped at 0. Same size and reasoning as the liked-paper term, with no decay: identical text gains 0.20, one at the typical 0.6 gains 0.12, so a near neighbour beats an average paper by about 0.2 × 0.2 = 0.04, roughly one standard deviation of similarity (0.045). It reorders close calls without overriding a clear topical gap. The reason `near your shelf: <note name>` is written when the raw cosine is at least 0.70. |
 | Liked papers | +0.20 × nearest | Your **implicit profile**: papers you up-voted or saved (`rpipe vote`, `rpipe save`). Only the *nearest* liked paper counts: the largest of (decay weight × cosine). A paper almost identical to one fresh like gains 0.20; one at the typical unrelated similarity of 0.6 gains 0.12, so the real difference between a near neighbour and an average paper is about 0.2 × 0.2 = 0.04, roughly one standard deviation of similarity: it reorders close calls without overriding a clear topical gap. |
 | Disliked papers | −0.15 × nearest | Same calculation over down-voted papers, slightly weaker because a downvote is often "not today" rather than "never". |
 
@@ -116,11 +116,18 @@ Your explicit profile (seeds, topics) is what you *said* you like. Your votes an
 
 Worked example: you up-voted paper L 60 days ago (weight 0.5^(60/60) = 0.5) and a candidate has cosine 0.9 to it. Gain = 0.20 × 0.5 × 0.9 = 0.09, exactly half of the 0.18 a fresh vote would give. The reason `liked similar: L` is added because the raw cosine 0.9 is at or above the 0.70 floor; decay does not hide it. At cosine 0.65 the gain would still be 0.065 but no reason is shown.
 
+### Your shelf
+
+At the start of triage, `run_triage` is given the vault's `my_work/` folder and calls `sync_shelf` (`shelf.py`), which embeds any new or edited notes (unchanged notes are not re-embedded). `rank.build_shelf_vectors` then loads every chunk's stored vector, and `score_papers` adds `0.20 ×` the cosine to the nearest chunk. With an empty shelf, or no folder, scores are exactly what they were before. `rpipe run` and `rpipe triage` both pass the folder.
+
+Worked example: a note `cooking_pasta.md` holds "tomato basil". A paper whose title and abstract are "Cooking pasta / tomato basil" has cosine 1.0 to that chunk, gains 0.20 and gets the reason `near your shelf: cooking_pasta`. A paper at cosine 0.55 gains 0.11 and no reason (below the 0.70 floor).
+
 ## Why it's built this way
 
 - **Embeddings over keywords or an LLM judge**: no per-paper API cost, works offline on a CPU, fast for hundreds of papers, and tolerant of different wording. An LLM judge would be more nuanced but costs money and time on every paper; we use the LLM later, only on the shortlist.
 - **Max similarity, not average**: a paper near any one interest is relevant. An average would punish papers for being unrelated to your *other* interests.
 - **Implicit profile uses the nearest liked paper, not an average**: averaging weight × cosine over all likes dilutes with history (with 20 diverse likes a near neighbour's gain shrinks about twenty-fold, from ~0.04 to ~0.002, so the feature would fade as you use it); dividing by the sum of weights has the same problem and also cancels decay for a lone vote. Max similarity matches how the explicit profile works (above): near any one thing you liked is enough. Cost: one stray like can pull in its neighbourhood; the 0.20 cap and decay bound that. A constant shift affecting every paper cannot change the order. Each feedback term is clamped at 0: a paper opposite to something you liked is simply not boosted (it is not penalised), and likewise for dislikes.
+- **Shelf uses the nearest chunk, not an average**: same argument as the implicit profile. Your notes cover many topics, and a paper only needs to be close to one of them; averaging would let a large shelf drown every match. No decay, because a note you keep on the shelf is still something you care about.
 - **Small additive boosts with named constants**: easy to read, explain and tune; no hidden learned model.
 - **Reasons from the same numbers as the score**: the explanation cannot disagree with the ranking.
 - **Skipped, not deleted**: triage is a cheap filter and may be wrong; skipped papers remain searchable.

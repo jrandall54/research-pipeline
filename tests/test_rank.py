@@ -13,7 +13,10 @@ from research_pipeline.rank import (
     FEEDBACK_PENALTY,
     FEEDBACK_REASON_FLOOR,
     FeedbackVectors,
+    SHELF_BOOST,
+    SHELF_REASON_FLOOR,
     ProfileVectors,
+    ShelfVectors,
     build_feedback_vectors,
     build_profile_vectors,
     score_papers,
@@ -324,3 +327,50 @@ def test_negative_cosine_never_flips_the_feedback_sign(tmp_path):
     # Opposite to a liked paper: no penalty. Opposite to a disliked paper: no boost.
     assert liked["2501.00001"].score == liked["2501.00002"].score
     assert disliked["2501.00001"].score == disliked["2501.00002"].score
+
+
+# ---- shelf term ----
+
+
+def shelf_score(tmp_path, shelf, vecs=(E1, E2)):
+    sub = tmp_path / f"sdb{len(list(tmp_path.iterdir()))}"
+    sub.mkdir()
+    rows = make_rows(sub, [meta("2501.00001", "Alpha"), meta("2501.00002", "Beta")])
+    return {s.id: s for s in score_papers(rows, np.array(vecs), Profile(topics=[], seeds=[]),
+                                          EMPTY_PV, shelf=shelf)}
+
+
+def test_empty_or_missing_shelf_changes_nothing(tmp_path):
+    base = shelf_score(tmp_path, None)
+    empty = shelf_score(tmp_path, ShelfVectors())
+    for pid in base:
+        assert empty[pid].score == base[pid].score and empty[pid].reasons == base[pid].reasons
+
+
+def test_shelf_neighbour_boosts_and_is_named(tmp_path):
+    base = shelf_score(tmp_path, None)
+    got = shelf_score(tmp_path, ShelfVectors(["idea"], np.array([E1])))
+    assert got["2501.00001"].score - base["2501.00001"].score == pytest.approx(SHELF_BOOST)
+    assert got["2501.00002"].score == base["2501.00002"].score  # orthogonal: nothing
+    assert "near your shelf: idea" in got["2501.00001"].reasons
+    assert not any("shelf" in r for r in got["2501.00002"].reasons)
+
+
+def test_shelf_uses_nearest_chunk_only(tmp_path):
+    one = shelf_score(tmp_path, ShelfVectors(["idea"], np.array([E1])))
+    many = shelf_score(tmp_path, ShelfVectors(["idea", "other", "more"], np.array([E1, E2, E2])))
+    assert many["2501.00001"].score == one["2501.00001"].score
+
+
+def test_shelf_negative_cosine_adds_nothing(tmp_path):
+    base = shelf_score(tmp_path, None)
+    got = shelf_score(tmp_path, ShelfVectors(["idea"], np.array([-E1])))
+    assert got["2501.00001"].score == base["2501.00001"].score
+    assert not any("shelf" in r for r in got["2501.00001"].reasons)
+
+
+def test_shelf_reason_needs_the_floor(tmp_path):
+    just_below = np.array([SHELF_REASON_FLOOR - 0.01, np.sqrt(1 - (SHELF_REASON_FLOOR - 0.01) ** 2)])
+    got = shelf_score(tmp_path, ShelfVectors(["idea"], np.array([just_below])))
+    assert got["2501.00001"].score > shelf_score(tmp_path, None)["2501.00001"].score
+    assert not any("shelf" in r for r in got["2501.00001"].reasons)

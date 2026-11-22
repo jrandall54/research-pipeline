@@ -292,7 +292,7 @@ def _run_locked(ctx: _Context) -> None:
                 counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
                 stage = "triage"
                 seeds = _seed_texts(ctx, profile, pipeline, errors)
-                counts |= run_triage(ctx.conn, embedder, profile, seeds)
+                counts |= run_triage(ctx.conn, embedder, profile, seeds, ctx.vault / "my_work")
                 # Triage is done with the embedder; free its GPU memory before the model probe
                 # measures what is free (the nightly summaries run without it).
                 del embedder
@@ -395,7 +395,7 @@ def triage(vault: VaultOption = None) -> None:
     embedder = _embedder(pipeline, ctx.config.embedding_model)
     errors: list[str] = []
     seeds = _seed_texts(ctx, profile, pipeline, errors)
-    counts = run_triage(ctx.conn, embedder, profile, seeds)
+    counts = run_triage(ctx.conn, embedder, profile, seeds, ctx.vault / "my_work")
     typer.echo("Triaged:")
     _report(counts, errors)
 

@@ -128,3 +128,36 @@ def test_vote_on_paper_without_embedding_is_ignored(conn, embedder):
     record_vote(conn, "9999.99999", 1)  # a real paper, but never embedded
     counts = run_triage(conn, embedder, Profile(topics=[], seeds=[], top_n=10), {})
     assert counts["triaged"] == 4
+
+
+def test_triage_syncs_shelf_and_boosts_matching_paper(conn, embedder, tmp_path):
+    my_work = tmp_path / "my_work"
+    my_work.mkdir()
+    (my_work / "cooking_pasta.md").write_text("tomato basil\n", encoding="utf-8")
+    fill(conn)
+    base = PROFILE.model_copy(update={"top_n": 4})
+    run_triage(conn, embedder, base, SEEDS, my_work=my_work)
+    row = get_paper(conn, "2501.00002")
+    assert "near your shelf: cooking_pasta" in json.loads(row["triage_reasons"])
+    assert row["triage_score"] > get_paper(conn, "2501.00004")["triage_score"]
+    assert [r["item_id"] for r in conn.execute("SELECT item_id FROM embeddings WHERE item_id LIKE 'shelf:%'")]
+
+
+def test_triage_second_run_does_not_reembed_the_note(conn, embedder, tmp_path):
+    my_work = tmp_path / "my_work"
+    my_work.mkdir()
+    (my_work / "idea.md").write_text("tomato basil sauce experiments\n", encoding="utf-8")
+    add(conn, "2501.00001", "A")
+    run_triage(conn, embedder, PROFILE, SEEDS, my_work=my_work)
+    add(conn, "2501.00002", "B", "x")
+    before = embedder.calls
+    run_triage(conn, embedder, PROFILE, SEEDS, my_work=my_work)
+    # only the new paper and the profile (1 seed + 1 topic) are embedded; the note is not
+    assert embedder.calls - before == 1 + 2
+
+
+def test_triage_without_my_work_ignores_shelf(conn, embedder):
+    fill(conn)
+    run_triage(conn, embedder, PROFILE, SEEDS)
+    assert not any("shelf" in r for p in ("2501.00001", "2501.00002")
+                   for r in json.loads(get_paper(conn, p)["triage_reasons"]))

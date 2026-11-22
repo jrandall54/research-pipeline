@@ -209,3 +209,25 @@
 **MathML** — the XML vocabulary for maths on web pages (`<mi>x</mi><mo>=</mo>...`); its visible text is the Unicode symbols (`α`, `∑`). Not to be confused with the TeX source stored beside it.
 
 **Refetch** — re-downloading and re-parsing a paper's full text and replacing the stored copy: `rpipe summarize ID... --refetch`. See `fulltext.md`.
+
+**Token** — the small piece of text a language model reads and writes at a time: a short word or part of a longer one (roughly three-quarters of an English word). Context windows, prompt budgets and usage limits are all counted in tokens. See `llm.md`.
+
+**Prompt / system prompt** — the text sent to a language model to tell it what to do. The system prompt is the fixed instructions (for us, "summarize this paper and cite sections"); the rest is the material it works on, such as the paper. See `summaries.md`.
+
+**Pydantic** — a Python library for describing the shape of data (which fields, what types) and checking it. We use it for the profile, the config and the model's JSON answers, so bad data is rejected with a clear error. See `llm.md`.
+
+**sentence-transformers** — the Python library that runs the embedding model on your computer. The default model is `BAAI/bge-small-en-v1.5` (config field `embedding_model`), which turns text into 384 numbers. See `running.md`.
+
+**RSS** — a standard format for a website to publish a list of new items that programs can read. The config has an `rss_feeds` setting for it, but it is not used yet. See `vault-and-config.md`.
+
+**MCP (Model Context Protocol)** — a standard way to plug extra tool servers into an AI tool. The Claude Code backend runs with `--strict-mcp-config` so none are loaded. See `backends.md`.
+
+**YAML** — a plain-text file format for settings, written as `name: value` lines and `- item` lists. `profile.yaml` and `config.yaml` use it; the `rpipe` commands edit them for you. See `vault-and-config.md`.
+
+**Inference** — using a trained model to produce an answer, as opposed to training it. Every summary the pipeline writes is one inference run on your machine or through your subscription. See `llm.md`.
+
+**Dedupe (deduplicate)** — recognising that two records are the same paper and keeping one. We do it with the canonical id. See `data-model.md`.
+
+**Cache** — a saved answer kept so work need not be repeated, and safe to delete because it can be rebuilt. For example `cache/llm_fit.json` remembers which model and context fit. See `vault-and-config.md`.
+
+**Fixture** — a small fixed sample input kept for tests (for example a saved paper page), so tests run offline and give the same result every time. See `running.md`.

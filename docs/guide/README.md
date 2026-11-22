@@ -2,7 +2,7 @@
 
 ## What it does
 
-Every night the pipeline collects new computer-science, security and AI papers, scores them against your personal profile, and writes a short digest of the best ones into your vault (a folder of your own files, kept outside this repo). Each paper in the digest says why it was picked and carries a short summary and critique written by a local model (Ollama) from the paper's full text, with every claim citing the section it came from; code checks the citations and flags any that do not exist. If a paper has no full text, the summary uses the abstract and says so; if Ollama is down, the digest is still written with abstracts. Phase 2 is done when the summaries pass your own accuracy check: at least 9 of your 10 gold papers graded accurate with `rpipe eval` (see [evaluation.md](evaluation.md)). You can vote on and save digest items (`rpipe vote`, `rpipe save`, or buttons on your phone via `rpipe serve`) and the pipeline learns from them, and `rpipe schedule install` runs it every night by itself ([scheduling.md](scheduling.md), [browsing.md](browsing.md)). Your own notes go on the shelf (`rpipe shelf add`, [shelf.md](shelf.md)) and papers close to them rank higher; later Phase 4 slices add note-linking.
+Every night the pipeline collects new computer-science, security and AI papers, scores them against your personal profile, and writes a short digest of the best ones into your vault (a folder of your own files, kept outside this repo). Each paper in the digest says why it was picked and carries a short summary and critique written by a local model (Ollama) from the paper's full text, with every claim citing the section it came from; code checks the citations and flags any that do not exist. If a paper has no full text, the summary uses the abstract and says so; if Ollama is down, the digest is still written with abstracts. You can check the summaries against your own accuracy test: at least 9 of your 10 gold papers graded accurate with `rpipe eval` (see [evaluation.md](evaluation.md)). You can vote on and save digest items (`rpipe vote`, `rpipe save`, or buttons on your phone via `rpipe serve`) and the pipeline learns from them, and `rpipe schedule install` runs it every night by itself ([scheduling.md](scheduling.md), [browsing.md](browsing.md)). Your own notes go on the shelf (`rpipe shelf add`, [shelf.md](shelf.md)) and papers close to them rank higher.
 
 ## How it works
 
@@ -60,4 +60,35 @@ Just want to use it? Follow the quickstart in the top-level `README.md` (install
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`, `schedule.py`, `serve.py`, `review.py`, `shelf.py`, `registry.py`, `machine.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/` (tests are in `tests/` and run offline with `uv run pytest -q`):
+
+- `cli.py`: every `rpipe` command.
+- `vault.py`: creates and locates the vault folders and files.
+- `profile_edit.py`: changes `profile.yaml` and `config.yaml` safely, keeping your comments.
+- `seed_input.py`: turns a link, id or title you typed into candidate seed papers.
+- `onboarding.py`: asks the model to propose topics and seed papers from a description; you approve each.
+- `db.py`: the SQLite database (tables, upgrades, reads and writes).
+- `models.py`: the data shapes (paper, profile, config) and their validation.
+- `summary_models.py`: the data shapes of a stored summary and critique.
+- `sources/`: the paper sources (`base.py` common interface, `arxiv.py`, `hf_daily.py`).
+- `collect.py`: runs every enabled source and stores new papers.
+- `seeds.py`: looks up your seed papers.
+- `embed.py`: turns text into embeddings.
+- `rank.py`: the scoring formula.
+- `triage.py`: ranks new papers and keeps the top N.
+- `digest.py`: writes the markdown digest.
+- `llm.py`: the Ollama client.
+- `ollama_fit.py`: finds the largest model and context that fit your GPU.
+- `backends/`: summary backends other than Ollama (`claude_code.py`, the Claude Code CLI).
+- `fulltext.py`: fetches and cleans a paper's arXiv HTML full text.
+- `prompts.py`: the summary and critique prompts.
+- `summarize.py`: summarizes and critiques papers and checks citations.
+- `gold.py`, `evaluate.py`: the gold set and `rpipe eval`.
+- `schedule.py`: the nightly systemd timer.
+- `serve.py`: browsing and voting from your phone (Datasette).
+- `review.py`: the terminal review loop.
+- `shelf.py`: your own notes and writing, indexed for ranking.
+- `registry.py`: built-in and installed plug-ins.
+- `machine.py`: looks at your computer and recommends a backend.
+- `run_lock.py`: stops two `rpipe run`s working on one vault at once.
+- `defaults/`: the packaged starting `profile.yaml`, `config.yaml` and `ollama_models.yaml`.

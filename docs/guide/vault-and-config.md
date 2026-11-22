@@ -57,6 +57,7 @@ Both files reject unknown keys: a typo such as `keyword:` or `top-n:` stops the 
 | `followed_authors` | `[]` | Authors whose papers get a boost. |
 | `keywords` | `[]` | Words in a title/abstract that give a small boost. |
 | `top_n` | 15 | Papers kept per digest (at least 1). |
+| `feedback_halflife_days` | 60 | Days after which a vote or save counts half as much in the implicit profile (1 to 3650). Change with `rpipe profile set-feedback-halflife DAYS`. See `triage.md`. |
 
 Normal use needs no editing: `rpipe profile show` prints these settings and the `rpipe profile ...` commands change them, validating every change (see [profile.md](profile.md), which also explains how your comments are kept). The files stay plain YAML, so power users may edit them by hand; a mistake is reported with the file name and field the next time any command reads it.
 

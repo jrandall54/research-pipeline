@@ -30,6 +30,7 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 | `followed_authors` | Authors whose papers get a boost. |
 | `keywords` | Words that give a boost when they appear. |
 | `top_n` | How many papers to keep per run. Default 15, must be at least 1. |
+| `feedback_halflife_days` | Days after which a vote or save counts half as much. Default 60, between 1 and 3650. |
 
 ### `Config` — pipeline settings
 

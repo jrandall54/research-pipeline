@@ -39,6 +39,9 @@ Your digest appears in the vault under `digests/` (default vault `~/research-vau
 - Read the digest, then vote: `rpipe vote ID up` or `rpipe vote ID down`. `ID` is the `id:` under each item.
 - Keep a paper with `rpipe save ID`.
 - Step through unvoted papers in the terminal with `rpipe review`.
+- Change topics, seeds, authors, keywords or top-N with `rpipe profile` (`rpipe profile show` lists them).
+- Add your own notes with `rpipe shelf add`; papers close to them rank higher.
+- Check summary accuracy with `rpipe gold` (your answer key) and `rpipe eval`.
 - Browse and vote from your phone with `rpipe serve` (needs the `serve` extra).
 
 Your votes shape the next night's ranking. `rpipe --help` lists every command; `rpipe sources list` shows paper sources and `rpipe plugins` shows installed plug-ins.

@@ -93,7 +93,7 @@ uv run pytest tests/test_gold.py -q
 
 ---
 
-# Evaluation: `rpipe eval` (the accuracy check)
+## Evaluation: `rpipe eval` (the accuracy check)
 
 ## What it does
 

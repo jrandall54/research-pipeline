@@ -1,4 +1,21 @@
-# Handoff — Phase 5 (Shareable) built, awaiting owner merge (2026-11-21; updated 2026-11-22)
+# Handoff — pipeline/app split designed and planned (2026-11-22)
+
+Read this first in a new session.
+
+## State
+- **`main` now holds Phase 5 and `summarize-backlog`** (fast-forward merge 2026-11-22, 897 tests passing). Before merging, an independent review of `summarize-backlog` found 2 Important issues, both fixed: quota is now checked before structured-output failure in `backends/claude_code.py`, and `rpipe summarize` lists `rpipe digest --date D` for older digests that gained summaries. Minor fixes: empty-backlog message, `--refetch` keeps stored text on a network error. Not pushed.
+- **New direction (owner, 2026-11-22):** the project is a **pipeline** (gets material, unattended) plus an **app** (uses material: read, vote, notes, study, later research and thesis), over **one database**, split by function in code. Design: `specs/2026-11-22-backend-frontend-split-design.md` (approved; a two-database version was drafted and dropped at the owner's push-back). Plan: `plans/2026-11-22-pipeline-app-split.md` (6 tasks, not started).
+- **Master plan (Claude Docs) updated:** new "Pipeline and app" section with a diagram; Datasette marked a stopgap, Open WebUI dropped; added dimensions sorted into pipeline vs app; roadmap now Phase 6 pipeline hardening (next), Phase 7 the split (this plan), Phases 8–11 the app (read and vote; library and notes; study, using the teacher's layered templates and concept tree; research and thesis), each to be brainstormed on its own first.
+- **Owner context:** philosophy BA, finishing CS prerequisites, applying for a master's starting fall 2027. "Research" today means articles, repos, project ideas they find. They want a good-looking, easy app eventually; nothing about its look is decided, and `library_api` must return data objects, not terminal text.
+
+## Next
+1. Phase 6 (pipeline hardening): brainstorm and plan it. Items: verify the Ollama path for real (owner's quick test said "decent"; paper was truncated), progress feedback everywhere (sketch below), long papers (bigger context first, chunked summaries second), owner setup, and where Phase 4's remaining slices go.
+2. Then execute `plans/2026-11-22-pipeline-app-split.md` (subagent-driven recommended). Task 6 asks the owner before editing CLAUDE.md.
+3. Owner action still open: remove the canary line, `sed -i '/PINEAPPLE-CANARY/d' ~/.claude/CLAUDE.md`.
+
+---
+
+# Earlier: Handoff — Phase 5 (Shareable) built, awaiting owner merge (2026-11-21; updated 2026-11-22)
 
 Read this first in a new session.
 

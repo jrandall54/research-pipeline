@@ -131,3 +131,5 @@
 **Provenance** — the record of where a summary came from: which model, prompt version, paper version and context size produced it, and when. Shown as a footer in the digest. See `summaries.md`.
 
 **Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts. Bumped whenever those prompts change, so summaries made with different wording can be told apart. See `summaries.md`.
+
+**Unfinished run** — a `runs` row whose `finished_at` is empty: the process was killed before it could record its end. The next digest's health line says `previous run did not finish`. See `running.md`.

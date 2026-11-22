@@ -7,14 +7,14 @@ import sys
 from contextlib import contextmanager
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from research_pipeline.collect import run_collect
-from research_pipeline.db import current_votes, finish_run, get_paper, list_saved, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
+from research_pipeline.db import current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
 from research_pipeline.digest import write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
@@ -189,7 +189,9 @@ def _seed_texts(
     return texts
 
 
-def health_line(day: date, counts: dict[str, int], errors: list[str]) -> str:
+def health_line(
+    day: date, counts: dict[str, int], errors: list[str], previous_unfinished: bool = False
+) -> str:
     detail = "; ".join(" ".join(e.split()) for e in errors) or "none"
     extras = ""
     if counts.get("abstract_only"):
@@ -203,6 +205,7 @@ def health_line(day: date, counts: dict[str, int], errors: list[str]) -> str:
         f"{counts.get('updated', 0)} updated · kept {counts.get('triaged', 0)} · "
         f"skipped {counts.get('skipped', 0)} · summarized {counts.get('summarized', 0)}"
         f"{extras} · errors: {detail}"
+        f"{' · previous run did not finish' if previous_unfinished else ''}"
     )
 
 
@@ -229,28 +232,84 @@ def run(vault: VaultOption = None) -> None:
     pipeline = build_pipeline(ctx.config)
     embedder = _embedder(pipeline, ctx.config.embedding_model)
     run_id = start_run(ctx.conn)
-    counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
-    seeds = _seed_texts(ctx, profile, pipeline, errors)
-    counts |= run_triage(ctx.conn, embedder, profile, seeds)
-    # Triage is done with the embedder; free its GPU memory before the model probe measures
-    # what is free (the nightly summaries run without it).
-    del embedder
-    _release_gpu_memory()
+    counts: dict[str, int] = {}
+    errors: list[str] = []
+    crashed = False
+    stage = "collect"
     try:
-        llm = _ready_llm(pipeline)
-    except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
-        errors.append(f"summaries skipped, model unavailable: {exc}")
-    else:
-        sum_counts, sum_errors = run_summarize(
-            ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
-        )
-        counts |= sum_counts
-        errors += sum_errors
+        counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
+        stage = "triage"
+        seeds = _seed_texts(ctx, profile, pipeline, errors)
+        counts |= run_triage(ctx.conn, embedder, profile, seeds)
+        # Triage is done with the embedder; free its GPU memory before the model probe
+        # measures what is free (the nightly summaries run without it).
+        del embedder
+        _release_gpu_memory()
+        stage = "summarize"
+        try:
+            llm = _ready_llm(pipeline)
+        except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
+            errors.append(f"summaries skipped, model unavailable: {exc}")
+        else:
+            sum_counts, sum_errors = run_summarize(
+                ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
+            )
+            counts |= sum_counts
+            errors += sum_errors
+    except Exception as exc:  # noqa: BLE001 - record it, then still try to write the digest
+        crashed = True
+        errors.append(f"{stage}: {' '.join(str(exc).split()) or type(exc).__name__}")
     today = date.today()
-    out = write_digest(ctx.conn, ctx.vault, today, health_line(today, counts, errors))
-    finish_run(ctx.conn, run_id, counts, errors)
-    typer.echo(f"Digest written to {out}")
+    out = None
+    try:
+        unfinished = previous_run_unfinished(ctx.conn, run_id)
+        out = write_digest(
+            ctx.conn, ctx.vault, today, health_line(today, counts, errors, unfinished)
+        )
+    except Exception as exc:  # noqa: BLE001
+        crashed = True
+        errors.append(f"digest: {' '.join(str(exc).split()) or type(exc).__name__}")
+    finally:
+        finish_run(ctx.conn, run_id, counts, errors)
+    if out is not None:
+        typer.echo(f"Digest written to {out}")
     _report(counts, errors)
+    if crashed:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def runs(
+    limit: Annotated[int, typer.Option("--limit", min=1, help="How many runs to show.")] = 10,
+    vault: VaultOption = None,
+) -> None:
+    """List recent runs, newest first: when, how long, what happened, how many errors."""
+    ctx = _open(vault)
+    rows = list_runs(ctx.conn, limit)
+    if not rows:
+        typer.echo("No runs yet. Run `rpipe run`.")
+        return
+    for row in rows:
+        typer.echo(format_run(row))
+
+
+def format_run(row: sqlite3.Row) -> str:
+    counts = json.loads(row["counts"]) if row["counts"] else {}
+    errors = json.loads(row["errors"]) if row["errors"] else []
+    if row["finished_at"]:
+        seconds = (
+            datetime.fromisoformat(row["finished_at"]) - datetime.fromisoformat(row["started_at"])
+        ).total_seconds()
+        took = f"{seconds:.0f}s"
+    else:
+        took = "did not finish"
+    summary = (
+        f"new {counts.get('inserted', 0)}, kept {counts.get('triaged', 0)}, "
+        f"summarized {counts.get('summarized', 0)}"
+        if counts
+        else "no counts"
+    )
+    return f"{row['started_at']}  {took}  {summary}  errors {len(errors)}"
 
 
 @app.command()

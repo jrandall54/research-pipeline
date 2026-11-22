@@ -591,3 +591,18 @@ def test_health_line_counts_truncated_summaries():
     line = cli.health_line(date(2026, 11, 21), {"summarized": 3, "truncated": 2}, [])
     assert "truncated 2" in line
     assert "truncated" not in cli.health_line(date(2026, 11, 21), {"summarized": 3}, [])
+
+
+def test_crash_in_collect_still_finishes_run(vault, monkeypatch):
+    install(monkeypatch)  # a single failing source is isolated by run_collect, so crash the stage itself
+    monkeypatch.setattr(cli, "run_collect", lambda *a, **k: (_ for _ in ()).throw(KeyError("kaboom")))
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 1, res.output
+    import sqlite3
+    finished, errors = sqlite3.connect(vault / "vault.sqlite").execute(
+        "SELECT finished_at, errors FROM runs"
+    ).fetchone()
+    assert finished is not None
+    assert any("collect:" in e and "kaboom" in e for e in json.loads(errors))
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert "kaboom" in first

@@ -51,10 +51,11 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 | Command | What it does | Writes |
 | --- | --- | --- |
-| `run` | `start_run`, then collect, seed lookup, triage, summarize, digest for today, then `finish_run` with the merged counts and errors | the `runs` row, papers, summaries, `digests/<today>.md` |
+| `run` | `start_run`, then collect, seed lookup, triage, summarize, digest for today, then `finish_run` with the merged counts and errors (always, even after a crash; exit code 1 if a stage crashed) | the `runs` row, papers, summaries, `digests/<today>.md` |
 | `collect` | fetch from arXiv and Hugging Face into the database | papers (status `new`) |
 | `triage` | rank the `new` papers, keep the top N | statuses, scores, reasons, embeddings |
 | `summarize` | summarise and critique every paper still waiting (`triaged`, `fetched`, or in today's digest without a summary) with the local model (fetching arXiv HTML full text first; abstract only if there is none) | full texts, summaries, statuses `fetched` then `summarized` |
+| `runs [--limit N]` | list recent runs, newest first | nothing |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
 **The summarize stage.** `rpipe run` checks that Ollama is up and the model installed before this stage. If not, it skips the stage, records the cause in the health line and `runs.errors`, and still writes the digest (abstracts only), so a stopped Ollama never costs you the night's digest. A single paper that fails (model error, network error fetching its text) keeps its status, gets its `error` and `retry_count` set, and the rest carry on.
@@ -179,7 +180,15 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 | `counts` | `{"inserted": 339, "updated": 11, "unchanged": 0, "source_errors": 0, "triaged": 15, "skipped": 324, "embedded": 339}` |
 | `errors` | `[]` |
 
-`counts` merges the collect counts (`inserted`, `updated`, `unchanged`, `source_errors`) with the triage counts (`triaged`, `skipped`, `embedded`) and, since Phase 2, the summarize counts (`fetched`, `summarized`, `abstract_only`, `truncated`, `summary_failed`); see `sources.md`, `triage.md` and the summarize stage above. The sample row above predates Phase 2 so it has no summarize counts, and the sample health line shows `summarized 0` for the same reason. A row with no `finished_at` means that run crashed before finishing. Look at it with `sqlite3 <vault>/vault.sqlite "select * from runs"`.
+`counts` merges the collect counts (`inserted`, `updated`, `unchanged`, `source_errors`) with the triage counts (`triaged`, `skipped`, `embedded`) and, since Phase 2, the summarize counts (`fetched`, `summarized`, `abstract_only`, `truncated`, `summary_failed`); see `sources.md`, `triage.md` and the summarize stage above. The sample row above predates Phase 2 so it has no summarize counts, and the sample health line shows `summarized 0` for the same reason. Look at the history with `rpipe runs` (below) or `sqlite3 <vault>/vault.sqlite "select * from runs"`.
+
+### Crash-safe runs and `rpipe runs`
+
+**What happens if a stage crashes.** Source failures, a missing model and a failed seed lookup are already handled one by one (see above). Anything *else* unexpected (a bug, a full disk) used to leave the run row with no `finished_at`. Now `run` wraps the stages: the exception is recorded in `runs.errors` as `<stage>: <message>` (the same plain-string shape as `arxiv: arXiv API returned HTTP 500`, with the stage being `collect`, `triage` or `summarize`), the later stages are skipped, `run` still tries to write the digest from whatever is in the database (so the health line shows the error), `finish_run` always executes, and the command exits with code 1 so cron or systemd notices. If even the digest fails, that is recorded as `digest: ...`.
+
+**`rpipe runs [--limit 10]`** prints one line per run, newest first: start time (UTC), how long it took (or `did not finish`), a counts summary (`new`, `kept`, `summarized`) and the number of errors, for example `2026-11-21T19:11:05+00:00  11s  new 339, kept 15, summarized 15  errors 0`.
+
+**A run that never finished.** If the process was killed outright (power cut, `kill -9`) nothing can record anything, so `finished_at` stays empty. The next `run` notices that the run immediately before it has no `finished_at` and adds `previous run did not finish` to the end of the digest's health line. Only the immediately preceding run is checked (the current run is itself unfinished while it writes the digest, so it is excluded), so the warning appears once and clears after the next healthy run.
 
 ### Running it nightly
 
@@ -226,9 +235,10 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 
 ## Where the code is
 
-- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `summarize`, `digest`, `model`, `gold` and `eval` commands, `build_pipeline`, `health_line` (the `profile` commands are in `profile.md`)
+- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `summarize`, `digest`, `model`, `gold` and `eval` commands, `build_pipeline`, `health_line`, `runs` (the `profile` commands are in `profile.md`)
 - `src/research_pipeline/seeds.py`: seed text lookup and cache
 - `src/research_pipeline/summarize.py`: `run_summarize` (the per-paper loop)
 - `src/research_pipeline/llm.py`, `fulltext.py`, `prompts.py`: model client, full-text fetching, prompts (see `llm.md`, `fulltext.md`, `summaries.md`)
 - `src/research_pipeline/gold.py`, `evaluate.py`: `rpipe gold` and `rpipe eval` (see `evaluation.md`)
-- `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`
+- `src/research_pipeline/db.py`: `start_run`, `finish_run`, `list_runs`, `previous_run_unfinished`
+- `tests/test_runs.py`, `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`

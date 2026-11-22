@@ -291,6 +291,21 @@ def finish_run(
     conn.commit()
 
 
+def list_runs(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    """The most recent runs, newest first."""
+    return conn.execute(
+        "SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+def previous_run_unfinished(conn: sqlite3.Connection, run_id: int) -> bool:
+    """True if the run just before `run_id` exists and never finished (it crashed or was killed)."""
+    row = conn.execute(
+        "SELECT finished_at FROM runs WHERE id < ? ORDER BY id DESC LIMIT 1", (run_id,)
+    ).fetchone()
+    return row is not None and row[0] is None
+
+
 def save_fulltext(conn: sqlite3.Connection, paper_id: str, sections: list[Section]) -> None:
     """Store (or replace) a paper's full text as a JSON list of sections."""
     conn.execute(

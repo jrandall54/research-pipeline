@@ -1,4 +1,4 @@
-# Handoff — Phase 5 (Shareable) built, awaiting owner merge (2026-11-21)
+# Handoff — Phase 5 (Shareable) built, awaiting owner merge (2026-11-21; updated 2026-11-22)
 
 Read this first in a new session.
 
@@ -11,6 +11,20 @@ Read this first in a new session.
   - **Packaging**: MIT licence, stranger's README, CI (`.github/workflows/tests.yml`), `rpipe schedule` refuses off Linux.
   - Docs: `docs/guide/backends.md` (incl. how to add a backend), `setup.md`, plus llm, running, profile, sources, plugins, summaries, glossary.
 - Process: subagent-driven; Tasks 3 and 6 each needed one fix round; the final whole-branch review found 0 Critical, 4 Important (3 fixed in one wave, the 4th is the owner smoke test below).
+
+## Added after Phase 5 (branch `summarize-backlog`, 4 commits on top of `phase-5-shareable`; NOT merged; merge `phase-5-shareable` first)
+- `rpipe summarize --backlog [--limit N]` (default 10; past-digest papers with no summary, newest first) and `rpipe summarize <id>...` (any status; replaces an existing summary); `--refetch` re-downloads the full text first.
+- `rpipe model set-effort low|medium|high` (default `low`) for Claude Code; `rpipe summarize` prints a progress line per paper.
+- Full-text cleanup: LaTeXML math and `\materiaDisplay`-style heading residue no longer leak into text (`fulltext.py`). Stored full texts from before are stale until `--refetch`.
+- Prompts now cap claim counts and lengths (`PROMPT_VERSION` 2026-11-p4); `_classify` no longer reports structured-output failures as "usage limit reached".
+- Measured 2026-11-22 (Haiku via Claude Code): critique calls went from 70-127 s to about 30 s per paper. `--effort low` is a hint, not a cap: Haiku still thinks for thousands of tokens about 1 call in 4.
+- **Phase 5 smoke test passed:** a canary line in `~/.claude/CLAUDE.md` did not leak into any summary (`--setting-sources ""` works). Owner still needs to remove the line: `sed -i '/PINEAPPLE-CANARY/d' ~/.claude/CLAUDE.md`.
+- Not yet reviewed by an independent reviewer (only the per-feature tests): run a review before merging `summarize-backlog`.
+
+## Next up (owner asked for, not built)
+1. `rpipe show <id>...` (print one paper's summary and critique, no voting; accepts ids or title fragments) and `rpipe show --recent`.
+2. A reader page in `rpipe serve` (it shows raw JSON today). `rpipe review` is a vote loop, not for reading.
+3. Run `rpipe summarize --backlog` for the other 12 unsummarized digest papers, then `rpipe digest --date 2026-11-21`. Summaries live in `~/research-vault/digests/2026-11-21.md`.
 
 ## Owner actions (not done)
 1. **Smoke-test the Claude Code adapter on a real install** (tests are offline and cannot prove this): put a canary line in `~/.claude/CLAUDE.md`, run `rpipe model set-backend claude-code` then `rpipe summarize`, and confirm (a) summaries come back, (b) the canary does not leak into prompts or output, (c) the JSON envelope keys (`structured_output`, `is_error`) parse. If the canary leaks, add `--safe-mode` to the argv in `backends/claude_code.py` if your `claude --help` lists it.

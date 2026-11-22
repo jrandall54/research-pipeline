@@ -26,7 +26,7 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 4. **Refresh `plans/2026-11-22-pipeline-app-split.md` (Phase 7), then execute it.** What changed: `progress.py` is classified *shared*; `run_summarize`'s `on_progress` is gone (stages take a keyword-only `reporter`); per-paper summarize lines now go to stderr.
 
 ## Phase 6 check (real run, 2026-11-22, copy of the owner vault, ollama backend)
-`rpipe run --vault <copy> | cat` (stderr merged): plain lines, 0 escape codes, 0 carriage returns.
+`rpipe run --vault <copy> 2>&1 | cat` (stderr merged): plain lines, 0 escape codes, 0 carriage returns.
 ```
 embedding model: BAAI/bge-small-en-v1.5...
 embedding model done (2s)
@@ -58,7 +58,7 @@ summarize done (1m20s)
 The first real run found the Hugging Face "Loading weights" bar and an HF_TOKEN warning; fixed in 9686858.
 
 ## Phase 6 inputs
-Done in Part C (branch `phase-6-hardening`): the progress-feedback list (every waiting step reports; shared reporter, spinner on a terminal, plain lines otherwise), the setting commands for `arxiv_max_results`, `embedding_model` and `rss_feeds`, the arXiv category check with did-you-mean, `rpipe show`, and the `my_work` boundary (shelf text never reaches a model; tested).
+Done on branch `phase-6-hardening`: Part A, the progress-feedback list (every waiting step reports; shared reporter, spinner on a terminal, plain lines otherwise); Part C, the setting commands for `arxiv_max_results` and `embedding_model` (`rss_feeds` got no command: it was dropped from the profile template), the arXiv category check with did-you-mean, `rpipe show`, and the `my_work` boundary (shelf text never reaches a model; tested).
 
 ### Long papers (Part B, owner, 2026-11-22)
 Real Ollama summary of 2611.25005 was fast and "decent" but **truncated**. Order to try: (1) a longer context window (`rpipe model fit` / `rpipe model set-context`; a long-context local model), (2) chunked summarize-and-critique (map-reduce by section, merge overlapping claims, keep section citations; measure with `rpipe eval`). Watch the health line's `truncated N` before building (2). See Next, item 2.
@@ -66,7 +66,6 @@ Real Ollama summary of 2611.25005 was fast and "decent" but **truncated**. Order
 ### Open items
 - **Owner setup:** the repo's own dev env needs `uv sync --extra embed` (or `uv run --extra embed`) for real runs from the checkout. Reinstall the tool with extras (`uv tool install --editable '.[embed,serve]' --force`), `rpipe schedule status`, `loginctl enable-linger $USER`, add seed papers (`rpipe profile suggest "..."` or `rpipe profile add-seed`), start voting, fill the gold set (`rpipe gold add`, `rpipe eval run|grade|report`), run `rpipe summarize --backlog` for the 12 unsummarized 2026-11-21 papers then `rpipe digest --date 2026-11-21`.
 - **Switching `embedding_model`** drops the feedback boost of earlier votes/saves until switched back (documented, not fixed).
-- **Repo is private**, but the README's install line is a GitHub URL: make it public (or give club members access) before the AI club pilot. (Owner note elsewhere says the repo went public; confirm.)
 - Check `SHELF_REASON_FLOOR` against real bge-small scores.
 - Deferred minors from Phase 6 reviews: triage stage shows a bar with a total but no steps; fit/check failure printed twice; `show ID --recent` may print a paper twice, no ambiguous-title test; `test_categories` imports fixtures from `test_e2e`; `shelf.md` says the boundary test "catches every import form" (soften: attribute access and dynamic imports are not caught); stale comment in `progress_render.py` naming a deleted helper; LiveRenderer total fixed at start. Older: no config-to-digest e2e test for plug-in sources; `ollama_fit` deadline-vs-does-not-fit decided by clock comparison.
 

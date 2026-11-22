@@ -175,3 +175,21 @@ def test_cited_section_names_cannot_break_digest_structure(tmp_path):
 
     line = _claim(Claim(text="t", sections=["Intro\n## Injected", "2 Method"]), [])
     assert "\n" not in line and line.endswith("[§ Intro ## Injected, 2 Method]")
+
+
+def test_digest_item_shows_id_and_saved_marker_and_footer_hint(conn, tmp_path):
+    from research_pipeline.db import record_vote, set_saved
+
+    add(conn, "2411.00001", 0.9)
+    add(conn, "2411.00002", 0.5)
+    set_saved(conn, "2411.00001", True)
+    record_vote(conn, "2411.00002", -1)
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "id: 2411.00001" in text and "★ saved" in text
+    assert "id: 2411.00002" in text and "👎" in text
+    assert text.count("rpipe vote 2411.00001 up|down · rpipe save 2411.00001") == 1
+
+
+def test_digest_without_items_has_no_hint(conn, tmp_path):
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "rpipe vote" not in text

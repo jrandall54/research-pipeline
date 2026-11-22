@@ -117,3 +117,7 @@
 **`user_version`** — a spare integer SQLite stores in the database file header (`PRAGMA user_version`). We use it as the schema version so `open_db()` knows whether an older vault needs upgrading. See `data-model.md`.
 
 **Migration** — a small step that upgrades an existing database from an older schema to the current one, run automatically on open. See `data-model.md`.
+
+**Vote** — your thumbs up or down on a digest paper, recorded with `rpipe vote`. Votes are appended, never overwritten: the latest one counts and `clear` records a neutral vote. See `digest.md`.
+
+**Save** — a bookmark on a paper (`rpipe save`), shown as `★ saved` in later digests and listed by `rpipe feedback`. See `digest.md`.

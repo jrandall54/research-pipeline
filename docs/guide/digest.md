@@ -36,6 +36,8 @@ Run 2026-11-21: collected 3 new, 0 updated · kept 2 · skipped 1 · errors: non
 
 ## 1. [Fuzzing eBPF Verifiers for Kernel Security](https://arxiv.org/abs/2411.05555)
 
+id: 2411.05555
+
 **Authors:** Gus Hall
 
 **Why it matched** (score 0.58)
@@ -48,6 +50,8 @@ _No abstract available._
 
 ## 2. [Jailbreaking \[Aligned\] LLMs via Gradient Search](https://arxiv.org/abs/2411.01234)
 
+id: 2411.01234 · ★ saved
+
 **Authors:** Ann Lee, Bo Chen, Cy Diaz, Di Evans, Ed Fox et al.
 
 **Why it matched** (score 0.35)
@@ -59,6 +63,10 @@ _No abstract available._
 We show that jailbreak suffixes found by gradient search transfer across aligned language models.
 
 [abs](https://arxiv.org/abs/2411.01234) · [PDF](https://arxiv.org/pdf/2411.01234) · HF upvotes: 42 · [repo](https://github.com/example/gcg)
+
+---
+
+`rpipe vote 2411.05555 up|down · rpipe save 2411.05555`
 ```
 
 | Part | What it is |
@@ -66,10 +74,19 @@ We show that jailbreak suffixes found by gradient search transfer across aligned
 | Line 1 | The **health line**, exactly as passed in. |
 | `# Research digest — date` | The title, with the digest date. |
 | `## N. [Title](abs url)` | Rank (1 = best) and the title as a link to the paper's page. Square brackets in a title are escaped with a backslash (`\[Aligned\]`) because an unescaped `]` would end the link early and break the line; newlines inside a title are collapsed to spaces. |
+| `id: ...` | The paper's id, the handle you give to `rpipe vote` and `rpipe save`. A `★ saved`, `👍` or `👎` marker follows when you have saved or voted on it (see "Feedback" below). |
 | Authors | The first 5 names, then "et al." if there are more. The Jailbreaking paper had 6 authors, so only 5 are shown. |
 | **Why it matched** | The score to 2 decimals and the plain-language reasons triage stored (see `triage.md`). The score is only for comparing papers within the same night. |
 | Abstract | The abstract as collected, or `_No abstract available._` when the source gave none. |
 | Links line | `abs` (the paper page), `PDF` (`https://arxiv.org/pdf/<id>`, only for papers with an arXiv id), HF upvotes when above zero, and one `repo` link per code repository found. |
+
+### Feedback: ids, markers and the footer hint
+
+Every item shows `id: <id>` right under its title. If you have saved the paper it adds `★ saved`; if your latest vote is up or down it adds `👍` or `👎` (a cleared vote shows nothing). The markers come from the `saves` and `votes` tables (`docs/guide/data-model.md`) and are read when the digest is written, so a same-day re-run shows votes you cast in between.
+
+At the very end of the file, when there is at least one item, a single footer line reminds you of the commands, using the first item's id as the example: `rpipe vote <id> up|down · rpipe save <id>`. It appears once rather than on every item so the digest stays readable; with no items there is nothing to vote on, so no hint is written.
+
+You record feedback with `rpipe vote ID up|down|clear`, `rpipe save ID`, `rpipe unsave ID` and list it with `rpipe feedback` (see `running.md`). `ID` can also be part of a title; if several papers match you pick from a numbered list, and if none match nothing is written. **Why validate against the vault:** the database does not enforce that a vote points at a real paper, so a typo would silently store a vote for nothing; the CLI checks first. Votes are append-only (the latest one counts), so changing your mind keeps the history for later use by ranking.
 
 ### The summary block
 
@@ -154,7 +171,8 @@ Tests: `uv run pytest -q tests/test_digest.py tests/test_db.py` (offline; they u
 ## Where the code is
 
 - `src/research_pipeline/digest.py`: `write_digest` and the markdown rendering (including the summary block).
-- `src/research_pipeline/db.py`: `mark_in_digest`.
-- `tests/test_digest.py`, `tests/test_db.py`.
+- `src/research_pipeline/db.py`: `mark_in_digest`, `record_vote`, `current_votes`, `set_saved`, `is_saved`, `list_saved`.
+- `src/research_pipeline/cli.py`: the `vote`, `save`, `unsave` and `feedback` commands (`_resolve_paper` turns an id or title fragment into a paper id).
+- `tests/test_digest.py`, `tests/test_db.py`, `tests/test_cli_feedback.py`.
 
 Cited section names come from the model, so they pass through the same one-line cleaning as other model text (whitespace and newlines collapse to single spaces): a section name containing a newline or `##` cannot start a new heading or break the digest layout.

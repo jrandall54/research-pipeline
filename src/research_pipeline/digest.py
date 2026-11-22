@@ -6,7 +6,7 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
-from research_pipeline.db import get_summary, mark_in_digest
+from research_pipeline.db import current_votes, get_summary, is_saved, mark_in_digest
 from research_pipeline.models import Status
 from research_pipeline.summarize import Claim, PaperSummary
 
@@ -64,8 +64,16 @@ def _render_summary(ps: PaperSummary) -> list[str]:
     return lines
 
 
-def _render(n: int, p: sqlite3.Row, ps: PaperSummary | None = None) -> str:
+def _id_line(paper_id: str, saved: bool, vote: int) -> str:
+    marks = (["★ saved"] if saved else []) + (["👍"] if vote > 0 else ["👎"] if vote < 0 else [])
+    return " · ".join([f"id: {paper_id}", *marks])
+
+
+def _render(
+    n: int, p: sqlite3.Row, ps: PaperSummary | None = None, saved: bool = False, vote: int = 0
+) -> str:
     lines = [f"## {n}. [{_link_text(p['title'])}]({_link_url(p['url'])})", ""]
+    lines += [_id_line(p["id"], saved, vote), ""]
     authors = _authors(p["authors"])
     if authors:
         lines += [f"**Authors:** {authors}", ""]
@@ -106,7 +114,13 @@ def write_digest(
 
     parts = [run_summary.strip(), "", f"# Research digest — {digest_date.isoformat()}", ""]
     if papers:
-        parts += [_render(i, p, get_summary(conn, p["id"])) for i, p in enumerate(papers, 1)]
+        votes = {r["paper_id"]: r["vote"] for r in current_votes(conn)}
+        parts += [
+            _render(i, p, get_summary(conn, p["id"]), is_saved(conn, p["id"]), votes.get(p["id"], 0))
+            for i, p in enumerate(papers, 1)
+        ]
+        first = papers[0]["id"]
+        parts += ["---", "", f"`rpipe vote {first} up|down · rpipe save {first}`", ""]
     else:
         parts += ["Nothing new matched your profile today.", ""]
 

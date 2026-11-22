@@ -95,6 +95,14 @@ Ollama is running at http://localhost:11434 and model qwen3:8b is installed.
 
 Illustrative output; your numbers will differ.
 
+Feedback commands (`rpipe vote ID up|down|clear`, `rpipe save ID`, `rpipe unsave ID`, `rpipe feedback`) record what you thought of a digest item. `ID` is the `id:` shown under each item (an arXiv id) or part of the title; an ambiguous title shows a numbered list, an unknown one changes nothing. See `digest.md`.
+
+```
+$ uv run rpipe vote 2307.15043 up
+$ uv run rpipe save 2307.15043
+$ uv run rpipe feedback          # lists current votes and saved papers with titles
+```
+
 Gold-set commands (`rpipe gold add`, `rpipe gold list`, `rpipe gold remove`, `rpipe gold add-fact`) build the answer key of papers and key facts that `rpipe eval` checks summaries against; see `evaluation.md`.
 
 ```

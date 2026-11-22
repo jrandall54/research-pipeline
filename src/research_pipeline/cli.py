@@ -14,7 +14,7 @@ from typing import Annotated
 import typer
 
 from research_pipeline.collect import run_collect
-from research_pipeline.db import finish_run, open_db, papers_given_up_on, papers_to_summarize, start_run
+from research_pipeline.db import current_votes, finish_run, get_paper, list_saved, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
 from research_pipeline.digest import write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
@@ -918,3 +918,98 @@ def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
     typer.echo("")
     profile_show(vault)
     typer.echo("\nNext step: rpipe run")
+
+
+# --- feedback: votes and saves -------------------------------------------------
+
+
+def _resolve_paper(conn: sqlite3.Connection, text: str) -> str:
+    """Turn an id or a title fragment into a paper id from the vault, or fail."""
+    text = text.strip()
+    if get_paper(conn, text) is not None:
+        return text
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    rows = conn.execute(
+        "SELECT id, title FROM papers WHERE title LIKE ? ESCAPE '\\' ORDER BY id",
+        (f"%{escaped}%",),
+    ).fetchall()
+    if not text or not rows:
+        raise _fail(f"No paper in your vault matches '{text}'. Use the id shown in the digest. Nothing was changed.")
+    if len(rows) == 1:
+        return rows[0]["id"]
+    for i, r in enumerate(rows, 1):
+        typer.echo(f"  {i}. {r['id']}  {r['title']}")
+    n = len(rows)
+    pick = typer.prompt(f"Pick 1-{n} or 0 to cancel", type=int)
+    if not 0 <= pick <= n:
+        raise _fail(f"{pick} is not between 0 and {n}. Nothing was changed.")
+    if pick == 0:
+        typer.echo("Cancelled. Nothing was changed.")
+        raise typer.Exit(code=0)
+    return rows[pick - 1]["id"]
+
+
+_VOTES = {"up": 1, "down": -1, "clear": 0}
+
+
+@app.command("vote")
+def vote(
+    paper: Annotated[str, typer.Argument(help="Paper id from the digest, or part of its title.")],
+    direction: Annotated[str, typer.Argument(help="up, down or clear.")],
+    vault: VaultOption = None,
+) -> None:
+    """Record a thumbs up/down on a paper (or clear it)."""
+    if direction not in _VOTES:
+        raise _fail(f"Direction must be up, down or clear, not '{direction}'.")
+    ctx = _open(vault)
+    try:
+        pid = _resolve_paper(ctx.conn, paper)
+        record_vote(ctx.conn, pid, _VOTES[direction])
+    finally:
+        ctx.conn.close()
+    typer.echo(f"Recorded vote {direction} for {pid}." if direction != "clear" else f"Cleared vote for {pid}.")
+
+
+def _save_command(saved: bool) -> None:
+    word = "save" if saved else "unsave"
+
+    def command(
+        paper: Annotated[str, typer.Argument(help="Paper id from the digest, or part of its title.")],
+        vault: VaultOption = None,
+    ) -> None:
+        ctx = _open(vault)
+        try:
+            pid = _resolve_paper(ctx.conn, paper)
+            set_saved(ctx.conn, pid, saved)
+        finally:
+            ctx.conn.close()
+        typer.echo(f"{'Saved' if saved else 'Unsaved'} {pid}.")
+
+    command.__doc__ = f"{word.capitalize()} a paper."
+    app.command(word)(command)
+
+
+_save_command(True)
+_save_command(False)
+
+
+@app.command("feedback")
+def feedback(vault: VaultOption = None) -> None:
+    """List your current votes and saved papers."""
+    ctx = _open(vault)
+    try:
+        titles = {r["id"]: r["title"] for r in ctx.conn.execute("SELECT id, title FROM papers")}
+        votes = current_votes(ctx.conn)
+        saves = list_saved(ctx.conn)
+    finally:
+        ctx.conn.close()
+    typer.echo("Votes")
+    if not votes:
+        typer.echo("  No votes yet. Try `rpipe vote ID up`.")
+    for r in votes:
+        typer.echo(f"  {'up  ' if r['vote'] > 0 else 'down'}  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")
+    typer.echo("Saved")
+    if not saves:
+        typer.echo("  No saved papers yet. Try `rpipe save ID`.")
+    for r in saves:
+        typer.echo(f"  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")

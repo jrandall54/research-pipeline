@@ -93,3 +93,12 @@ def test_queue_progress_counts(tmp_path):
     assert queue_progress(conn, "2026-11-01") == (2, 4)
     assert queue_progress(conn, "2026-11-02") == (0, 1)
     assert queue_progress(conn, "2026-12-31") == (0, 0)
+
+
+def test_null_triage_score_sorts_last_within_its_day(tmp_path):
+    conn = open_db(tmp_path / "p.db")
+    _add(conn, "no-score", "2026-11-01")
+    _add(conn, "low", "2026-11-01", 0.01)
+    _add(conn, "high", "2026-11-01", 0.9)
+    _add(conn, "next-day", "2026-11-02", 0.99)
+    assert _ids(review_queue(conn)) == ["high", "low", "no-score", "next-day"]

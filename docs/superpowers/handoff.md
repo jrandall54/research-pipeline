@@ -14,6 +14,8 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 - Parked-list cleanup (the parked-fixes segment of this branch) is done: `uv run pytest -q` gives 623 passing.
 - Earlier Phase 3 count: 563 passing. Docs: `docs/guide/` (new `scheduling.md` and `browsing.md`; `triage`, `data-model`, `digest`, `profile`, `running`, `glossary` updated).
 
+- **`rpipe review`** (branch `review-loop`, not merged): terminal read-and-vote loop over unvoted digest papers, plus `rpipe review --later` for skipped ones (`skips` table, schema version 2, `review.py`). Docs: `docs/guide/review.md`. Next UI item: a reader page for `rpipe serve` (read the summary and vote in the browser, the phone equivalent of this loop).
+
 ## Owner actions not yet done
 - Merge `phase-3-daily-habit` into `main` when happy.
 - Reinstall the tool WITH the extras: `cd` into the repo and run `uv tool install --editable '.[embed,serve]' --force` (the plain `rpipe` on PATH was installed without `embed`, so the nightly run would fail). Then `rpipe schedule install` (it refuses if embed is missing), then `loginctl enable-linger $USER` (so the timer runs with nobody logged in). Check with `rpipe schedule status`.

@@ -195,7 +195,7 @@ rpipe sources enable NAME
 rpipe sources disable NAME      # refused for the last enabled source
 ```
 
-Extra sources come from installed plug-ins (see `plugins.md`). A source named in `sources` that is no longer installed or fails to start is skipped and reported in the health line; the run and digest carry on. Looking up seed papers (`rpipe profile add-seed`, the seed text used in triage) always uses arXiv, whichever sources are enabled, because seeds are arXiv ids. Code: `registry.build_sources`, `build_pipeline` in `cli.py`.
+Extra sources come from installed plug-ins (see `plugins.md`). A source named in `sources` that is no longer installed or fails to start is skipped and reported in the health line; the run and digest carry on. Looking up seed papers (`rpipe profile add-seed`, the seed text used in triage) always uses arXiv, whichever sources are enabled, because seeds are arXiv ids. When `arxiv` is enabled the seed lookup reuses the very same client object as collection, so its 3-second spacing between requests carries over (a fresh client would fire at once and risk arXiv 429 errors); when it is not enabled, one private client is made on first use. Code: `registry.build_sources`, `build_pipeline` in `cli.py`.
 
 ## How collection combines sources
 

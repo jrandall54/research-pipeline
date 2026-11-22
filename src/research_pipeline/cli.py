@@ -83,10 +83,20 @@ def build_pipeline(config: Config) -> Pipeline:
     """The enabled sources, the real embedding model, and arXiv lookup for seed papers
     (always arXiv, whichever sources are enabled)."""
     sources, startup_errors = registry.build_sources(config)
+    arxiv = next((s for s in sources if s.name == "arxiv" and hasattr(s, "fetch_by_ids")), None)
+    private: list[ArxivSource] = []  # arXiv not enabled: one private client, made on first use
+
+    def fetch_seeds(ids: list[str]) -> list[PaperMeta]:
+        if arxiv is not None:  # same instance as collection, so its 3-second spacing is shared
+            return arxiv.fetch_by_ids(ids)
+        if not private:
+            private.append(make_arxiv(config))
+        return private[0].fetch_by_ids(ids)
+
     return Pipeline(
         sources=sources,
         make_embedder=lambda: SentenceTransformerEmbedder(config.embedding_model),
-        seed_fetcher=lambda ids: make_arxiv(config).fetch_by_ids(ids),
+        seed_fetcher=fetch_seeds,
         make_llm=lambda: build_llm(config, config.vault_path, log=_progress),
         fulltext_fetcher=fetch_fulltext,
         startup_errors=startup_errors,

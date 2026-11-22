@@ -741,3 +741,26 @@ def test_run_with_uninstalled_plugin_source_still_writes_digest(vault, monkeypat
     assert res.exit_code == 0, res.output
     digests = list((vault / "digests").glob("*.md"))
     assert digests and "source gone" in digests[0].read_text()
+
+
+def test_seed_fetcher_shares_the_collection_arxiv_instance(vault):
+    pipe = cli.build_pipeline(cli.load_config(vault / "config.yaml"))
+    arxiv = next(s for s in pipe.sources if s.name == "arxiv")
+    calls = []
+    arxiv.fetch_by_ids = lambda ids: calls.append(ids) or []
+    pipe.seed_fetcher(["2401.00001"])
+    assert calls == [["2401.00001"]]  # same throttled object, not a fresh client
+
+
+def test_seed_fetcher_without_arxiv_enabled_reuses_one_private_client(vault, monkeypatch):
+    made = []
+
+    class Fake:
+        def fetch_by_ids(self, ids):
+            return []
+
+    monkeypatch.setattr(cli, "make_arxiv", lambda config: made.append(1) or Fake())
+    cfg = cli.load_config(vault / "config.yaml").model_copy(update={"sources": ["hf_daily"]})
+    pipe = cli.build_pipeline(cfg)
+    pipe.seed_fetcher(["a"]); pipe.seed_fetcher(["b"])
+    assert made == [1]

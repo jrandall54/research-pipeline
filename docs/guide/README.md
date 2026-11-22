@@ -56,7 +56,7 @@ New to the project? Read in this order:
 18. [setup.md](setup.md): the setup walkthrough (`rpipe model setup`, also the first step of `rpipe init`): how your machine is checked, a backend recommended, chosen and tested
 19. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
-Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
+Just want to use it? Follow the quickstart in the top-level `README.md` (install, `rpipe init`, `rpipe run`, `rpipe schedule install`), then read [running.md](running.md), then [profile.md](profile.md) for setting up your profile.
 
 ## Where the code is
 

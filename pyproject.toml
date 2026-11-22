@@ -3,6 +3,8 @@ name = "research-pipeline"
 version = "0.1.0"
 description = "Nightly pipeline that collects, ranks and digests research papers"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",

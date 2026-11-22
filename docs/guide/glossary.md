@@ -231,3 +231,5 @@
 **Cache** — a saved answer kept so work need not be repeated, and safe to delete because it can be rebuilt. For example `cache/llm_fit.json` remembers which model and context fit. See `vault-and-config.md`.
 
 **Fixture** — a small fixed sample input kept for tests (for example a saved paper page), so tests run offline and give the same result every time. See `running.md`.
+
+**Progress event** — a small record saying what a stage is doing: `start`, `step` (one item finished, with `current` of `total` and the time so far), `note` (a message while waiting) or `done` (with its outcome). Stages create these and hand them to a reporter; they never print. See `progress.py` in the module map of `README.md`.

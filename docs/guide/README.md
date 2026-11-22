@@ -91,4 +91,5 @@ Just want to use it? Follow the quickstart in the top-level `README.md` (install
 - `registry.py`: built-in and installed plug-ins.
 - `machine.py`: looks at your computer and recommends a backend.
 - `run_lock.py`: stops two `rpipe run`s working on one vault at once.
+- `progress.py`: progress events (data objects) that stages emit instead of printing; no package imports, so it can be shared.
 - `defaults/`: the packaged starting `profile.yaml`, `config.yaml` and `ollama_models.yaml`.

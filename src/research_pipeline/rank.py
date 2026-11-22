@@ -24,15 +24,18 @@ AUTHOR_BOOST = 0.02  # per followed author on the paper: a clear nudge, about ha
 KEYWORD_BOOST = 0.01  # per keyword found in title/abstract: weak, keywords are blunt
 KEYWORD_BOOST_CAP = 0.04  # many keywords must not swamp similarity
 MY_WORK_WEIGHT = 0.0  # TODO(phase4): similarity to the user's own notes in my_work/
-# Implicit profile (votes and saves). The term is FEEDBACK x (decayed similarity to your liked
-# papers, divided by how many there are), so it is a taste signal, not a similarity replacement.
-# A paper identical to one fresh like gains the full 0.20; one at similarity 0.6 (the typical
-# "unrelated" level) gains 0.12. The gap between a near neighbour and an average paper is
-# 0.2 x ~0.2 = ~0.04, about one standard deviation of similarity: enough to reorder close
-# calls, not enough to override a clear topical gap. Dislikes are slightly weaker (0.15)
-# because a downvote is often "not today" rather than "never".
+# Implicit profile (votes and saves). The term is FEEDBACK x max over your liked papers of
+# (decay weight x cosine): the NEAREST neighbour only, so 20 diverse likes do not dilute the
+# pull of the one that matches. A paper identical to one fresh like gains the full 0.20; one at
+# similarity 0.6 (typical "unrelated") gains 0.12. The gap between a near neighbour and an
+# average paper is 0.2 x ~0.2 = ~0.04, about one standard deviation of similarity: enough to
+# reorder close calls, not enough to override a clear topical gap. Dislikes are slightly weaker
+# (0.15) because a downvote is often "not today" rather than "never".
 FEEDBACK_BOOST = 0.20
 FEEDBACK_PENALTY = 0.15
+# A "liked/disliked similar" reason is only written when weight x cosine reaches this floor:
+# about two similarity standard deviations (0.045) above the 0.6 typical for unrelated papers.
+FEEDBACK_REASON_FLOOR = 0.70
 
 
 @dataclass
@@ -103,12 +106,11 @@ def build_feedback_vectors(
 def _feedback_term(
     vec: np.ndarray, group: list[tuple[str, np.ndarray, float]]
 ) -> tuple[float, str | None]:
-    """(sum of weight x similarity) / count, plus the id contributing most."""
+    """Largest weight x cosine over the group, and the id that gives it (None if empty)."""
     if not group:
         return 0.0, None
-    contrib = [(w * float(v @ vec), pid) for pid, v, w in group]
-    best = max(contrib, key=lambda c: c[0])[1]
-    return sum(c for c, _ in contrib) / len(group), best
+    best, best_id = max((w * float(v @ vec), pid) for pid, v, w in group)
+    return best, best_id
 
 
 def build_profile_vectors(
@@ -178,9 +180,9 @@ def score_papers(
             liked, liked_id = _feedback_term(vec, feedback.liked)
             disliked, disliked_id = _feedback_term(vec, feedback.disliked)
             score += FEEDBACK_BOOST * liked - FEEDBACK_PENALTY * disliked
-            if liked_id:
+            if liked_id and liked >= FEEDBACK_REASON_FLOOR:
                 reasons.append(f"liked similar: {liked_id}")
-            if disliked_id:
+            if disliked_id and disliked >= FEEDBACK_REASON_FLOOR:
                 reasons.append(f"disliked similar: {disliked_id}")
         out.append(ScoredPaper(row["id"], score, reasons))
 

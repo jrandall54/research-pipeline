@@ -113,3 +113,11 @@ def test_votes_and_saves_reach_ranking(conn, embedder):
     row = get_paper(conn, "2501.00003")
     assert row["triage_score"] > base
     assert "liked similar: 2501.00001" in json.loads(row["triage_reasons"])
+
+
+def test_vote_on_paper_without_embedding_is_ignored(conn, embedder):
+    from research_pipeline.db import record_vote
+    fill(conn)
+    record_vote(conn, "9999.99999", 1)  # never embedded
+    counts = run_triage(conn, embedder, Profile(topics=[], seeds=[], top_n=10), {})
+    assert counts["triaged"] == 4

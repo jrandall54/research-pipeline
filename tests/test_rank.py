@@ -1,5 +1,6 @@
 import builtins
 import logging
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
@@ -7,15 +8,14 @@ import pytest
 from research_pipeline.db import get_paper, open_db, upsert_paper
 from research_pipeline.embed import SentenceTransformerEmbedder
 from research_pipeline.models import PaperMeta, Profile
-from datetime import UTC, datetime
-
 from research_pipeline.rank import (
     FEEDBACK_BOOST,
+    FEEDBACK_REASON_FLOOR,
     FeedbackVectors,
     ProfileVectors,
     build_feedback_vectors,
-    score_papers,
     build_profile_vectors,
+    score_papers,
 )
 
 
@@ -242,3 +242,49 @@ def test_no_feedback_scores_unchanged(tmp_path):
     b = fb_score(tmp_path, FeedbackVectors([], []))
     assert {k: v.score for k, v in a.items()} == {k: v.score for k, v in b.items()}
     assert all(v.reasons == [] for v in a.values())
+
+
+def test_up_then_clear_contributes_nothing(tmp_path):
+    conn = open_db(tmp_path / "v.db")
+    from research_pipeline.db import current_votes, record_vote
+    record_vote(conn, "L", 1)
+    record_vote(conn, "L", 0)
+    fv = build_feedback_vectors(current_votes(conn), [], {"L": E1}, 60.0, NOW)
+    assert fv.liked == [] and fv.disliked == []
+
+
+def test_down_vote_beats_save_of_same_paper():
+    saves = [{"paper_id": "P", "created_at": "2026-11-21T12:00:00+00:00"}]
+    fv = build_feedback_vectors([row("P", -1)], saves, {"P": E1}, 60.0, NOW)
+    assert fv.liked == [] and [x[0] for x in fv.disliked] == ["P"]
+
+
+def test_many_diverse_likes_do_not_dilute(tmp_path):
+    rng = np.random.default_rng(0)
+    others = []
+    for _ in range(19):
+        v = rng.normal(size=8)
+        v[0] = 0.0
+        others.append(v / np.linalg.norm(v))
+    dim = lambda v: np.concatenate([v, np.zeros(8 - len(v))])  # noqa: E731
+    near = dim(E1)
+    one = build_feedback_vectors([row("L", 1)], [], {"L": near}, 60.0, NOW)
+    emb = {"L": near} | {f"o{i}": v for i, v in enumerate(others)}
+    votes = [row("L", 1)] + [row(f"o{i}", 1) for i in range(19)]
+    many = build_feedback_vectors(votes, [], emb, 60.0, NOW)
+    rows = make_rows(tmp_path, [meta("2501.00001", "Alpha")])
+    args = (rows, np.array([near]), Profile(topics=[], seeds=[]), EMPTY_PV)
+    base = score_papers(*args)[0].score
+    g1 = score_papers(*args, one)[0].score - base
+    g20 = score_papers(*args, many)[0].score - base
+    assert g20 == pytest.approx(g1, abs=1e-9) and g20 == pytest.approx(FEEDBACK_BOOST)
+
+
+def test_reason_floor_both_sides(tmp_path):
+    def reasons(cos):
+        v = np.array([cos, (1 - cos**2) ** 0.5])
+        fv = build_feedback_vectors([row("L", 1)], [], {"L": v}, 60.0, NOW)
+        return fb_score(tmp_path, fv, vecs=(E1, E2))["2501.00001"].reasons
+
+    assert reasons(FEEDBACK_REASON_FLOOR + 0.01) == ["liked similar: L"]
+    assert reasons(FEEDBACK_REASON_FLOOR - 0.01) == []

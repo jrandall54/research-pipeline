@@ -1,45 +1,41 @@
-# Handoff — Phase 5 planned, not started (2026-11-21)
+# Handoff — Phase 5 (Shareable) built, awaiting owner merge (2026-11-21)
 
 Read this first in a new session.
 
-## Next: execute Phase 5 (Shareable)
-- **Design (approved by owner):** `specs/2026-11-21-phase5-shareable-design.md`. Its "Builder-check resolutions" section overrides the body where they conflict. Research behind it: `specs/2026-11-21-cli-backends-research.md`.
-- **Plan (approved by owner):** `plans/2026-11-21-phase5-shareable.md`, 8 tasks. Task 8 (master plan doc + handoff) is the coordinator's, not a subagent's.
-- **Execution method chosen by owner:** subagent-driven (`superpowers:subagent-driven-development`).
-- **SDD workspace already set up** (git-ignored): `.superpowers/sdd/2026-11-21-phase5-shareable/`, holding:
-  - `progress.md`: the ledger, with the pre-flight scan and rulings R1-R3 already done;
-  - `global-constraints.md`: hand to every implementer and reviewer;
-  - `reviewer-template.txt`;
-  - `task-1-brief.md`.
+## State
+- **Phase 5 is done on branch `phase-5-shareable` (11 commits ahead of `main`). NOT merged; the owner merges.** `uv run pytest -q` gives 827 passing. Design `specs/2026-11-21-phase5-shareable-design.md`, plan `plans/2026-11-21-phase5-shareable.md`, research `specs/2026-11-21-cli-backends-research.md`.
+- What shipped:
+  - **Backends**: `llm_backend` is `ollama` (default, unchanged), `claude-code` (subscription CLI, headless, all tools off) or `none` (abstracts only). `rpipe model set-backend`, `rpipe model setup` (hardware-aware walkthrough, also the first step of `rpipe init`; re-running keeps your backend unless you say no). Usage-limit stop (`LlmLimitReached`): remaining papers wait for the next run.
+  - **Plug-ins**: entry-point groups for sources and backends (`registry.py`); `rpipe plugins`, `rpipe sources list|enable|disable`. A missing or broken plug-in is reported in the health line and the digest is still written.
+  - **Machine detection** (`machine.py`): GPU/RAM/Ollama/Claude detection and a recommendation; `rpipe` never installs Ollama and pulls a model only after a yes/no.
+  - **Packaging**: MIT licence, stranger's README, CI (`.github/workflows/tests.yml`), `rpipe schedule` refuses off Linux.
+  - Docs: `docs/guide/backends.md` (incl. how to add a backend), `setup.md`, plus llm, running, profile, sources, plugins, summaries, glossary.
+- Process: subagent-driven; Tasks 3 and 6 each needed one fix round; the final whole-branch review found 0 Critical, 4 Important (3 fixed in one wave, the 4th is the owner smoke test below).
 
-  The skill's resuming reference applies: the ledger says Task 1 has not started.
-- **First step:** `git checkout -b phase-5-shareable` from `main`, then dispatch Task 1. All branches before this are merged into `main`.
+## Owner actions (not done)
+1. **Smoke-test the Claude Code adapter on a real install** (tests are offline and cannot prove this): put a canary line in `~/.claude/CLAUDE.md`, run `rpipe model set-backend claude-code` then `rpipe summarize`, and confirm (a) summaries come back, (b) the canary does not leak into prompts or output, (c) the JSON envelope keys (`structured_output`, `is_error`) parse. If the canary leaks, add `--safe-mode` to the argv in `backends/claude_code.py` if your `claude --help` lists it.
+2. Review and merge `phase-5-shareable` into `main`.
+3. Reinstall the tool with extras: `uv tool install --editable '.[embed,serve]' --force`, then `rpipe model setup` to record a backend, then `rpipe schedule status`.
+4. Confirm the GitHub repo is public before sharing the README (its install line is an https git URL), and push to see CI run (action tags `checkout@v4`, `setup-uv@v5` were not checked online; no uv cache).
+5. Carried over from earlier handoffs: start voting; `rpipe profile suggest "<describe your research>"`; `rpipe model fit`.
 
-## What Phase 5 is (owner decisions, 2026-11-21)
-- The target is anyone on any machine, not the AI club specifically. The ideal and default is the owner's setup: a GPU plus Ollama.
-- Three tiers, picked by a hardware-aware walkthrough:
-  1. local GPU + Ollama;
-  2. a **subscription** AI CLI (Claude Code first; API keys are "way down the road, if at all");
-  3. abstracts-only.
-- `rpipe` never installs Ollama. It pulls a model only after a yes/no. `rpipe model setup` re-runs the backend part.
-- Backends are one adapter per tool, in code, with the safety flags hard-wired. Paper text is untrusted and these CLIs are agents.
-- MIT licence, `Copyright (c) 2026 jrandall54`. Docker is dropped.
-- Plan-time correction (owner informed): in `rpipe init` the backend step comes **first**, because the "describe your research" step already calls the model.
+## Separate projects (not Phase 5)
+- **Optimised CPU pipeline** (no GPU, no subscription): needs its own brainstorming session.
+- **Antigravity (`agy`) investigation**: make `agy` a safe backend. Gemini Pro is free for students with a school email, so tier 2 would be free for them. Open problems: no-TTY hangs, no tools-off switch, long prompts need `--input-format stream-json`, consumer-plan wording on wrapping. See the research file.
+- **Codex adapter**: waits for someone to verify it on a real install; it cannot switch tools off.
+- Docker and API-key backends: **not planned**.
 
-## Separate projects recorded (not Phase 5)
-- **Optimised CPU pipeline:** for machines with no GPU and no subscription. It needs its own brainstorming session; don't cram it into a phase (owner).
-- **Antigravity (`agy`) investigation:** an agent-driven deep dive into making `agy` a safe backend. Gemini Pro is free for students with a school email, so this would make tier 2 free for them. Open problems (see the research file):
-  - no-TTY hangs;
-  - no tools-off switch;
-  - long prompts need `--input-format stream-json`;
-  - consumer-plan wording on wrapping.
-- **Codex adapter:** waits until someone verifies it on a real install. It cannot switch tools off.
-- **Master plan doc** (Claude Docs) is not yet updated for this scope. That's plan Task 8, done by the coordinator at the end.
+## Known deferred minors (from reviews; none block merge)
+- `require_local` exists but is not wired anywhere: shelf text goes to no model today. Wire it before any feature sends shelf content to a model.
+- `cli.make_arxiv` duplicates `registry.make_arxiv`; duplicate third-party entry-point names overwrite silently; no single config-to-digest e2e test for plug-in sources.
+- rocm-smi: one bad card discards all cards; no tests for `system_cmd` timeout or `ollama_tags`; Windows/macOS Ollama install hints not confirmed against ollama.com.
+- After an Ollama pull the model stays `auto`; no test for the "Stopped." path; setup.md transcripts are hand-abridged; `model set-backend` docstring still says the model "resets to auto" (only true when the backend changes).
+- Claude child env strips `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` (ruling: both move the child off the subscription); `ANTHROPIC_BASE_URL` is left alone.
 
 ## Still open from Phase 4
-The shelf slice is done and merged. Remaining slices: a local-model judge for overlap callouts plus `links` rows, the feasibility tag, weekly synthesis. Follow-up: check `SHELF_REASON_FLOOR` against real bge-small scores.
+Remaining slices: a local-model judge for overlap callouts plus `links` rows, the feasibility tag, weekly synthesis. Follow-up: check `SHELF_REASON_FLOOR` against real bge-small scores.
 
-## Earlier state (before Phase 5 planning)
+## Earlier state (before Phase 5; kept for the rulings below)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next.
 

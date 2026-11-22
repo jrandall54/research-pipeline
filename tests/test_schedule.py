@@ -108,6 +108,7 @@ def fake(tmp_path, monkeypatch):
     monkeypatch.setattr(schedule, "default_unit_dir", lambda: unit_dir)
     monkeypatch.setattr(schedule, "system_runner", lambda c: calls.append(c) or 0)
     monkeypatch.setattr(cli.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(cli, "_embed_available", lambda: True)
     init_vault(tmp_path / "v", topics=["x"])
     return calls, unit_dir, tmp_path / "v"
 
@@ -185,3 +186,29 @@ def test_cli_status_not_installed_hints_install(fake, monkeypatch):
 def test_cli_remove_nothing_installed(fake):
     res = runner.invoke(cli.app, ["schedule", "remove"])
     assert res.exit_code == 0 and "nothing was installed" in res.output
+
+
+def test_cli_install_and_show_refuse_without_embed_extra(fake, monkeypatch):
+    calls, unit_dir, vault = fake
+    monkeypatch.setattr(cli, "_embed_available", lambda: False)
+    for sub in ("install", "show"):
+        res = runner.invoke(cli.app, ["schedule", sub, "--vault", str(vault)])
+        assert res.exit_code == 1, res.output
+        assert "uv tool install --editable '.[embed]' --force" in res.output
+    assert calls == [] and not unit_dir.exists()
+
+
+def test_rpipe_path_prefers_the_running_program(tmp_path, monkeypatch):
+    me = tmp_path / "rpipe"
+    me.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(cli.sys, "argv", [str(me), "schedule", "install"])
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/rpipe")
+    monkeypatch.setattr(cli, "_embed_available", lambda: True)
+    assert cli._rpipe_path() == str(me)
+    monkeypatch.setattr(cli.sys, "argv", ["/x/pytest"])
+    assert cli._rpipe_path() == "/usr/bin/rpipe"
+
+
+def test_vault_path_with_newline_is_rejected(tmp_path):
+    with pytest.raises(schedule.ScheduleError, match="control character"):
+        schedule.render_service(tmp_path / "a\nb", "/usr/bin/rpipe")

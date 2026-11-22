@@ -161,7 +161,7 @@ def test_seed_fetch_failure_does_not_stop_the_run(vault, monkeypatch):
 
 def _no_extra_pipeline(monkeypatch):
     def make_embedder():
-        raise RuntimeError("sentence-transformers is not installed; run `uv sync --extra embed`")
+        raise RuntimeError("sentence-transformers is not installed; reinstall with the extra: `uv tool install --editable '.[embed]' --force`")
 
     hf = parse_hf_daily(json.loads((FIXTURES / "hf_daily.json").read_text()))
     monkeypatch.setattr(
@@ -175,7 +175,18 @@ def test_missing_embed_extra_is_a_clear_error_for_run_and_triage(vault, monkeypa
     _no_extra_pipeline(monkeypatch)
     res = run_cli(cmd, "--vault", str(vault))
     assert res.exit_code == 1
-    assert "uv sync --extra embed" in res.output
+    assert "uv tool install --editable '.[embed]' --force" in res.output
+
+
+def test_run_records_embedder_load_failure_in_runs(vault, monkeypatch):
+    _no_extra_pipeline(monkeypatch)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 1
+    finished, _, errors = _last_run(vault)
+    assert finished is not None
+    assert len(errors) == 1 and errors[0].startswith("embed: sentence-transformers is not installed")
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert "sentence-transformers is not installed" in first
 
 
 def test_collect_and_digest_work_without_the_embed_extra(vault, monkeypatch):
@@ -204,7 +215,7 @@ def test_digest_rejects_bad_date(vault):
 
 def test_real_build_pipeline_does_not_load_the_embedder_until_asked(vault, monkeypatch):
     def boom(model_name):
-        raise RuntimeError("sentence-transformers is not installed; run `uv sync --extra embed`")
+        raise RuntimeError("sentence-transformers is not installed; reinstall with the extra: `uv tool install --editable '.[embed]' --force`")
 
     monkeypatch.setattr(cli, "SentenceTransformerEmbedder", boom)
     pipeline = cli.build_pipeline(cli.load_config(vault / "config.yaml"))
@@ -629,6 +640,35 @@ def test_keyboard_interrupt_finishes_run_records_it_and_propagates(vault, monkey
     assert finished is not None
     assert errors == ["triage: interrupted"]
     assert next((vault / "digests").glob("*.md"), None) is None  # no digest after Ctrl-C
+
+
+def test_sigterm_is_handled_like_ctrl_c_and_restored(vault, monkeypatch):
+    import signal
+    install(monkeypatch)
+    before = signal.getsignal(signal.SIGTERM)
+
+    def term(*a, **k):
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)  # what the kernel signal would do
+
+    monkeypatch.setattr(cli, "run_triage", term)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 130
+    finished, _, errors = _last_run(vault)
+    assert finished is not None and errors == ["triage: interrupted"]
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+def test_interrupt_during_digest_is_recorded(vault, monkeypatch):
+    install(monkeypatch)
+
+    def interrupt(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "write_digest", interrupt)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 130
+    finished, _, errors = _last_run(vault)
+    assert finished is not None and errors[-1] == "digest: interrupted"
 
 
 def test_digest_failure_finishes_run_and_exits_1(vault, monkeypatch):

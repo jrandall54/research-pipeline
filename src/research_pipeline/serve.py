@@ -1,6 +1,6 @@
 """Browse the vault from a phone: Datasette over the private Tailscale network.
 
-Datasette is an optional extra (`uv sync --extra serve`); nothing here imports it. It is
+Datasette is an optional extra (`uv sync --extra embed --extra serve` in the repo; `uv tool install --editable '.[embed,serve]' --force` for plain `rpipe`); nothing here imports it. It is
 started as a separate process, so this module only builds its metadata and command line.
 """
 
@@ -29,6 +29,7 @@ def _vote(value: int, title: str) -> dict:
     return {
         "title": title,
         "write": True,
+        "params": ["paper_id"],  # explicit: Datasette's regex would also see ':00' in the timestamp literal
         "sql": f"INSERT INTO votes (paper_id, vote, created_at) "
         f"SELECT :paper_id, {value}, {_TS} WHERE {_EXISTS}",
         "on_success_message": title,
@@ -56,6 +57,7 @@ def build_metadata() -> dict:
         "save": {
             "title": "Save paper",
             "write": True,
+            "params": ["paper_id"],
             "sql": f"INSERT OR IGNORE INTO saves (paper_id, created_at) "
             f"SELECT :paper_id, {_TS} WHERE {_EXISTS}",
             "on_success_message": "Saved",
@@ -63,6 +65,7 @@ def build_metadata() -> dict:
         "unsave": {
             "title": "Unsave paper",
             "write": True,
+            "params": ["paper_id"],
             "sql": "DELETE FROM saves WHERE paper_id = :paper_id",
             "on_success_message": "Unsaved",
         },

@@ -297,3 +297,14 @@ def test_old_like_still_gets_reason_and_decayed_score(tmp_path):
     assert old.liked[0][2] == pytest.approx(0.25, abs=1e-3)  # 120 days = 2 half-lives
     assert "liked similar: L" in got.reasons
     assert got.score - base == pytest.approx(0.2 * old.liked[0][2] * 0.9, abs=1e-9)
+
+
+def test_negative_cosine_never_flips_the_feedback_sign(tmp_path):
+    opposite = np.array([-1.0, 0.0])
+    liked = fb_score(tmp_path, build_feedback_vectors([row("L", 1)], [], {"L": E1}, 60.0, NOW),
+                     vecs=(opposite, E2))
+    disliked = fb_score(tmp_path, build_feedback_vectors([row("D", -1)], [], {"D": E1}, 60.0, NOW),
+                        vecs=(opposite, E2))
+    # Opposite to a liked paper: no penalty. Opposite to a disliked paper: no boost.
+    assert liked["2501.00001"].score == liked["2501.00002"].score
+    assert disliked["2501.00001"].score == disliked["2501.00002"].score

@@ -155,3 +155,5 @@
 **Content words** — the words of a title left after dropping filler words (the, of, on, in ...). Onboarding compares titles on content words only, so filler cannot make an invented title look real. See `profile.md`.
 
 **Hallucinated title** — a paper title a language model makes up that sounds real but does not exist. Onboarding drops any proposed title that arXiv search cannot match. See `profile.md`.
+
+**DNS rebinding.** A trick where a web page makes your browser treat a private address (such as a Tailscale IP) as if it belonged to the page's own site, so the page can read a server that has no login. Servers defend by checking the `Host` header; Datasette does not (see `browsing.md`).

@@ -13,7 +13,7 @@ Commands (`install` and `show` take `--time` and `--vault`; no file editing need
 
 ## How it works
 
-1. `install` finds your vault (the `--vault` option, `$RESEARCH_VAULT` or `~/research-vault`) and checks it exists. It finds the `rpipe` program with `which rpipe` (made absolute); if it is not on your PATH it stops with an install hint.
+1. `install` finds your vault (the `--vault` option, `$RESEARCH_VAULT` or `~/research-vault`) and checks it exists. It uses the `rpipe` that is running right now (the absolute path of the program you typed, when it is called `rpipe` or `research-pipeline`), else the first `rpipe` on your PATH; if there is none it stops with an install hint. It then checks that this environment can import `sentence_transformers`; if not it **refuses** and prints `uv tool install --editable '.[embed]' --force`. Without the embed extra the 03:00 run would fail before recording anything. `show` does the same checks. A vault path containing a control character (such as a newline) is refused too.
 2. It checks `systemctl` exists and that the user manager answers (`systemctl --user show-environment`); if not it stops with "nothing written".
 3. It validates the time (`HH:MM`, 24-hour; `25:00` and `3am` are rejected) before touching any file.
 4. It writes `~/.config/systemd/user/research-pipeline.service` (what to run) and `research-pipeline.timer` (when to run it).
@@ -46,7 +46,7 @@ WantedBy=timers.target
 
 Quoting: systemd splits `ExecStart` on spaces and expands `%` and `$`, so paths are wrapped in double quotes, `\` and `"` are backslash-escaped, `%` is written `%%` and (in `ExecStart`) `$` as `$$`. A vault path with spaces therefore works. `Environment="NAME=value"` quotes the whole assignment.
 
-**Persistent=true** means: if the machine was off or asleep at 03:00, systemd runs the missed job as soon as it can (once) instead of skipping the night.
+**Persistent=true** means: if the machine was off or asleep at 03:00, systemd runs the missed job as soon as it can (once) instead of skipping the night. (There is no lock between runs, so a catch-up run could overlap one you started by hand; avoid starting `rpipe run` manually right when the machine wakes.)
 
 **Linger.** A user timer normally only runs while you have a login session. `loginctl enable-linger $USER` (run once, by you) tells systemd to keep your user services alive while logged out, so a 03:00 run happens even if nobody is logged in. It changes machine-wide login behaviour, which is why `rpipe` never runs it for you.
 
@@ -55,6 +55,7 @@ Quoting: systemd splits `ExecStart` on spaces and expands `%` and `$`, so paths 
 - **systemd user timer, not cron.** `Persistent=true` catches up missed runs; cron silently skips them. systemd also keeps the output in the journal and `systemctl --user list-timers` shows the next run. Cron rejected: no catch-up, no built-in status, and it needs the environment (vault path) smuggled into a crontab line.
 - **User units, not system units.** The vault and Ollama belong to your user; a system-level unit would need root, run as the wrong user, and could not find your home directory. User units need no sudo.
 - **`Type=oneshot`, not `Type=simple`.** The run starts, does its work and exits. `oneshot` tells systemd the service is "done" when the process exits, so the timer can start it again next night and `status` is meaningful. `simple` would mark it active the instant it starts.
+- **Refusing an `rpipe` without the embed extra.** The nightly unit runs one fixed program. If that program lacks the embedding library, `rpipe run` used to fail silently at 03:00 (and now records the failure as `embed: ...` in `runs`). Refusing at install time catches it when you are looking. Rejected: warning only; a warning scrolls past and the first failure is at 03:00.
 - **Only printing the linger command.** Changing login behaviour should be a conscious decision by the owner.
 - **Injected runner.** `schedule.py` takes the function that runs `systemctl` as a parameter, so tests use a fake and never touch the real systemd or `~/.config`.
 

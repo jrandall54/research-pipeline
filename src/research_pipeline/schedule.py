@@ -41,7 +41,14 @@ def _quote_exec(text: str) -> str:
     return f'"{_quote(text).replace("$", "$$")}"'
 
 
+def _reject_control_chars(label: str, text: str) -> None:
+    if any(ord(c) < 32 or ord(c) == 127 for c in text):
+        raise ScheduleError(f"{label} contains a control character (such as a newline), which a unit file cannot hold safely.")
+
+
 def render_service(vault: Path, rpipe_cmd: str) -> str:
+    _reject_control_chars("The vault path", str(vault))
+    _reject_control_chars("The rpipe path", rpipe_cmd)
     return (
         "[Unit]\n"
         "Description=Research pipeline nightly run\n"

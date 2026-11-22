@@ -1,6 +1,7 @@
 """Command line interface."""
 
 import gc
+import importlib.util
 import json
 import os
 import shutil
@@ -168,13 +169,35 @@ def _load_profile(ctx: _Context) -> Profile:
         raise _fail(str(exc)) from exc
 
 
-def _embedder(pipeline: Pipeline, model_name: str) -> Embedder:
+def _load_embedder(pipeline: Pipeline, model_name: str) -> Embedder:
+    """Build the embedder; any failure becomes a RuntimeError whose message says what to do."""
     try:
         return pipeline.make_embedder()
-    except RuntimeError as exc:  # e.g. the `embed` extra is not installed (message has the hint)
-        raise _fail(str(exc)) from exc
+    except RuntimeError:  # e.g. the `embed` extra is not installed (message has the hint)
+        raise
     except Exception as exc:  # noqa: BLE001 - failed download, broken torch install, ...
-        raise _fail(f"could not load embedding model {model_name}: {exc}") from exc
+        raise RuntimeError(f"could not load embedding model {model_name}: {exc}") from exc
+
+
+def _embedder(pipeline: Pipeline, model_name: str) -> Embedder:
+    try:
+        return _load_embedder(pipeline, model_name)
+    except RuntimeError as exc:
+        raise _fail(str(exc)) from exc
+
+
+@contextmanager
+def _sigterm_as_interrupt():
+    """While active, SIGTERM (systemd stop, `kill`) behaves like Ctrl-C so `finally` blocks run."""
+    def handler(signum, frame):
+        raise KeyboardInterrupt
+
+    old = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, old if old is not None else signal.SIG_DFL)
 
 
 def _seed_texts(
@@ -234,51 +257,56 @@ def run(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     profile = _load_profile(ctx)
     pipeline = build_pipeline(ctx.config)
-    embedder = _embedder(pipeline, ctx.config.embedding_model)
-    run_id = start_run(ctx.conn)
+    run_id = start_run(ctx.conn)  # before anything can fail, so every failure leaves a runs row
     counts: dict[str, int] = {}
     errors: list[str] = []
     crashed = False
     out = None
-    try:  # finish_run runs exactly once however this block ends (crash, Ctrl-C, success)
-        stage = "collect"
-        try:
-            counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
-            stage = "triage"
-            seeds = _seed_texts(ctx, profile, pipeline, errors)
-            counts |= run_triage(ctx.conn, embedder, profile, seeds)
-            # Triage is done with the embedder; free its GPU memory before the model probe
-            # measures what is free (the nightly summaries run without it).
-            del embedder
-            _release_gpu_memory()
-            stage = "summarize"
+    with _sigterm_as_interrupt():
+        try:  # finish_run runs exactly once however this block ends (crash, Ctrl-C, SIGTERM, success)
+            stage = "embed"
             try:
-                llm = _ready_llm(pipeline)
-            except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
-                errors.append(f"summaries skipped, model unavailable: {exc}")
-            else:
-                sum_counts, sum_errors = run_summarize(
-                    ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
+                embedder = _load_embedder(pipeline, ctx.config.embedding_model)
+                stage = "collect"
+                counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
+                stage = "triage"
+                seeds = _seed_texts(ctx, profile, pipeline, errors)
+                counts |= run_triage(ctx.conn, embedder, profile, seeds)
+                # Triage is done with the embedder; free its GPU memory before the model probe
+                # measures what is free (the nightly summaries run without it).
+                del embedder
+                _release_gpu_memory()
+                stage = "summarize"
+                try:
+                    llm = _ready_llm(pipeline)
+                except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
+                    errors.append(f"summaries skipped, model unavailable: {exc}")
+                else:
+                    sum_counts, sum_errors = run_summarize(
+                        ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
+                    )
+                    counts |= sum_counts
+                    errors += sum_errors
+            except KeyboardInterrupt:
+                errors.append(f"{stage}: interrupted")
+                raise  # the user wants out: no digest, keep the conventional interrupt exit
+            except Exception as exc:  # noqa: BLE001 - record it, then still try to write the digest
+                crashed = True
+                errors.append(f"{stage}: {' '.join(str(exc).split()) or type(exc).__name__}")
+            today = date.today()
+            unfinished = previous_run_unfinished(ctx.conn, run_id)
+            try:
+                out = write_digest(
+                    ctx.conn, ctx.vault, today, health_line(today, counts, errors, unfinished)
                 )
-                counts |= sum_counts
-                errors += sum_errors
-        except KeyboardInterrupt:
-            errors.append(f"{stage}: interrupted")
-            raise  # the user wants out: no digest, keep the conventional interrupt exit
-        except Exception as exc:  # noqa: BLE001 - record it, then still try to write the digest
-            crashed = True
-            errors.append(f"{stage}: {' '.join(str(exc).split()) or type(exc).__name__}")
-        today = date.today()
-        unfinished = previous_run_unfinished(ctx.conn, run_id)
-        try:
-            out = write_digest(
-                ctx.conn, ctx.vault, today, health_line(today, counts, errors, unfinished)
-            )
-        except Exception as exc:  # noqa: BLE001
-            crashed = True
-            errors.append(f"digest: {' '.join(str(exc).split()) or type(exc).__name__}")
-    finally:
-        finish_run(ctx.conn, run_id, counts, errors)
+            except KeyboardInterrupt:
+                errors.append("digest: interrupted")
+                raise
+            except Exception as exc:  # noqa: BLE001
+                crashed = True
+                errors.append(f"digest: {' '.join(str(exc).split()) or type(exc).__name__}")
+        finally:
+            finish_run(ctx.conn, run_id, counts, errors)
     if out is not None:
         typer.echo(f"Digest written to {out}")
     _report(counts, errors)
@@ -1205,10 +1233,32 @@ _LINGER_HINT = (
 )
 
 
+_EMBED_REINSTALL = "uv tool install --editable '.[embed]' --force"
+
+
+def _embed_available() -> bool:
+    """Is sentence-transformers importable here? (Replaced in tests.)"""
+    return importlib.util.find_spec("sentence_transformers") is not None
+
+
 def _rpipe_path() -> str:
-    found = shutil.which("rpipe")
+    """The program the nightly timer will run: the one running now, else the first on PATH.
+
+    Refuses when this environment lacks the embed extra: the 03:00 run would fail silently.
+    """
+    argv0 = sys.argv[0] if sys.argv else ""
+    if os.path.basename(argv0) in ("rpipe", "research-pipeline") and os.path.isfile(argv0):
+        found: str | None = argv0
+    else:
+        found = shutil.which("rpipe")
     if found is None:
-        raise _fail("rpipe is not on PATH. Install it first (`uv tool install .` in the repo), then retry.")
+        raise _fail("rpipe is not on PATH. Install it first (`uv tool install --editable '.[embed]'` in the repo), then retry.")
+    if not _embed_available():
+        raise _fail(
+            "This rpipe was installed without the embedding extra (sentence-transformers is missing), "
+            "so the nightly run would fail at 03:00 before recording anything. Nothing was written. "
+            f"Reinstall it with `{_EMBED_REINSTALL}` (run in the repo), then retry."
+        )
     return os.path.abspath(found)
 
 
@@ -1235,7 +1285,11 @@ def schedule_show(
         timer = schedule.render_timer(time)
     except ValueError as exc:
         raise _fail(str(exc)) from exc
-    typer.echo(f"# {schedule.SERVICE_NAME}\n{schedule.render_service(path, _rpipe_path())}")
+    try:
+        service = schedule.render_service(path, _rpipe_path())
+    except schedule.ScheduleError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"# {schedule.SERVICE_NAME}\n{service}")
     typer.echo(f"# {schedule.TIMER_NAME}\n{timer}")
 
 
@@ -1299,7 +1353,7 @@ def serve_cmd(
     except serve_mod.ServeError as exc:
         raise _fail(str(exc)) from exc
     if not serve_mod.datasette_available():
-        raise _fail("Datasette is not installed. Install it with: uv sync --extra serve")
+        raise _fail("Datasette is not installed. Install it with: uv sync --extra embed --extra serve (in the repo), or for plain `rpipe`: uv tool install --editable '.[embed,serve]' --force")
     old_handler = signal.getsignal(signal.SIGTERM)
     meta: Path | None = None
     try:

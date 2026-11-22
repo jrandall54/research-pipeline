@@ -128,7 +128,7 @@ def test_cli_missing_datasette(tmp_path, monkeypatch):
     init_vault(tmp_path / "v")
     monkeypatch.setattr(serve, "datasette_available", lambda: False)
     r = runner.invoke(cli.app, ["serve", "--host", "127.0.0.1", "--vault", str(tmp_path / "v")])
-    assert r.exit_code == 1 and "uv sync --extra serve" in r.output
+    assert r.exit_code == 1 and "uv sync --extra embed --extra serve" in r.output and "'.[embed,serve]' --force" in r.output
 
 
 def test_cli_serve_cleans_up_metadata(tmp_path, monkeypatch):
@@ -185,3 +185,12 @@ def test_cli_sigterm_cleans_up_and_restores_handler(tmp_path, monkeypatch):
         assert signal.getsignal(signal.SIGTERM) == before
     finally:
         signal.signal(signal.SIGTERM, before)
+
+
+def test_every_query_binding_paper_id_declares_its_params():
+    # Datasette's :name regex also matches ':00' in the strftime literal; explicit params avoid a bogus input.
+    queries = serve.build_metadata()["databases"]["vault"]["queries"]
+    binding = {k: q for k, q in queries.items() if ":paper_id" in q["sql"]}
+    assert set(binding) == {"vote_up", "vote_down", "vote_clear", "save", "unsave"}
+    for q in binding.values():
+        assert q["params"] == ["paper_id"]

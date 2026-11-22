@@ -21,7 +21,8 @@ class SentenceTransformerEmbedder:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
             raise RuntimeError(
-                "sentence-transformers is not installed; run `uv sync --extra embed`"
+                "sentence-transformers is not installed; reinstall with the extra: "
+                "`uv tool install --editable '.[embed]' --force` (or `uv sync --extra embed` inside the repo)"
             ) from exc
         self.model_name = model_name
         self._model = SentenceTransformer(model_name)

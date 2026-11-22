@@ -106,11 +106,15 @@ def build_feedback_vectors(
 def _feedback_term(
     vec: np.ndarray, group: list[tuple[str, np.ndarray, float]]
 ) -> tuple[float, str | None, float]:
-    """(largest weight x cosine, id that gives it, that paper's raw cosine); empty -> (0, None, 0)."""
+    """(largest weight x cosine, clamped at 0; id that gives it; its raw cosine); empty -> (0, None, 0).
+
+    Clamped so a negative cosine (dissimilar paper) cannot flip a like into a penalty or a dislike
+    into a boost: dissimilarity is simply no signal.
+    """
     if not group:
         return 0.0, None, 0.0
     best, best_id, raw = max((w * (c := float(v @ vec)), pid, c) for pid, v, w in group)
-    return best, best_id, raw
+    return max(0.0, best), best_id, raw
 
 
 def build_profile_vectors(

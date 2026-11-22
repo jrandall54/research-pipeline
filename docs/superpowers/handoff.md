@@ -19,9 +19,13 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 | 6 | Next. Brainstorm first. |
 | 7 | Planned; plan corrected after the audit but must be refreshed after Phase 6 (see the note at its top). |
 
-## Next
-1. **Phase 6 (pipeline hardening): brainstorm and plan it.** The master plan's Phase 6 list is the scope. Inputs below: progress audit, long papers, open items.
-2. Then refresh and execute `plans/2026-11-22-pipeline-app-split.md` (subagent-driven).
+## Next (updated 2026-11-22, end of session)
+1. **Execute `plans/2026-11-22-phase6-hardening.md`** (Phase 6 Parts A and C, 11 tasks) on branch `phase-6-hardening`, subagent-driven (implementer + reviewer per task, whole-branch review at the end). Design: `specs/2026-11-22-phase6-pipeline-hardening-design.md`, approved by the owner. Task 2 Step 7 asks the owner before editing CLAUDE.md.
+2. **Part B (long papers) waits on the owner's verdict** on `~/research-vault/model-comparison-2026-11-22.md`: the same 3 long papers summarised by `q3.8-27b-34k` (fits 33,792 tokens; truncated 2 of 3; 54–83 s/paper; 0 unverified citations) and `q3f-14b-143k` (fits 130,048 tokens; whole papers; 28–56 s/paper; 7 unverified citations). 14B wins → long context becomes the default path, tighten its citation retry. 27B wins → section-priority trimming. Then write Part B's own plan. Comparison vault copies: the session scratchpad (may be cleared; re-runnable).
+3. **Part D** (decision only): overlap alerts, archive connections and weekly synthesis → app Phase 9; feasibility tag → Ongoing. Record in the master plan once the owner confirms.
+4. After Phase 6: refresh and execute `plans/2026-11-22-pipeline-app-split.md` (Phase 7).
+
+Done this session: full audit; master plan cleaned (51 accepted edits); repo public (history rewritten to the GitHub noreply email); simple known issues fixed (ruff lint in CI, plug-in duplicate names, rocm-smi, tests); 905 tests passing.
 
 ## Phase 6 inputs
 ### Progress feedback (owner requirement: no step may look frozen)

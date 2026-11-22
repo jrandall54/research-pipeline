@@ -606,3 +606,57 @@ def test_crash_in_collect_still_finishes_run(vault, monkeypatch):
     assert any("collect:" in e and "kaboom" in e for e in json.loads(errors))
     first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
     assert "kaboom" in first
+
+
+def _last_run(vault):
+    import sqlite3
+    finished, counts, errors = sqlite3.connect(vault / "vault.sqlite").execute(
+        "SELECT finished_at, counts, errors FROM runs ORDER BY id DESC"
+    ).fetchone()
+    return finished, json.loads(counts), json.loads(errors)
+
+
+def test_keyboard_interrupt_finishes_run_records_it_and_propagates(vault, monkeypatch):
+    install(monkeypatch)
+
+    def interrupt(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "run_triage", interrupt)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 130  # typer turns the propagated KeyboardInterrupt into the interrupt exit
+    finished, _, errors = _last_run(vault)
+    assert finished is not None
+    assert errors == ["triage: interrupted"]
+    assert next((vault / "digests").glob("*.md"), None) is None  # no digest after Ctrl-C
+
+
+def test_digest_failure_finishes_run_and_exits_1(vault, monkeypatch):
+    install(monkeypatch)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cli, "write_digest", boom)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 1, res.output
+    finished, _, errors = _last_run(vault)
+    assert finished is not None
+    assert errors == ["digest: disk full"]
+
+
+@pytest.mark.parametrize("stage,patched", [("triage", "run_triage"), ("summarize", "run_summarize")])
+def test_crash_in_later_stage_keeps_earlier_counts(vault, monkeypatch, stage, patched):
+    install(monkeypatch)
+
+    def boom(*a, **k):
+        raise RuntimeError("bad stage")
+
+    monkeypatch.setattr(cli, patched, boom)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 1, res.output
+    finished, counts, errors = _last_run(vault)
+    assert finished is not None
+    assert counts["inserted"] > 0
+    assert errors == [f"{stage}: bad stage"]
+    assert next((vault / "digests").glob("*.md")).exists()

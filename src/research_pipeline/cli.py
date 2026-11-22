@@ -235,40 +235,44 @@ def run(vault: VaultOption = None) -> None:
     counts: dict[str, int] = {}
     errors: list[str] = []
     crashed = False
-    stage = "collect"
-    try:
-        counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
-        stage = "triage"
-        seeds = _seed_texts(ctx, profile, pipeline, errors)
-        counts |= run_triage(ctx.conn, embedder, profile, seeds)
-        # Triage is done with the embedder; free its GPU memory before the model probe
-        # measures what is free (the nightly summaries run without it).
-        del embedder
-        _release_gpu_memory()
-        stage = "summarize"
-        try:
-            llm = _ready_llm(pipeline)
-        except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
-            errors.append(f"summaries skipped, model unavailable: {exc}")
-        else:
-            sum_counts, sum_errors = run_summarize(
-                ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
-            )
-            counts |= sum_counts
-            errors += sum_errors
-    except Exception as exc:  # noqa: BLE001 - record it, then still try to write the digest
-        crashed = True
-        errors.append(f"{stage}: {' '.join(str(exc).split()) or type(exc).__name__}")
-    today = date.today()
     out = None
-    try:
+    try:  # finish_run runs exactly once however this block ends (crash, Ctrl-C, success)
+        stage = "collect"
+        try:
+            counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
+            stage = "triage"
+            seeds = _seed_texts(ctx, profile, pipeline, errors)
+            counts |= run_triage(ctx.conn, embedder, profile, seeds)
+            # Triage is done with the embedder; free its GPU memory before the model probe
+            # measures what is free (the nightly summaries run without it).
+            del embedder
+            _release_gpu_memory()
+            stage = "summarize"
+            try:
+                llm = _ready_llm(pipeline)
+            except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
+                errors.append(f"summaries skipped, model unavailable: {exc}")
+            else:
+                sum_counts, sum_errors = run_summarize(
+                    ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
+                )
+                counts |= sum_counts
+                errors += sum_errors
+        except KeyboardInterrupt:
+            errors.append(f"{stage}: interrupted")
+            raise  # the user wants out: no digest, keep the conventional interrupt exit
+        except Exception as exc:  # noqa: BLE001 - record it, then still try to write the digest
+            crashed = True
+            errors.append(f"{stage}: {' '.join(str(exc).split()) or type(exc).__name__}")
+        today = date.today()
         unfinished = previous_run_unfinished(ctx.conn, run_id)
-        out = write_digest(
-            ctx.conn, ctx.vault, today, health_line(today, counts, errors, unfinished)
-        )
-    except Exception as exc:  # noqa: BLE001
-        crashed = True
-        errors.append(f"digest: {' '.join(str(exc).split()) or type(exc).__name__}")
+        try:
+            out = write_digest(
+                ctx.conn, ctx.vault, today, health_line(today, counts, errors, unfinished)
+            )
+        except Exception as exc:  # noqa: BLE001
+            crashed = True
+            errors.append(f"digest: {' '.join(str(exc).split()) or type(exc).__name__}")
     finally:
         finish_run(ctx.conn, run_id, counts, errors)
     if out is not None:

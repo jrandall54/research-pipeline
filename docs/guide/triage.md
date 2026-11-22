@@ -104,6 +104,8 @@ Seeds are arXiv ids in `profile.yaml`; triage needs their text. `resolve_seed_te
 
 ### Caching embeddings
 
+While the model loads, the library's own progress bar and its unauthenticated-HF_TOKEN warning are switched off (`embed.quiet_model_load`; see the Progress section of running.md): the `embedding model` stage line and heartbeat replace them, and the bar's carriage returns would garble a journal.
+
 Vectors are stored in the `embeddings` table as raw float32 bytes, keyed by (paper id, model name). Triage reuses a stored vector when the model is the same, so re-running does not re-embed. A different model name gets its own rows, so switching models never mixes incompatible vectors. Profile vectors (seeds and topics) are few and cheap and are recomputed each run.
 
 ### Implicit profile: votes and saves with decay

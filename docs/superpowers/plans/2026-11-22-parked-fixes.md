@@ -86,3 +86,10 @@ No production code changes except where a tightened test exposes a real bug (fix
 - `tests/test_cli_feedback.py::test_init_exits_cleanly_on_too_new_database`: replace the weak final assertion (`res.exception is None or SystemExit`) with a precise one.
 - `schedule.py` `status`: handle a missing `systemctl` binary the way `install` does (clean message, no traceback); add a test.
 - `docs/guide/scheduling.md` usage section (~line 68): mention that `rpipe schedule status` exits 1 with a clear message when the systemd user manager is unreachable (a change from the old exit 0 "not installed").
+
+### Task 7 addendum 2 (carried from Task 4 review, Minor)
+
+- `onboarding.py` ~line 28: two blank lines before `class ProposedProfile` (PEP8/E302).
+- `tests/test_onboarding.py`: one-line comment on the seed-query test explaining ESC becomes a space while `[31m` stays.
+- `docs/guide/profile.md` normalisation table: state that ZWJ/ZWNJ (U+200D/U+200C) are deliberately kept (needed for Persian, Indic and emoji text), and describe the bidi example in words rather than a literal invisible character. Add a test that ZWJ/ZWNJ survive.
+- Add tests that `add_author` and `add_keyword` strip these characters (the docs claim they do).

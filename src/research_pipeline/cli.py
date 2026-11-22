@@ -120,7 +120,10 @@ def init(
     """Create the vault, then (in a terminal) walk you through topics, categories and seed papers."""
     path = resolve_vault(vault)
     existed = {n for n in ("config.yaml", "profile.yaml") if (path / n).exists()}
-    init_vault(path)
+    try:
+        init_vault(path)
+    except SchemaTooNewError as exc:
+        raise _fail(str(exc)) from exc
     typer.echo(f"Vault ready at {path}")
     for name in ("config.yaml", "profile.yaml"):
         typer.echo(f"  {name}: {'kept existing' if name in existed else 'created'}")
@@ -540,19 +543,25 @@ def _describe(meta: PaperMeta) -> str:
     return f"{meta.title} ({first}, {year})"
 
 
+def _pick_index(labels: list[str]) -> int | None:
+    """Show a numbered list and ask for a choice; return the 0-based index, or None for cancel."""
+    for i, label in enumerate(labels, 1):
+        typer.echo(f"  {i}. {label}")
+    n = len(labels)
+    pick = typer.prompt(f"Pick 1-{n} or 0 to cancel", type=int)
+    if not 0 <= pick <= n:
+        raise _SeedProblem(f"{pick} is not between 0 and {n}. Nothing was changed.")
+    return pick - 1 if pick else None
+
+
 def _choose(candidates: list[PaperMeta], yes: bool) -> PaperMeta | None:
     if yes:
         return candidates[0]
     if len(candidates) == 1:
         typer.echo(_describe(candidates[0]))
         return candidates[0] if typer.confirm("Add this paper?", default=True) else None
-    for i, meta in enumerate(candidates, 1):
-        typer.echo(f"  {i}. {_describe(meta)}")
-    n = len(candidates)
-    pick = typer.prompt(f"Pick 1-{n} or 0 to cancel", type=int)
-    if not 0 <= pick <= n:
-        raise _SeedProblem(f"{pick} is not between 0 and {n}. Nothing was changed.")
-    return candidates[pick - 1] if pick else None
+    index = _pick_index([_describe(m) for m in candidates])
+    return None if index is None else candidates[index]
 
 
 def _close(source: object) -> None:
@@ -1170,16 +1179,14 @@ def _resolve_paper(conn: sqlite3.Connection, text: str) -> str:
         raise _fail(f"No paper in your vault matches '{text}'. Use the id shown in the digest. Nothing was changed.")
     if len(rows) == 1:
         return rows[0]["id"]
-    for i, r in enumerate(rows, 1):
-        typer.echo(f"  {i}. {r['id']}  {r['title']}")
-    n = len(rows)
-    pick = typer.prompt(f"Pick 1-{n} or 0 to cancel", type=int)
-    if not 0 <= pick <= n:
-        raise _fail(f"{pick} is not between 0 and {n}. Nothing was changed.")
-    if pick == 0:
+    try:
+        index = _pick_index([f"{r['id']}  {r['title']}" for r in rows])
+    except _SeedProblem as exc:
+        raise _fail(str(exc)) from exc
+    if index is None:
         typer.echo("Cancelled. Nothing was changed.")
         raise typer.Exit(code=0)
-    return rows[pick - 1]["id"]
+    return rows[index]["id"]
 
 
 _VOTES = {"up": 1, "down": -1, "clear": 0}

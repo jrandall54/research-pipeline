@@ -211,3 +211,22 @@ def test_digest_without_provenance_has_no_footer(conn, tmp_path):
     with_summary(conn, "2501.00001")
     text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
     assert "prompt " not in text
+
+
+def test_provenance_line_tolerates_partial_dict():
+    from research_pipeline.digest import _provenance_line
+
+    assert _provenance_line({"model": "m"}) == ["_m_", ""]
+    assert _provenance_line({"model": "m", "paper_version": 0, "created_at": "2026-11-21T03:00:00"}) == [
+        "_m · paper v0 · 2026-11-21_", ""]
+    assert _provenance_line({}) == [] and _provenance_line(None) == []
+    assert _provenance_line({"created_at": None}) == []
+
+
+def test_digest_renders_with_partial_provenance(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    conn.execute("UPDATE summaries SET text = json_set(text, '$.provenance', json(?))"
+                 " WHERE kind = 'summary'", ('{"model": "qwen3:14b"}',))
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "_qwen3:14b_" in text

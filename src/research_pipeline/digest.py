@@ -65,10 +65,20 @@ def _render_summary(ps: PaperSummary) -> list[str]:
 
 
 def _provenance_line(prov: dict | None) -> list[str]:
+    """The small italic footer; any missing field is left out, and no fields means no line."""
     if not prov:
         return []
-    day = str(prov.get("created_at", ""))[:10]
-    return [f"_{prov['model']} · prompt {prov['prompt_version']} · paper v{prov['paper_version']} · {day}_", ""]
+    parts = []
+    if prov.get("model"):
+        parts.append(str(prov["model"]))
+    if prov.get("prompt_version"):
+        parts.append(f"prompt {prov['prompt_version']}")
+    if prov.get("paper_version") is not None:
+        parts.append(f"paper v{prov['paper_version']}")
+    day = str(prov.get("created_at") or "")[:10]
+    if day:
+        parts.append(day)
+    return [f"_{' · '.join(parts)}_", ""] if parts else []
 
 
 def _id_line(paper_id: str, saved: bool, vote: int) -> str:

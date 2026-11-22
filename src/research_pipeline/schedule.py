@@ -119,7 +119,16 @@ def remove(unit_dir: Path, runner: Runner) -> tuple[list[Path], list[str]]:
 
 
 def status(runner: Runner) -> bool:
-    """Print the timer schedule; return False (printing nothing) when it is not enabled."""
+    """Print the timer schedule; return False (printing nothing) when it is not enabled.
+
+    Raises ScheduleError when the systemd user manager cannot be reached, so "not installed"
+    and "cannot ask systemd" are never confused.
+    """
+    if runner(["systemctl", "--user", "show-environment"]) != 0:
+        raise ScheduleError(
+            "Cannot reach the systemd user manager (`systemctl --user` failed), so the timer's "
+            "state is unknown. Log in to a normal user session (or enable lingering) and try again."
+        )
     if runner(["systemctl", "--user", "is-enabled", "--quiet", TIMER_NAME]) != 0:
         return False
     if runner(["systemctl", "--user", "list-timers", TIMER_NAME, "--all"]) != 0:

@@ -40,9 +40,6 @@ From before:
 
 ## Parked (not fixed, no owner decision needed yet)
 Phase 3:
-- `cli.py`: `_resolve_paper` picker duplicates `_choose` (about 8 lines).
-- `digest.py`: `_provenance_line` hard-indexes provenance keys (KeyError on a partial dict); `save_summary` provenance is optional.
-- `schedule.py`: `status` hint is misleading if the user manager is unreachable.
 - `profile_edit`/onboarding: C1 and bidi control characters are not stripped from topics; `seed_queries` are not cleaned (never shown raw).
 - Tests: weak assertions on some messages and exit codes; weak negative digest test.
 

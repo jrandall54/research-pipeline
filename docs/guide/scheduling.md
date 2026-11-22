@@ -8,7 +8,7 @@ Commands (`install` and `show` take `--time` and `--vault`; no file editing need
 
 - `rpipe schedule install [--time HH:MM] [--vault PATH]` writes the units and enables the timer.
 - `rpipe schedule show [--time HH:MM] [--vault PATH]` prints the units without writing anything, so you can review them first.
-- `rpipe schedule status` shows when the timer last fired and when it fires next; if the timer is not enabled it says so and suggests `rpipe schedule install`.
+- `rpipe schedule status` shows when the timer last fired and when it fires next; if the timer is not enabled it says so and suggests `rpipe schedule install`. It first checks that the systemd user manager can be reached; if not, it says exactly that (and exits 1) instead of claiming the timer is not installed, because then the real state is unknown and reinstalling would not help.
 - `rpipe schedule remove` disables the timer and deletes both files (and reloads systemd only if something was removed). If disabling fails it warns and still removes the files. With nothing installed it just says so.
 
 ## How it works

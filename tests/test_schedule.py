@@ -97,8 +97,13 @@ def test_remove_deletes_broken_symlink(tmp_path):
 
 
 def test_status_false_when_not_enabled():
-    assert schedule.status(lambda c: 1) is False
+    assert schedule.status(lambda c: 1 if "is-enabled" in c else 0) is False
     assert schedule.status(lambda c: 0) is True
+
+
+def test_status_unreachable_manager_is_not_reported_as_not_installed():
+    with pytest.raises(schedule.ScheduleError, match="Cannot reach the systemd user manager"):
+        schedule.status(lambda c: 1)
 
 
 @pytest.fixture
@@ -178,9 +183,16 @@ def test_cli_install_failure_reports_files_left(fake, monkeypatch):
 
 
 def test_cli_status_not_installed_hints_install(fake, monkeypatch):
-    monkeypatch.setattr(schedule, "system_runner", lambda c: 1)
+    monkeypatch.setattr(schedule, "system_runner", lambda c: 1 if "is-enabled" in c else 0)
     res = runner.invoke(cli.app, ["schedule", "status"])
     assert res.exit_code == 0 and "rpipe schedule install" in res.output
+
+
+def test_cli_status_unreachable_manager_says_so(fake, monkeypatch):
+    monkeypatch.setattr(schedule, "system_runner", lambda c: 1)
+    res = runner.invoke(cli.app, ["schedule", "status"])
+    assert res.exit_code == 1 and "Cannot reach the systemd user manager" in res.output
+    assert "rpipe schedule install" not in res.output
 
 
 def test_cli_remove_nothing_installed(fake):

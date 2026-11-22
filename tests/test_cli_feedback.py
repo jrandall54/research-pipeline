@@ -119,3 +119,36 @@ def test_feedback_empty(vault):
     res = run(vault, "feedback")
     assert res.exit_code == 0
     assert "No votes" in res.output
+
+
+@pytest.mark.parametrize("cmd", ["vote", "save"])
+def test_unknown_paper_id_exits_1_with_message(vault, cmd):
+    args = [cmd, "9999.99999"] + (["up"] if cmd == "vote" else []) + ["--vault", str(vault)]
+    res = runner.invoke(cli.app, args)
+    assert res.exit_code == 1
+    assert "No paper in your vault matches '9999.99999'" in res.output
+
+
+def _make_too_new(vault):
+    import sqlite3
+
+    from research_pipeline.db import SCHEMA_VERSION
+
+    raw = sqlite3.connect(vault / "vault.sqlite")
+    raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    raw.commit()
+    raw.close()
+
+
+def test_open_exits_cleanly_on_too_new_database(vault):
+    _make_too_new(vault)
+    res = runner.invoke(cli.app, ["feedback", "--vault", str(vault)])
+    assert res.exit_code == 1 and "upgrade rpipe" in res.output
+    assert "Traceback" not in res.output
+
+
+def test_init_exits_cleanly_on_too_new_database(vault):
+    _make_too_new(vault)
+    res = runner.invoke(cli.app, ["init", "--vault", str(vault)])
+    assert res.exit_code == 1 and "upgrade rpipe" in res.output
+    assert res.exception is None or isinstance(res.exception, SystemExit)

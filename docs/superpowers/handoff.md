@@ -32,6 +32,13 @@ Sketch for a design/plan (brainstorm first, then write a plan):
 - Tests: the helper is unit-tested offline; each stage gets a test that it reports progress via the callback.
 - Docs: a "progress" section in `docs/guide/running.md`; add the convention to CLAUDE.md so future steps follow it (ask the owner before editing CLAUDE.md).
 
+## Ollama test result and long-paper idea (owner, 2026-11-22, not built)
+- Real Ollama summary of 2611.25005: much faster than Claude Code; "decent" at a quick glance (not yet judged in depth). The digest noted the paper was **too long for the model** (truncated).
+- Owner's two options, in order of preference to try:
+  1. A **longer context window** for the local model (`rpipe model fit` / `set-context`; the pinned 143K-context model `q3f-14b-143k` was the earlier cheap option).
+  2. **Chunked summarize-and-critique** (map-reduce): split the paper into parts, run summary and critique on each, then **merge the partial results**: where parts overlap they confirm or deduplicate each other, where they do not overlap they fill in what the other is missing. Needs its own brainstorm and design: how chunks are cut (by section), how overlapping claims are matched, how citations (section titles) survive the merge, cost (more calls, weaker cross-section critique), and how to measure it with `rpipe eval` and the gold set. See also the older "Watching: truncation" section below.
+- Look at the `truncated N` count in the health line over a few runs to see how often it matters before building option 2.
+
 ## Next up (owner asked for, not built)
 1. `rpipe show <id>...` (print one paper's summary and critique, no voting; accepts ids or title fragments) and `rpipe show --recent`.
 2. A reader page in `rpipe serve` (it shows raw JSON today). `rpipe review` is a vote loop, not for reading.

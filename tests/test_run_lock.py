@@ -34,7 +34,10 @@ def test_run_exits_75_with_a_clear_message_when_locked(tmp_path):
     with run_lock(vault):
         res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
     assert res.exit_code == cli.RUN_LOCKED_EXIT == 75
-    assert "already using" in res.output and "nothing was started" in res.output
+    assert (
+        f"another `rpipe run` is already using {vault}; nothing was started."
+        " Wait for it to finish (see `rpipe runs`)."
+    ) in " ".join(res.output.split())
     # nothing was started: no runs row was written
     conn = sqlite3.connect(vault / "vault.sqlite")
     assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0

@@ -700,3 +700,24 @@ def test_crash_in_later_stage_keeps_earlier_counts(vault, monkeypatch, stage, pa
     assert counts["inserted"] > 0
     assert errors == [f"{stage}: bad stage"]
     assert next((vault / "digests").glob("*.md")).exists()
+
+
+def test_run_after_llm_timeout_still_writes_digest_and_records_error(vault, monkeypatch):
+    import sqlite3
+    from research_pipeline.llm import LlmTimeout
+
+    class HangingLLM(AlwaysSummary):
+        def generate(self, system, user, schema):
+            self.calls.append((system, user))
+            raise LlmTimeout("Ollama at http://x timed out after 600s")
+
+    llm = HangingLLM([])
+    install(monkeypatch, llm=lambda: llm)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert len(llm.calls) == 1  # only the first summary attempt reached the model
+    assert len(list((vault / "digests").glob("*.md"))) == 1
+    errors = json.loads(
+        sqlite3.connect(vault / "vault.sqlite").execute("SELECT errors FROM runs").fetchone()[0]
+    )
+    assert any(e.startswith("summarize: stopped calling the model after the first timeout") for e in errors)

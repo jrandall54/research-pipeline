@@ -50,7 +50,14 @@ Quoting: systemd splits `ExecStart` on spaces and expands `%` and `$`, so paths 
 
 **Linger.** A user timer normally only runs while you have a login session. `loginctl enable-linger $USER` (run once, by you) tells systemd to keep your user services alive while logged out, so a 03:00 run happens even if nobody is logged in. It changes machine-wide login behaviour, which is why `rpipe` never runs it for you.
 
+## Checks when you install
+
+- **Linux only.** `rpipe schedule install`, `status` and `remove` use systemd. On macOS or Windows they print "rpipe schedule uses systemd, which only exists on Linux. On <OS>, run `rpipe run` once a day from your own scheduler (see the README)." and exit 1 without writing anything.
+- **Backend check.** After the timer is installed, rpipe builds and tests the summary backend the way a run would. If it is not ready (Ollama not running, Claude Code logged out, the recorded `claude` path moved) it prints a warning and the fix (`rpipe model setup`) but still installs: the nightly run would write abstracts only until you fix it, and the digest is still written.
+
 ## Why it's built this way
+
+- **The absolute CLI path is recorded.** The nightly unit has no `~/.local/bin` on its PATH and none of your shell setup. `rpipe model setup` stores the full path of the `claude` program in the vault's config, and `rpipe schedule install` writes the full path of `rpipe` into the unit, so neither has to be found by searching at 03:00. Rejected: relying on PATH, which works in your terminal and fails silently under systemd.
 
 - **systemd user timer, not cron.** `Persistent=true` catches up missed runs; cron silently skips them. systemd also keeps the output in the journal and `systemctl --user list-timers` shows the next run. Cron rejected: no catch-up, no built-in status, and it needs the environment (vault path) smuggled into a crontab line.
 - **User units, not system units.** The vault and Ollama belong to your user; a system-level unit would need root, run as the wrong user, and could not find your home directory. User units need no sudo.

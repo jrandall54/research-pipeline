@@ -277,3 +277,38 @@ def test_install_does_not_print_the_systemd_environment(fake, noisy_systemctl, m
     assert res.exit_code == 0, res.output
     assert "hunter2" not in res.output + out.out + out.err
     assert "err-secret" not in res.output + out.out + out.err
+
+
+class _Ready:
+    def check(self):
+        return "ok"
+
+
+@pytest.fixture(autouse=True)
+def backend_ready(monkeypatch):
+    monkeypatch.setattr(cli, "build_llm", lambda config, vault, log=lambda s: None: _Ready())
+
+
+def test_schedule_install_warns_when_backend_not_ready(fake, monkeypatch):
+    from research_pipeline.llm import LlmError
+
+    def down(config, vault, log=lambda s: None):
+        raise LlmError("cannot reach Ollama")
+
+    monkeypatch.setattr(cli, "build_llm", down)
+    calls, unit_dir, vault = fake
+    res = runner.invoke(cli.app, ["schedule", "install", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert (unit_dir / "research-pipeline.timer").exists()
+    assert "cannot reach Ollama" in res.output and "rpipe model setup" in res.output
+
+
+@pytest.mark.parametrize("sub", ["install", "status", "remove"])
+def test_schedule_refuses_off_linux(fake, monkeypatch, sub):
+    calls, unit_dir, vault = fake
+    monkeypatch.setattr(cli, "_platform", lambda: "Darwin")
+    res = runner.invoke(cli.app, ["schedule", sub, *([] if sub != "install" else ["--vault", str(vault)])])
+    assert res.exit_code == 1
+    assert ("rpipe schedule uses systemd, which only exists on Linux. On Darwin, run `rpipe run` "
+            "once a day from your own scheduler (see the README).") in res.output
+    assert calls == [] and not unit_dir.exists()

@@ -194,3 +194,7 @@
 **VRAM** — the memory on a graphics card (GPU). A model must fit in it to run fast; `rpipe model setup` compares it with 6 GB and with the model table. See `setup.md`.
 
 **Unified memory** — Apple Silicon's single memory pool shared by CPU and GPU. rpipe counts 66% of it as GPU memory. See `setup.md`.
+
+**Pull (a model)** — downloading a model's files into Ollama so it can run locally (`ollama pull NAME`). `rpipe model setup` offers to do it for you, after a yes/no, and shows download progress. See `setup.md`.
+
+**Walkthrough** — the guided, step-by-step prompts of `rpipe model setup` (also the first step of `rpipe init`): look at your computer, recommend a backend, set it up, test it. See `setup.md`.

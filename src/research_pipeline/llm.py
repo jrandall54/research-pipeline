@@ -1,5 +1,7 @@
 """Client for a local model server (Ollama) that returns validated, structured answers."""
 
+import json
+from collections.abc import Callable
 from typing import Protocol, TypeVar
 
 import httpx
@@ -133,3 +135,39 @@ class OllamaClient:
         if _with_tag(self.model_name) not in {_with_tag(n) for n in names}:
             raise LlmError(self._pull_hint())
         return f"Ollama is running at {self.url} and model {self.model_name} is installed."
+
+
+def pull_model(url: str, tag: str, progress: Callable[[str], None]) -> None:
+    """Download model `tag` through Ollama's /api/pull, streaming status lines to `progress`.
+
+    `progress` is called when the status text or the whole-percent changes (not on every
+    chunk). Raises LlmError on an HTTP error, an unreachable server or a streamed error."""
+    base = url.rstrip("/")
+    last: tuple[str, int | None] | None = None
+    try:
+        with httpx.stream("POST", f"{base}/api/pull", json={"model": tag},
+                          timeout=httpx.Timeout(30.0, read=600.0)) as resp:
+            if resp.status_code >= 400:
+                resp.read()
+                raise LlmError(f"Ollama returned HTTP {resp.status_code} while pulling {tag}: {resp.text[:200]}")
+            for line in resp.iter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(msg, dict):
+                    continue
+                if "error" in msg:
+                    raise LlmError(f"pulling {tag} failed: {msg['error']}")
+                status = str(msg.get("status", ""))
+                total, done = msg.get("total"), msg.get("completed")
+                pct = int(done * 100 / total) if isinstance(total, int) and total > 0 and isinstance(done, int) else None
+                if (status, pct) != last:
+                    last = (status, pct)
+                    progress(f"{status} {pct}%" if pct is not None else status)
+    except httpx.ConnectError as e:
+        raise LlmError(f"cannot reach Ollama at {base}: {SERVE_HINT}") from e
+    except httpx.HTTPError as e:
+        raise LlmError(f"pulling {tag} failed: {e}") from e

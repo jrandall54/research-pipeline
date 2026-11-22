@@ -17,11 +17,29 @@ def tty(monkeypatch):
 
 
 def init(tmp_path, input, describe=False):
-    """Run `rpipe init`. The wizard's first question is the optional description: Enter skips
-    it, so unless `describe` is set a blank line is prepended to the scripted answers."""
-    if input is not None and not describe:
+    """Run `rpipe init`. The first question is the backend (the stubbed machine finds nothing,
+    so Enter accepts `none`), which also skips the description step; a blank line for it is
+    prepended. Tests that need the description step use the `ollama_ready` fixture."""
+    if input is not None:
         input = "\n" + input
     return runner.invoke(cli.app, ["init", "--vault", str(tmp_path / "v")], input=input)
+
+
+class _Ok:
+    def check(self):
+        return "ok"
+
+
+@pytest.fixture
+def ollama_ready(monkeypatch):
+    """A machine with Ollama running and a model pulled, so the wizard's backend step ends ready
+    and the description step runs."""
+    from research_pipeline.machine import Gpu, MachineInfo
+
+    monkeypatch.setattr(cli, "detect_machine", lambda config: MachineInfo(
+        os="Linux", ram_gb=16.0, gpu=Gpu("Test GPU", 16.0, "nvidia"), ollama_installed=True, ollama_running=True,
+        ollama_models=["qwen3:8b"], claude_path=None, claude_logged_in=False))
+    monkeypatch.setattr(cli, "build_llm", lambda config, vault, log=lambda s: None: _Ok())
 
 
 def use(monkeypatch, stub):
@@ -262,17 +280,17 @@ def _llm(monkeypatch, responses):
     return llm
 
 
-def test_wizard_skip_description_goes_manual(tmp_path, tty, monkeypatch):
+def test_wizard_skip_description_goes_manual(tmp_path, tty, monkeypatch, ollama_ready):
     use(monkeypatch, StubArxiv())
     llm = _llm(monkeypatch, [])
-    result = init(tmp_path, "my topic\n\n\n\n")
+    result = init(tmp_path, "\nmy topic\n\n\n\n")
     assert result.exit_code == 0, result.output
     assert "Describe your research in a few sentences" in result.output
     assert llm.calls == []
     assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["my topic"]
 
 
-def test_wizard_description_then_manual_steps_still_run(tmp_path, tty, monkeypatch):
+def test_wizard_description_then_manual_steps_still_run(tmp_path, tty, monkeypatch, ollama_ready):
     from research_pipeline.onboarding import ProposedProfile
 
     use(monkeypatch, StubArxiv())
@@ -285,14 +303,14 @@ def test_wizard_description_then_manual_steps_still_run(tmp_path, tty, monkeypat
     assert topics == ["proposed one", "extra"]  # template examples replaced; manual step ran
 
 
-def test_wizard_llm_down_falls_through_to_manual(tmp_path, tty, monkeypatch):
+def test_wizard_llm_down_falls_through_to_manual(tmp_path, tty, monkeypatch, ollama_ready):
     from research_pipeline.llm import LlmError
 
     use(monkeypatch, StubArxiv())
     _llm(monkeypatch, [LlmError("down")])
     result = init(tmp_path, "I study security of LLM agents and prompt injection.\nhand topic\n\n\n\n", describe=True)
     assert result.exit_code == 0, result.output
-    assert "Local model unavailable" in result.output
+    assert "Summary model unavailable" in result.output
     assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["hand topic"]
 
 
@@ -307,13 +325,13 @@ def test_wizard_ctrl_c_at_description_prompt(tmp_path, tty, monkeypatch):
     assert result.exit_code == 130 and ABORT in result.output
 
 
-def test_wizard_eof_at_description_prompt(tmp_path, tty, monkeypatch):
+def test_wizard_eof_at_description_prompt(tmp_path, tty, monkeypatch, ollama_ready):
     use(monkeypatch, StubArxiv())
     result = init(tmp_path, "", describe=True)
     assert result.exit_code == 130 and ABORT in result.output
 
 
-def test_wizard_short_description_skipped_without_model_call(tmp_path, tty, monkeypatch):
+def test_wizard_short_description_skipped_without_model_call(tmp_path, tty, monkeypatch, ollama_ready):
     use(monkeypatch, StubArxiv())
 
     def boom(config):

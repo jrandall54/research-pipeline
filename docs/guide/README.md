@@ -52,8 +52,9 @@ New to the project? Read in this order:
 14. [review.md](review.md): `rpipe review`, reading and voting on the digest in the terminal, and the review-later list
 15. [shelf.md](shelf.md): `rpipe shelf`, your notes in `my_work/`: how they are chunked, embedded, added and removed
 16. [plugins.md](plugins.md): plug-ins, entry points, `rpipe plugins` and `rpipe sources`
-17. [setup.md](setup.md): the setup walkthrough: how your machine is checked and a backend recommended
-18. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+17. [backends.md](backends.md): the summary backends (Ollama, Claude Code, none) and how they differ
+18. [setup.md](setup.md): the setup walkthrough (`rpipe model setup`, also the first step of `rpipe init`): how your machine is checked, a backend recommended, chosen and tested
+19. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 

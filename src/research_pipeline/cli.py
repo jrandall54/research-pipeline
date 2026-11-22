@@ -4,6 +4,7 @@ import gc
 import importlib.util
 import json
 import os
+import platform
 import shutil
 import signal
 import sqlite3
@@ -24,8 +25,9 @@ from research_pipeline.digest import render_summary, write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
 from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, has_gold, load_gold, remove_fact, remove_gold
-from research_pipeline.backends.claude_code import find_claude, logged_in, LOGIN_HINT
-from research_pipeline.llm import LLM, NO_MODEL, LlmError, OllamaClient
+from research_pipeline.backends.claude_code import find_claude, logged_in, resolve_model, LOGIN_HINT
+from research_pipeline.llm import LLM, NO_MODEL, LlmError, OllamaClient, pull_model
+from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
 from research_pipeline.review import later_queue, queue_progress, review_queue
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.run_lock import RunLocked, run_lock
@@ -144,9 +146,10 @@ def init(
     typer.echo("  vault.sqlite, raw/, markdown/, summaries/, my_work/, gold/, digests/, cache/ ready")
     if not _is_tty():
         typer.echo("\nNext steps:")
-        typer.echo("  1. Add 10-20 papers you like: rpipe profile add-seed <arXiv link, id or title>")
-        typer.echo("  2. Check your profile: rpipe profile show")
-        typer.echo("  3. Change topics, authors, keywords, top-N or categories: rpipe profile --help")
+        typer.echo("  1. Choose how summaries are written (run in a terminal): rpipe model setup")
+        typer.echo("  2. Add 10-20 papers you like: rpipe profile add-seed <arXiv link, id or title>")
+        typer.echo("  3. Check your profile: rpipe profile show")
+        typer.echo("  4. Change topics, authors, keywords, top-N or categories: rpipe profile --help")
         return
     try:
         _wizard(path, fresh_profile="profile.yaml" not in existed, fresh_config="config.yaml" not in existed)
@@ -663,7 +666,7 @@ def profile_add_seed(
         _close(arxiv)
 
 
-LLM_DOWN = "Local model unavailable; add topics by hand with `rpipe profile add-topic`"
+LLM_DOWN = "Summary model unavailable; add topics by hand with `rpipe profile add-topic`"
 
 
 def _onboarding_llm(config: Config) -> LLM | None:
@@ -1241,7 +1244,7 @@ def model_set_backend(
             if cli_path is None:
                 raise _fail(
                     "Claude Code not found (looked at the recorded path, PATH and ~/.local/bin). "
-                    "Install it, then try again (or use --force to switch anyway)."
+                    "Install it and run `rpipe model setup`, or use --force to switch anyway."
                 )
             if not logged_in(cli_path):
                 raise _fail(f"Claude Code is not logged in: {LOGIN_HINT} (or use --force to switch anyway).")
@@ -1398,6 +1401,131 @@ def _wizard_seeds(vault: Path, config: Config) -> None:
         typer.echo("Tip: 10-20 seeds work best; add more later with rpipe profile add-seed")
 
 
+def _describe_machine(info) -> None:
+    typer.echo("What I found on this computer:")
+    typer.echo(f"  system: {info.os}" + (f", {info.ram_gb:.0f} GB of memory" if info.ram_gb else ""))
+    if info.gpu is None:
+        typer.echo("  graphics card: no GPU found")
+    else:
+        typer.echo(f"  graphics card: {info.gpu.name}, {info.gpu.vram_gb:.1f} GB of GPU memory")
+    if not info.ollama_installed:
+        typer.echo("  Ollama: not installed")
+    else:
+        models = ", ".join(info.ollama_models) or "no models pulled yet"
+        typer.echo(f"  Ollama: installed, {'running' if info.ollama_running else 'not running'}; {models}")
+    if info.claude_path is None:
+        typer.echo("  Claude Code: not found")
+    else:
+        typer.echo(f"  Claude Code: found at {info.claude_path}, "
+                   f"{'logged in' if info.claude_logged_in else 'not logged in'}")
+
+
+def _recheck(config: Config, info, problem: str, ok: Callable, question: str):
+    """Show `problem` and re-detect the machine each time the user says they fixed it."""
+    while not ok(info):
+        typer.echo(problem)
+        if not typer.confirm(question, default=False):
+            break
+        info = detect_machine(config)
+    return info
+
+
+def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> None:
+    info = _recheck(config, info, f"Ollama is not installed. Install it yourself with:\n  {OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}",
+                    lambda i: i.ollama_installed, "Installed it? Check again")
+    if rec.pull is not None and rec.backend == "ollama" and info.ollama_installed:
+        if typer.confirm(f"Pull {rec.pull.tag} now ({rec.pull.download_gb:g} GB download)?", default=True):
+            try:
+                pull_model(config.llm_url, rec.pull.tag, lambda line: typer.echo(f"  {line}"))
+            except LlmError as exc:
+                typer.echo(f"Pull failed: {exc}")
+    profile_edit.set_llm_backend(vault, "ollama", known)
+
+
+def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:
+    hint = ("Claude Code was not found. Install it, run `claude` once in a terminal and log in, then come back."
+            if info.claude_path is None else
+            "Claude Code is not logged in. Run `claude` once in a terminal and log in, then come back.")
+    info = _recheck(config, info, hint, lambda i: i.claude_logged_in, "Logged in? Check again")
+    typer.echo(
+        "With Claude Code, the text of each paper is sent to Anthropic to be summarised. A night uses "
+        "about 30 calls from your plan's usage quota. Your shelf (my_work/) never leaves this machine. "
+        "`haiku` uses less quota than `sonnet`; `opus` uses the most."
+    )
+    while True:
+        model = typer.prompt("Model (sonnet, haiku or opus)", default="sonnet").strip()
+        try:
+            resolve_model(model)
+            break
+        except ValueError as exc:
+            typer.echo(str(exc))
+    profile_edit.set_llm_backend(vault, "claude-code", known, info.claude_path)
+    profile_edit.set_llm_model(vault, model)
+
+
+def _wizard_backend(vault: Path) -> bool:
+    """Look at this computer, recommend a summary backend, save the user's choice and check it.
+
+    Returns True when the final check passed (`none` counts as ready)."""
+    config = load_config(vault / "config.yaml")
+    info = detect_machine(config)
+    _describe_machine(info)
+    rec = recommend(info, load_model_table())
+    typer.echo(f"\\nRecommended: {rec.backend}")
+    for reason in rec.reasons:
+        typer.echo(f"  - {reason}")
+    options = [rec.backend, *rec.alternatives]
+    labels = {"ollama": "a model on this computer (Ollama)", "claude-code": "Claude Code (your login)",
+              "none": "no summaries (abstracts only)"}
+    typer.echo("\\nChoose how summaries are written:")
+    for i, name in enumerate(options, 1):
+        typer.echo(f"  {i}. {labels.get(name, name)}" + ("  [recommended]" if i == 1 else ""))
+    while True:
+        pick = typer.prompt("Choice", default=1, type=int)
+        if 1 <= pick <= len(options):
+            break
+        typer.echo(f"Enter a number from 1 to {len(options)}.")
+    choice = options[pick - 1]
+    known = set(registry.plugins(registry.BACKEND_GROUP))
+    try:
+        if choice == "ollama":
+            _setup_ollama(vault, config, info, rec, known)
+        elif choice == "claude-code":
+            _setup_claude(vault, config, info, known)
+        else:
+            profile_edit.set_llm_backend(vault, "none", known)
+            typer.echo("No summary model: digests list each paper's abstract instead of a summary. "
+                       "Change this any time with `rpipe model setup`.")
+    except (ValueError, ConfigError, OSError) as exc:
+        raise _fail(str(exc)) from exc
+    config = load_config(vault / "config.yaml")
+    if config.llm_backend == "none":
+        typer.echo("Ready: abstracts-only mode needs nothing else.")
+        return True
+    try:
+        llm = build_llm(config, vault, log=_progress)
+        line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
+    except (LlmError, OSError, ValueError) as exc:
+        typer.echo(f"Not ready yet: {exc}\\nFix it, then run rpipe model setup")
+        return False
+    typer.echo(f"Ready: {line}")
+    return True
+
+
+@model_app.command("setup")
+def model_setup(vault: VaultOption = None) -> None:
+    """Walk through choosing a summary backend: checks this computer, recommends one, saves it and tests it."""
+    if not _is_tty():
+        raise _fail("rpipe model setup is interactive; use `rpipe model set-backend NAME` in scripts")
+    ctx = _open(vault)
+    try:
+        ready = _wizard_backend(ctx.vault)
+    except (typer.Abort, KeyboardInterrupt, EOFError):
+        typer.echo("\\nStopped. Nothing further was changed; run rpipe model setup to continue.")
+        raise typer.Exit(code=130) from None
+    if not ready:
+        raise typer.Exit(code=1)
+
 def _wizard_describe(vault: Path, config: Config) -> None:
     """Optional: propose topics and seeds from a description. Any failure falls through."""
     if config.llm_backend == "none":
@@ -1415,6 +1543,8 @@ def _wizard_describe(vault: Path, config: Config) -> None:
 def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
     """Interactive setup. Every answer is saved as soon as it is confirmed."""
     try:
+        # The backend comes first: the describe step below already calls the model.
+        _wizard_backend(vault)
         config = load_config(vault / "config.yaml")
         _wizard_describe(vault, config)
         _wizard_topics(vault, fresh_profile)
@@ -1635,6 +1765,19 @@ def _rpipe_path() -> str:
     return os.path.abspath(found)
 
 
+def _platform() -> str:
+    """The operating system name (Linux, Darwin, Windows); tests replace it."""
+    return platform.system()
+
+
+def _need_linux() -> None:
+    if (system := _platform()) != "Linux":
+        raise _fail(
+            "rpipe schedule uses systemd, which only exists on Linux. "
+            f"On {system}, run `rpipe run` once a day from your own scheduler (see the README)."
+        )
+
+
 def _need_systemctl(writes: bool = False) -> None:
     if shutil.which("systemctl") is None:
         raise _fail("systemctl not found (is systemd available?)." + ("" if not writes else " Nothing was written."))
@@ -1645,6 +1788,20 @@ def _schedule_vault(vault: Path | None) -> Path:
     if not (path / "config.yaml").exists():
         raise _fail(f"No vault found at {path} (no config.yaml). Run `rpipe init` first.")
     return path
+
+
+def _warn_backend(vault: Path) -> None:
+    """After scheduling, say so if the nightly run would not be able to summarise."""
+    try:
+        config = load_config(vault / "config.yaml")
+        if config.llm_backend == "none":
+            return
+        llm = build_llm(config, vault)
+        if hasattr(llm, "check"):
+            llm.check()
+    except (LlmError, OSError, ValueError, ConfigError) as exc:
+        typer.echo(f"Warning: the summary backend is not ready ({exc}). Until it is, the nightly run "
+                   "writes abstracts only. Fix it with `rpipe model setup`.")
 
 
 @schedule_app.command("show")
@@ -1672,6 +1829,7 @@ def schedule_install(
     vault: VaultOption = None,
 ) -> None:
     """Write the systemd user units and enable the nightly timer."""
+    _need_linux()
     path = _schedule_vault(vault)
     try:
         schedule.render_timer(time)
@@ -1687,11 +1845,13 @@ def schedule_install(
         typer.echo(f"wrote {f}")
     typer.echo(f"Scheduled: `rpipe run` every day at {time} for vault {path}.")
     typer.echo(_LINGER_HINT)
+    _warn_backend(path)
 
 
 @schedule_app.command("status")
 def schedule_status() -> None:
     """Show when the timer last ran and will run next."""
+    _need_linux()
     _need_systemctl()
     try:
         enabled = schedule.status(schedule.system_runner)
@@ -1704,6 +1864,7 @@ def schedule_status() -> None:
 @schedule_app.command("remove")
 def schedule_remove() -> None:
     """Disable the timer and delete the unit files."""
+    _need_linux()
     try:
         removed, warnings = schedule.remove(schedule.default_unit_dir(), schedule.system_runner)
     except schedule.ScheduleError as exc:

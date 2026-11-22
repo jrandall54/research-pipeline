@@ -128,7 +128,7 @@ def test_suggest_llm_down_changes_nothing(vault, monkeypatch):
     before = (vault / "profile.yaml").read_text()
     result = suggest(vault, DESC)
     assert result.exit_code == 0
-    assert "Local model unavailable; add topics by hand with `rpipe profile add-topic`" in result.output
+    assert "Summary model unavailable; add topics by hand with `rpipe profile add-topic`" in result.output
     assert (vault / "profile.yaml").read_text() == before
 
 

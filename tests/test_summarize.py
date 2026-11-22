@@ -1,4 +1,5 @@
 import pytest
+from conftest import SECTIONS, FakeLLM, critique, summary
 
 from research_pipeline.llm import LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section
@@ -10,7 +11,7 @@ from research_pipeline.summarize import (
     summarize_paper,
     unknown_citations,
 )
-from conftest import SECTIONS, FakeLLM, critique, summary
+
 
 def between_tags(user: str) -> str:
     start, end = user.index("<paper>"), user.index("</paper>")
@@ -157,7 +158,13 @@ def test_llm_error_propagates():
 
 # ---- run_summarize (Task 4) ----
 from research_pipeline.db import (  # noqa: E402
-    get_fulltext, get_paper, get_summary, open_db, save_fulltext, set_status, upsert_paper,
+    get_fulltext,
+    get_paper,
+    get_summary,
+    open_db,
+    save_fulltext,
+    set_status,
+    upsert_paper,
 )
 from research_pipeline.fulltext import FullTextUnavailable  # noqa: E402
 from research_pipeline.models import PaperMeta, Status  # noqa: E402
@@ -250,6 +257,7 @@ def test_fetch_network_error_fails_the_paper_not_abstract_fallback(conn):
 
 def test_num_ctx_floor_is_8192():
     from pydantic import ValidationError
+
     from research_pipeline.models import Config
     assert Config(vault_path="/x", llm_num_ctx=8192).llm_num_ctx == 8192
     with pytest.raises(ValidationError):
@@ -322,12 +330,11 @@ def test_paper_is_given_up_on_after_three_failures(conn):
 
 
 def test_run_summarize_empty_sections_use_abstract_and_are_not_cached(tmp_path):
-    from research_pipeline.db import get_fulltext, get_paper, open_db, upsert_paper
-    from research_pipeline.models import PaperMeta
-    from research_pipeline.summarize import run_summarize
-    from research_pipeline.db import set_status
-    from research_pipeline.models import Status
     from conftest import AlwaysSummary
+
+    from research_pipeline.db import get_fulltext, open_db, set_status, upsert_paper
+    from research_pipeline.models import PaperMeta, Status
+    from research_pipeline.summarize import run_summarize
 
     conn = open_db(tmp_path / "p.db")
     upsert_paper(conn, PaperMeta(id="2401.00001", title="T", abstract="We study X.", source="arxiv", url="u"))
@@ -439,7 +446,6 @@ def two_calls(n):
 
 
 def test_backlog_selects_past_digest_unsummarized_newest_first_and_respects_limit(conn):
-    from research_pipeline.db import save_summary
     from research_pipeline.models import Status as S  # noqa: F401
     add_digested(conn, "2501.00001", TODAY - timedelta(days=3))
     add_digested(conn, "2501.00002", TODAY - timedelta(days=1))

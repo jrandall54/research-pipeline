@@ -116,7 +116,7 @@ def remove(unit_dir: Path, runner: Runner) -> tuple[list[Path], list[str]]:
     present = [p for p in paths if os.path.lexists(p)]  # lexists: a broken symlink still counts
     if present and runner(["systemctl", "--user", "disable", "--now", TIMER_NAME]) != 0:
         warnings.append("`systemctl --user disable --now` failed; the timer may still be enabled "
-                        f"(check `systemctl --user list-timers`). Files are being removed anyway.")
+                        "(check `systemctl --user list-timers`). Files are being removed anyway.")
     for path in present:
         path.unlink(missing_ok=True)
     if present and runner(["systemctl", "--user", "daemon-reload"]) != 0:

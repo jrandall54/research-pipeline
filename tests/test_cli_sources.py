@@ -25,7 +25,7 @@ def test_cli_sources_list_shows_on_off(vault):
     assert run(vault, "sources", "disable", "hf_daily").exit_code == 0
     res = run(vault, "sources", "list")
     assert res.exit_code == 0, res.output
-    lines = {l.split()[0]: l for l in res.output.splitlines() if l.strip()}
+    lines = {ln.split()[0]: ln for ln in res.output.splitlines() if ln.strip()}
     assert " on " in lines["arxiv"] and "built-in" in lines["arxiv"]
     assert " off " in lines["hf_daily"]
 

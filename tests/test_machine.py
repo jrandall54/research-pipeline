@@ -6,8 +6,17 @@ import pytest
 import respx
 
 from research_pipeline.machine import (
-    APPLE_GPU_FRACTION, OLLAMA_INSTALL, Gpu, MachineInfo, ModelChoice, detect_gpu,
-    detect_machine, load_model_table, ollama_tags, recommend, system_cmd,
+    APPLE_GPU_FRACTION,
+    OLLAMA_INSTALL,
+    Gpu,
+    MachineInfo,
+    ModelChoice,
+    detect_gpu,
+    detect_machine,
+    load_model_table,
+    ollama_tags,
+    recommend,
+    system_cmd,
 )
 from research_pipeline.models import Config
 

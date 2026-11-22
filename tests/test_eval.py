@@ -1,9 +1,9 @@
 from datetime import date
 
 import pytest
+from conftest import SECTIONS, AlwaysSummary
 from typer.testing import CliRunner
 
-from conftest import SECTIONS, AlwaysSummary
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
 from research_pipeline.evaluate import Grade, latest_day, load_eval, report, run_eval, save_grade
@@ -93,10 +93,12 @@ def test_run_eval_same_day_overwrites_and_clears_grades(vault):
 # ---- CLI
 
 def install(monkeypatch, fetcher=fetch):
-    pipe = lambda config: Pipeline(
-        [], None, lambda ids: [PaperMeta(id=i, title="T", abstract="abs", source="arxiv", url="u") for i in ids],
-        lambda: AlwaysSummary([]), fetcher,
-    )
+    def pipe(config):
+        return Pipeline(
+            [], None, lambda ids: [PaperMeta(id=i, title="T", abstract="abs", source="arxiv", url="u") for i in ids],
+            lambda: AlwaysSummary([]), fetcher,
+        )
+
     monkeypatch.setattr(cli, "build_pipeline", pipe)
 
 

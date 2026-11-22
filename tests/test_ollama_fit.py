@@ -3,8 +3,8 @@ import json
 import httpx
 import pytest
 import respx
-
 from fakes import GB, URL, FakeOllama
+
 from research_pipeline.llm import LlmError
 from research_pipeline.ollama_fit import (
     Fit,
@@ -15,6 +15,7 @@ from research_pipeline.ollama_fit import (
     max_context,
     resolve,
 )
+
 
 def boundary_fake(boundary: int, size: int = 8 * GB) -> FakeOllama:
     """One model "m" that fits up to exactly `boundary` tokens."""
@@ -353,7 +354,7 @@ def test_resolve_notes_and_skips_cache_when_other_models_were_loaded(mock, tmp_p
     fake.install(mock)
     logs: list[str] = []
     resolve(URL, tmp_path, "m", "auto", log=logs.append)
-    assert any("busy" in l and "rpipe model fit" in l for l in logs)
+    assert any("busy" in ln and "rpipe model fit" in ln for ln in logs)
     assert not (tmp_path / "cache" / "llm_fit.json").exists()
 
 
@@ -373,7 +374,7 @@ def test_resolve_caches_when_the_gpu_is_idle(mock, tmp_path):
     logs: list[str] = []
     resolve(URL, tmp_path, "m", "auto", log=logs.append)
     assert (tmp_path / "cache" / "llm_fit.json").exists()
-    assert not any("was loaded" in l for l in logs)
+    assert not any("was loaded" in ln for ln in logs)
 
 
 def test_list_models_malformed_tags_json_is_an_llmerror(mock):

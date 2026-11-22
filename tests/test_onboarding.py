@@ -1,4 +1,6 @@
 import pytest
+from conftest import FakeLLM
+from fakes import StubArxiv, paper
 from typer.testing import CliRunner
 
 from research_pipeline import cli
@@ -6,9 +8,6 @@ from research_pipeline.llm import LlmError
 from research_pipeline.onboarding import ProposedProfile, propose, resolve_seeds
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import init_vault, load_profile
-
-from conftest import FakeLLM
-from fakes import StubArxiv, paper
 
 runner = CliRunner()
 DESC = "I work on security of LLM agents, especially prompt injection."

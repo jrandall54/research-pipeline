@@ -254,7 +254,10 @@ To run it every night automatically, use `rpipe schedule install` (a systemd use
 uv run rpipe run --vault /tmp/try-vault   # after init, on a scratch vault
 uv run pytest -q                                      # whole suite, offline
 uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
+uv run ruff check .                                   # lint (settings in pyproject.toml)
 ```
+
+Lint is `ruff` (a fast Python linter, installed with the dev group by `uv sync`). It looks for real mistakes such as unused variables and imports, ambiguous names like `l`, and unsorted imports; it does not reformat code. CI runs `uv run ruff check .` before the tests, so run it locally first. `uv run ruff check . --fix` applies the safe automatic fixes.
 
 `tests/test_e2e.py` runs the real CLI on a temporary vault with fixture sources and the test embedder, and checks: the digest is written and the top paper is the on-topic one; the `runs` row is finished; a second run the same day adds no duplicates; an uninitialised vault exits 1; a failing source exits 0 with the error recorded; a failed seed lookup does not stop the run; a missing `embed` extra gives a clear error; with a scripted fake model the digest contains a cited summary; with the model unavailable `run` still exits 0, writes the digest and names the cause in the health line; `rpipe summarize` runs the stage alone.
 

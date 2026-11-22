@@ -1,9 +1,9 @@
 import json
 
 import pytest
+from fakes import StubArxiv, paper
 from typer.testing import CliRunner
 
-from fakes import StubArxiv, paper
 from research_pipeline import cli
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import init_vault, load_config, load_profile

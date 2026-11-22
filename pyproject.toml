@@ -25,7 +25,7 @@ rpipe = "research_pipeline.cli:app"
 research-pipeline = "research_pipeline.cli:app"
 
 [dependency-groups]
-dev = ["pytest", "respx"]
+dev = ["pytest", "respx", "ruff"]
 
 [build-system]
 requires = ["hatchling"]
@@ -36,3 +36,12 @@ packages = ["src/research_pipeline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# Long lines are kept as written (some are prose strings and tables); ruff format is not used.
+ignore = ["E501"]

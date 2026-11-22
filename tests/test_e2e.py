@@ -1,15 +1,18 @@
-from datetime import date
 import json
+from datetime import date
 from pathlib import Path
 
+import httpx
 import pytest
+import respx
+from conftest import SECTIONS, AlwaysSummary, FakeEmbedder, critique, summary
+from fakes import GB, FakeOllama
+from fakes import URL as OLLAMA
 from typer.testing import CliRunner
 
-from conftest import FakeEmbedder, FakeLLM
-from conftest import SECTIONS, AlwaysSummary, critique, summary
-from research_pipeline.llm import LlmError
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
+from research_pipeline.llm import LlmError
 from research_pipeline.models import PaperMeta
 from research_pipeline.sources.arxiv import parse_arxiv_atom
 from research_pipeline.sources.base import SourceError
@@ -358,6 +361,7 @@ def test_summarize_command_reports_ollama_down(vault, monkeypatch):
 
 def test_e2e_version_bump_resummarises_from_new_text(vault, monkeypatch):
     import sqlite3
+
     from research_pipeline.models import Section
 
     install(monkeypatch)
@@ -383,11 +387,6 @@ def test_e2e_version_bump_resummarises_from_new_text(vault, monkeypatch):
 
 
 # ---------------------------------------------------------------- auto model and context
-
-import httpx
-import respx
-
-from fakes import GB, URL as OLLAMA, FakeOllama
 
 
 def install_real_llm(monkeypatch, vault):
@@ -696,6 +695,7 @@ def test_crash_in_later_stage_keeps_earlier_counts(vault, monkeypatch, stage, pa
 
 def test_run_after_llm_timeout_still_writes_digest_and_records_error(vault, monkeypatch):
     import sqlite3
+
     from research_pipeline.llm import LlmTimeout
 
     class HangingLLM(AlwaysSummary):
@@ -762,7 +762,8 @@ def test_seed_fetcher_without_arxiv_enabled_reuses_one_private_client(vault, mon
     monkeypatch.setattr(cli, "make_arxiv", lambda config: made.append(1) or Fake())
     cfg = cli.load_config(vault / "config.yaml").model_copy(update={"sources": ["hf_daily"]})
     pipe = cli.build_pipeline(cfg)
-    pipe.seed_fetcher(["a"]); pipe.seed_fetcher(["b"])
+    pipe.seed_fetcher(["a"])
+    pipe.seed_fetcher(["b"])
     assert made == [1]
 
 
@@ -770,6 +771,7 @@ def test_seed_fetcher_without_arxiv_enabled_reuses_one_private_client(vault, mon
 
 def seed_backlog(vault, n=3):
     from datetime import timedelta
+
     from research_pipeline.db import mark_in_digest, open_db, set_status, upsert_paper
     from research_pipeline.models import Status
     conn = open_db(vault / "vault.sqlite")

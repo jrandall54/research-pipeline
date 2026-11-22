@@ -5,8 +5,14 @@ from typer.testing import CliRunner
 
 from research_pipeline import cli
 from research_pipeline.db import (
-    current_votes, mark_in_digest, open_db, record_skip, record_vote, save_summary,
-    set_status, upsert_paper,
+    current_votes,
+    mark_in_digest,
+    open_db,
+    record_skip,
+    record_vote,
+    save_summary,
+    set_status,
+    upsert_paper,
 )
 from research_pipeline.models import PaperMeta, Status
 from research_pipeline.summarize import Claim, Critique, PaperSummary, Summary
@@ -97,7 +103,7 @@ def test_review_invalid_key_reprompts(vault, tty):
 
 
 def test_review_uppercase_and_first_letter(vault, tty):
-    res = run(vault, "review", input="UP\nDown\nq\n")
+    run(vault, "review", input="UP\nDown\nq\n")
     assert votes(vault) == [("2401.00001", 1), ("2401.00002", -1)]
 
 

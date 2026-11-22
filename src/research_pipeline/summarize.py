@@ -13,8 +13,6 @@ from typing import Literal, TypeVar
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.llm import LLM, LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section, Status
-from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
-from research_pipeline.sources.base import SourceError
 from research_pipeline.prompts import (
     PROMPT_VERSION,
     build_critique_prompt,
@@ -22,7 +20,8 @@ from research_pipeline.prompts import (
     citation_feedback,
     fit_to_budget,
 )
-
+from research_pipeline.sources.base import SourceError
+from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
 
 T = TypeVar("T", Summary, Critique)
 
@@ -48,7 +47,7 @@ def unknown_citations(obj: Summary | Critique, titles: list[str]) -> list[str]:
     return bad
 
 
-def _generate_checked(
+def _generate_checked(  # noqa: UP047 (module-level constrained TypeVar T is shared)
     llm: LLM, system: str, user: str, schema: type[T], titles: list[str]
 ) -> tuple[T, list[str]]:
     """Generate, check citations, retry once with feedback; return result and unverified texts."""
@@ -158,7 +157,7 @@ def run_summarize(
 
         def report(outcome: str, detail: str = "") -> None:
             if on_progress is not None:
-                on_progress(index, total, pid, outcome, time.monotonic() - started, detail)
+                on_progress(index, total, pid, outcome, time.monotonic() - started, detail)  # noqa: B023 (called within the same iteration)
 
         # Only triaged/fetched papers move on to `summarized`; every other status stays.
         listed = paper["status"] not in (Status.triaged.value, Status.fetched.value)

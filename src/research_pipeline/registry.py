@@ -3,9 +3,8 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import entry_points
-from typing import Any
-
 from pathlib import Path
+from typing import Any
 
 from research_pipeline import ollama_fit
 from research_pipeline.backends.claude_code import ClaudeCodeClient, find_claude

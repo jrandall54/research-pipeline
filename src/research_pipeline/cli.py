@@ -10,8 +10,8 @@ import signal
 import sqlite3
 import sys
 import tempfile
-from contextlib import contextmanager
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -19,24 +19,57 @@ from typing import Annotated
 
 import typer
 
+from research_pipeline import ollama_fit, onboarding, profile_edit, registry, schedule
+from research_pipeline import serve as serve_mod
+from research_pipeline.backends.claude_code import LOGIN_HINT, find_claude, logged_in, resolve_model
 from research_pipeline.collect import run_collect
-from research_pipeline.db import SchemaTooNewError, list_shelf_items, clear_skip, get_summary, record_skip, UnknownPaperError, current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, papers_by_ids, count_missing_summary, start_run
+from research_pipeline.db import (
+    SchemaTooNewError,
+    UnknownPaperError,
+    clear_skip,
+    count_missing_summary,
+    current_votes,
+    finish_run,
+    get_paper,
+    get_summary,
+    list_runs,
+    list_saved,
+    list_shelf_items,
+    open_db,
+    papers_by_ids,
+    papers_given_up_on,
+    papers_to_summarize,
+    previous_run_unfinished,
+    record_skip,
+    record_vote,
+    set_saved,
+    start_run,
+)
 from research_pipeline.digest import render_summary, write_digest
-from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
+from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
+from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, run_eval, save_grade, ungraded
+from research_pipeline.evaluate import report as eval_report
 from research_pipeline.fulltext import fetch_fulltext
-from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, has_gold, load_gold, remove_fact, remove_gold
-from research_pipeline.backends.claude_code import find_claude, logged_in, resolve_model, LOGIN_HINT
+from research_pipeline.gold import (
+    GOLD_TARGET,
+    GoldPaper,
+    add_fact,
+    add_gold,
+    edit_fact,
+    has_gold,
+    load_gold,
+    remove_fact,
+    remove_gold,
+)
 from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
 from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
-from research_pipeline.review import later_queue, queue_progress, review_queue
-from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
-from research_pipeline.run_lock import RunLocked, run_lock
-from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline import ollama_fit, onboarding, profile_edit, registry, schedule, serve as serve_mod
+from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
+from research_pipeline.review import later_queue, queue_progress, review_queue
+from research_pipeline.run_lock import RunLocked, run_lock
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
-from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
+from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.summarize import run_summarize

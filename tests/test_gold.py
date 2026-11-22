@@ -1,13 +1,22 @@
 import os
 
 import pytest
+from fakes import StubArxiv, paper
 from typer.testing import CliRunner
 
 from research_pipeline import cli
-from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, load_gold, remove_fact, remove_gold
+from research_pipeline.gold import (
+    GOLD_TARGET,
+    GoldPaper,
+    add_fact,
+    add_gold,
+    edit_fact,
+    load_gold,
+    remove_fact,
+    remove_gold,
+)
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import ConfigError, init_vault
-from fakes import StubArxiv, paper
 
 runner = CliRunner()
 

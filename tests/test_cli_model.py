@@ -4,10 +4,10 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+from conftest import FakeEmbedder
 from ruamel.yaml import YAML
 from typer.testing import CliRunner
 
-from conftest import FakeEmbedder
 from research_pipeline import cli, profile_edit, registry
 from research_pipeline.backends import claude_code
 from research_pipeline.cli import Pipeline
@@ -180,8 +180,8 @@ def test_suggest_announces_non_local_backend(vault, monkeypatch):
     monkeypatch.setattr(cli, "_onboarding_llm", lambda config: llm)
     seen = []
 
-    def propose(l, description):
-        seen.append(l)
+    def propose(llm, description):
+        seen.append(llm)
         raise LlmError("stop here")
 
     monkeypatch.setattr(cli.onboarding, "propose", propose)
@@ -247,7 +247,7 @@ def test_collect_reports_startup_errors(vault, monkeypatch):
 
 
 def test_old_config_without_effort_key_behaves_as_low(vault):
-    text = "\n".join(l for l in (vault / "config.yaml").read_text().splitlines() if not l.startswith("llm_effort"))
+    text = "\n".join(ln for ln in (vault / "config.yaml").read_text().splitlines() if not ln.startswith("llm_effort"))
     (vault / "config.yaml").write_text(text + "\n")
     assert load_config(vault / "config.yaml").llm_effort == "low"
 
@@ -298,7 +298,6 @@ def test_claude_code_factory_passes_effort(vault, monkeypatch):
 
 
 def test_ollama_backend_ignores_effort(vault, monkeypatch):
-    seen = {}
     monkeypatch.setattr(registry.ollama_fit, "resolve", lambda *a, **k: SimpleNamespace(model="m", num_ctx=8192))
     cfg = load_config(vault / "config.yaml").model_copy(update={"llm_effort": "high"})
     client = registry.make_ollama(cfg, vault, lambda s: None)

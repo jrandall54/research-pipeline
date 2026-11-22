@@ -1,7 +1,11 @@
 from datetime import date
 
 from research_pipeline.db import (
-    mark_in_digest, open_db, record_skip, record_vote, upsert_paper,
+    mark_in_digest,
+    open_db,
+    record_skip,
+    record_vote,
+    upsert_paper,
 )
 from research_pipeline.models import PaperMeta
 from research_pipeline.review import later_queue, queue_progress, review_queue

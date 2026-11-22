@@ -110,9 +110,10 @@ def test_other_days_papers_not_included(conn, tmp_path):
 
 
 # ---- summaries in the digest (Task 4) ----
+from conftest import critique, summary  # noqa: E402
+
 from research_pipeline.db import save_summary  # noqa: E402
 from research_pipeline.summarize import PaperSummary  # noqa: E402
-from conftest import critique, summary  # noqa: E402
 
 
 def with_summary(conn, pid, basis="full_text", unverified=(), status=Status.summarized):

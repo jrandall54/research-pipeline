@@ -1,7 +1,7 @@
 import pytest
+from conftest import FakeEmbedder
 from typer.testing import CliRunner
 
-from conftest import FakeEmbedder
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
 from research_pipeline.db import list_shelf_items, open_db

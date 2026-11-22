@@ -4,7 +4,6 @@ Results live in `<vault>/eval/YYYY-MM-DD.json` (entries and grades) with a reada
 `YYYY-MM-DD.md` beside it. See docs/guide/evaluation.md.
 """
 
-import json
 import os
 import tempfile
 from collections.abc import Callable
@@ -17,7 +16,7 @@ from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.gold import GoldPaper, load_gold
 from research_pipeline.llm import LLM
 from research_pipeline.models import Section
-from research_pipeline.summarize import Claim, PaperSummary, claims, summarize_paper
+from research_pipeline.summarize import Claim, PaperSummary, summarize_paper
 from research_pipeline.vault import ConfigError
 
 PASS_MARK = 0.9

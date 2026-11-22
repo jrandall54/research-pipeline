@@ -82,8 +82,9 @@ def test_delete_name_with_like_wildcards(tmp_path):
 
 
 def test_hash_in_item_name_does_not_collide(tmp_path):
-    from research_pipeline.rank import build_shelf_vectors
     from conftest import FakeEmbedder
+
+    from research_pipeline.rank import build_shelf_vectors
 
     conn = open_db(tmp_path / "v.sqlite")
     emb = FakeEmbedder()

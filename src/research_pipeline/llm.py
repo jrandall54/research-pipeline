@@ -95,7 +95,7 @@ class OllamaClient:
 
     def generate(self, system: str, user: str, schema: type[T]) -> T:
         error: ValidationError | ValueError | None = None
-        for attempt in range(2):
+        for _attempt in range(2):
             content_user = user
             if error is not None:
                 content_user = (

@@ -86,7 +86,7 @@ def test_vote_ambiguous_prompts(vault):
 
 
 def test_vote_ambiguous_cancel_writes_nothing(vault):
-    res = run(vault, "vote", "fuzzing", "up", input="0\n")
+    run(vault, "vote", "fuzzing", "up", input="0\n")
     assert votes(vault) == []
 
 

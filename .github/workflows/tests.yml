@@ -20,4 +20,5 @@ jobs:
       - run: uv python install 3.12
       # The offline suite fakes the embedder and datasette, so no extras are needed.
       - run: uv sync
+      - run: uv run ruff check .
       - run: uv run pytest -q

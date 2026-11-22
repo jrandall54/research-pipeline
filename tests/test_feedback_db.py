@@ -3,7 +3,14 @@ import sqlite3
 import pytest
 
 from research_pipeline.db import (
-    SCHEMA_VERSION, UnknownPaperError, current_votes, is_saved, list_saved, open_db, record_vote, set_saved,
+    SCHEMA_VERSION,
+    UnknownPaperError,
+    current_votes,
+    is_saved,
+    list_saved,
+    open_db,
+    record_vote,
+    set_saved,
     upsert_paper,
 )
 from research_pipeline.models import PaperMeta

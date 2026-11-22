@@ -130,3 +130,85 @@ def test_suggest_llm_down_changes_nothing(vault, monkeypatch):
     assert result.exit_code == 0
     assert "Local model unavailable; add topics by hand with `rpipe profile add-topic`" in result.output
     assert (vault / "profile.yaml").read_text() == before
+
+
+# --- seed matching: the anti-hallucination gate ---------------------------------
+
+TITLE = "Universal and Transferable Adversarial Attacks on Aligned Language Models"
+
+
+def match(query, *titles):
+    stub = StubArxiv(by_title=[paper(pid=f"2307.{i:05d}", title=t) for i, t in enumerate(titles, 1)])
+    return resolve_seeds([query], stub)[0][1]
+
+
+def test_match_ignores_case_punctuation_hyphen_colon():
+    assert match("universal & TRANSFERABLE adversarial-attacks: aligned language models!", TITLE)
+
+
+def test_match_query_missing_subtitle_passes():
+    assert match("Universal and Transferable Adversarial Attacks", TITLE)
+
+
+def test_overlap_boundary_just_below_and_above():
+    # 5 content words in the query; the arXiv title holds 3 (0.6, accepted) or 2 (0.4, dropped)
+    assert match("alpha beta gamma delta epsilon", "alpha beta gamma zeta eta") is not None
+    assert match("alpha beta gamma delta epsilon", "alpha beta zeta eta theta") is None
+    # 7 content words: 4 shared = 0.571 dropped, 5 shared = 0.714 accepted
+    q = "alpha beta gamma delta epsilon zeta eta"
+    assert match(q, "alpha beta gamma delta theta iota") is None
+    assert match(q, "alpha beta gamma delta epsilon iota") is not None
+
+
+def test_stopword_heavy_invented_title_dropped():
+    assert match("On the Security of the Agents in the Wild", "On the Origin of the Species in the Wild") is None
+
+
+def test_first_candidate_fails_later_one_passes():
+    got = match("Universal Transferable Adversarial Attacks", "Cooking with graphs", TITLE)
+    assert got.title == TITLE
+
+
+def test_one_content_word_query_dropped():
+    assert match("Attention", "Attention") is None
+    assert match("The Attention", "Attention Is All You Need") is None
+
+
+# --- description, topic hygiene --------------------------------------------------
+
+
+def test_short_description_checked_before_model_is_touched(vault, monkeypatch):
+    def boom(config):
+        raise AssertionError("model must not be resolved")
+
+    monkeypatch.setattr(cli, "_onboarding_llm", boom)
+    result = suggest(vault, "short")
+    assert result.exit_code == 1
+    assert "at least 20 characters" in result.output
+
+
+def test_topics_are_capped_and_control_characters_stripped():
+    evil = "good\x1b[31m topic\x07" + "x" * 200
+    result = propose(FakeLLM([ProposedProfile(topics=[evil, "\x1b\x07"], seed_queries=[])]), DESC)
+    assert len(result.topics) == 1  # the all-control one is dropped
+    t = result.topics[0]
+    assert len(t) <= 120 and "\x1b" not in t and "\x07" not in t and t.startswith("good")
+
+
+def test_all_topics_deduped_message(vault, monkeypatch):
+    use_llm(monkeypatch, FakeLLM([ProposedProfile(topics=["Mine"], seed_queries=[])]))
+    result = suggest(vault, DESC, "--yes")
+    assert result.exit_code == 0
+    assert "All proposed topics are already in your profile." in result.output
+
+
+def test_topic_equal_to_template_example_still_offered(tmp_path, monkeypatch):
+    from research_pipeline.vault import DEFAULT_TOPICS
+
+    path = tmp_path / "t"
+    init_vault(path)
+    ex = DEFAULT_TOPICS[0]
+    use_llm(monkeypatch, FakeLLM([ProposedProfile(topics=[ex, "brand new"], seed_queries=[])]))
+    result = suggest(path, DESC, "--yes")
+    assert result.exit_code == 0, result.output
+    assert load_profile(path / "profile.yaml").topics == [ex, "brand new"]

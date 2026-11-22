@@ -16,17 +16,6 @@ def tty(monkeypatch):
     monkeypatch.setattr(cli, "_is_tty", lambda: True)
 
 
-@pytest.fixture(autouse=True)
-def no_real_model(monkeypatch):
-    """Never reach a real Ollama from the wizard tests."""
-    from research_pipeline.llm import LlmError
-
-    def down(config):
-        raise LlmError("no model in tests")
-
-    monkeypatch.setattr(cli, "_onboarding_llm", down)
-
-
 def init(tmp_path, input, describe=False):
     """Run `rpipe init`. The wizard's first question is the optional description: Enter skips
     it, so unless `describe` is set a blank line is prepended to the scripted answers."""
@@ -304,4 +293,34 @@ def test_wizard_llm_down_falls_through_to_manual(tmp_path, tty, monkeypatch):
     result = init(tmp_path, "I study security of LLM agents and prompt injection.\nhand topic\n\n\n\n", describe=True)
     assert result.exit_code == 0, result.output
     assert "Local model unavailable" in result.output
+    assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["hand topic"]
+
+
+def test_wizard_ctrl_c_at_description_prompt(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+
+    def boom(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.typer, "prompt", boom)
+    result = init(tmp_path, "", describe=True)
+    assert result.exit_code == 130 and ABORT in result.output
+
+
+def test_wizard_eof_at_description_prompt(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    result = init(tmp_path, "", describe=True)
+    assert result.exit_code == 130 and ABORT in result.output
+
+
+def test_wizard_short_description_skipped_without_model_call(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+
+    def boom(config):
+        raise AssertionError("model must not be resolved")
+
+    monkeypatch.setattr(cli, "_onboarding_llm", boom)
+    result = init(tmp_path, "too short\nhand topic\n\n\n\n", describe=True)
+    assert result.exit_code == 0, result.output
+    assert "at least 20 characters" in result.output
     assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["hand topic"]

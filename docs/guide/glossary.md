@@ -152,4 +152,6 @@
 
 **Onboarding (guided suggestions)** — asking the local model to propose topics and seed-paper titles from a short description of your research, so a new user does not start from a blank profile. Every proposal needs your approval, and a proposed paper title is kept only if it resolves to a real paper on arXiv. See `profile.md`.
 
+**Content words** — the words of a title left after dropping filler words (the, of, on, in ...). Onboarding compares titles on content words only, so filler cannot make an invented title look real. See `profile.md`.
+
 **Hallucinated title** — a paper title a language model makes up that sounds real but does not exist. Onboarding drops any proposed title that arXiv search cannot match. See `profile.md`.

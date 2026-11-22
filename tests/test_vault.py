@@ -91,6 +91,7 @@ def test_cli_init_via_typer_runner(tmp_path):
 
 def test_cli_init_tty_prompts(tmp_path, monkeypatch):
     monkeypatch.setattr("research_pipeline.cli._is_tty", lambda: True)
+    monkeypatch.setattr("research_pipeline.cli.make_arxiv", lambda config: object())
     result = CliRunner().invoke(
         app,
         ["init", "--vault", str(tmp_path / "v")],

@@ -580,7 +580,9 @@ def _onboarding_llm(config: Config) -> LLM:
 def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> bool:
     """Propose topics and seeds from `description`, adding each one the user approves.
 
-    Returns False (changing nothing) if the local model is unavailable."""
+    Returns False (changing nothing) if the local model is unavailable. Raises ValueError for
+    a too-short description, before any model call."""
+    description = onboarding.check_description(description)
     try:
         proposal = onboarding.propose(_onboarding_llm(config), description)
     except (LlmError, OSError) as exc:
@@ -588,21 +590,25 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
         return False
     current = load_profile(vault / "profile.yaml").topics
     was_template = [profile_edit.normalise_text(t).casefold() for t in current] == [t.casefold() for t in DEFAULT_TOPICS]
-    existing = {profile_edit.normalise_text(t).casefold() for t in current}
+    # While the topics are only the template examples, a proposal equal to an example is still offered.
+    existing = set() if was_template else {profile_edit.normalise_text(t).casefold() for t in current}
     topics = []
     for t in proposal.topics:
         key = profile_edit.normalise_text(t).casefold()
         if key and key not in existing:
             existing.add(key)
             topics.append(profile_edit.normalise_text(t))
-    typer.echo("Proposed topics:\n" + _numbered(topics))
+    if topics:
+        typer.echo("Proposed topics:\n" + _numbered(topics))
+    else:
+        typer.echo("All proposed topics are already in your profile.")
     added: set[str] = set()
     for t in topics:
         if yes or typer.confirm(f"Add topic '{t}'?", default=True):
             try:
-                profile_edit.add_topic(vault, t)
+                changed = profile_edit.add_topic(vault, t)
                 added.add(t.casefold())
-                typer.echo(f"Added topic: {t}")
+                typer.echo(f"Added topic: {t}" if changed else f"{t} is already in your profile.")
             except (ValueError, ConfigError, OSError) as exc:
                 typer.echo(f"Skipped: {exc}")
     if was_template and added:  # your own topics replace the template examples, as in the wizard

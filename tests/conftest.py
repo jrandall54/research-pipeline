@@ -87,3 +87,20 @@ class AlwaysSummary(FakeLLM):
     def generate(self, system, user, schema):
         self.calls.append((system, user))
         return summary() if schema.__name__ == "Summary" else critique()
+
+
+@pytest.fixture(autouse=True)
+def no_real_model_or_arxiv(monkeypatch):
+    """Never reach a real Ollama or arXiv: onboarding finds the model unavailable and any
+    unstubbed arXiv client fails loudly. Tests that need them monkeypatch these again."""
+    from research_pipeline import cli
+    from research_pipeline.llm import LlmError
+
+    def down(config):
+        raise LlmError("no model in tests")
+
+    def no_arxiv(config):
+        raise AssertionError("test reached the real arXiv: stub cli.make_arxiv")
+
+    monkeypatch.setattr(cli, "_onboarding_llm", down)
+    monkeypatch.setattr(cli, "make_arxiv", no_arxiv)

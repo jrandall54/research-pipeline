@@ -82,3 +82,9 @@
 - [ ] **Step 4: Run the full suite**; green.
 - [ ] **Step 5: Docs.** Write `docs/guide/review.md` in the required shape: worked example with a short transcript, the queue rules (oldest digest first, active-vote rule, why skips are their own table and never affect ranking), and the non-terminal refusal. Update the other pages listed above and the handoff.
 - [ ] **Step 6: Commit** `feat: rpipe review loop with a review-later list` with the two trailer lines the session requires.
+
+### Task 2 addendum (carried from Task 1 review, Minor)
+
+- `docs/guide/data-model.md` "Foreign keys and paper ids": add `skips` to the list of FK tables and note `record_skip` raises `UnknownPaperError`.
+- `tests/test_review.py`: pin that a paper with NULL `triage_score` in a digest sorts last within its day (add a test).
+- Document in `docs/guide/review.md` that `digest_date` stays set when a paper later falls back to `triaged` on a new version, so it stays eligible for the queue (intended).

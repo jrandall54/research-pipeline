@@ -72,6 +72,11 @@ def test_declining_pull_saves_choice_but_not_ready(vault, monkeypatch):
     assert pulled == [] and cfg(vault).llm_backend == "ollama"
     assert result.exit_code == 1
     assert "Not ready yet: model not installed" in result.output and "rpipe model setup" in result.output
+    lines = result.output.splitlines()
+    assert "Not ready yet: model not installed" in lines
+    assert "Fix it, then run rpipe model setup" in lines
+    assert "\\n" not in result.output
+    assert "" in lines and "Recommended: ollama" in lines
 
 
 def test_no_ollama_prints_install_command_and_rechecks(vault, monkeypatch):

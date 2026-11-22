@@ -1471,13 +1471,13 @@ def _wizard_backend(vault: Path) -> bool:
     info = detect_machine(config)
     _describe_machine(info)
     rec = recommend(info, load_model_table())
-    typer.echo(f"\\nRecommended: {rec.backend}")
+    typer.echo(f"\nRecommended: {rec.backend}")
     for reason in rec.reasons:
         typer.echo(f"  - {reason}")
     options = [rec.backend, *rec.alternatives]
     labels = {"ollama": "a model on this computer (Ollama)", "claude-code": "Claude Code (your login)",
               "none": "no summaries (abstracts only)"}
-    typer.echo("\\nChoose how summaries are written:")
+    typer.echo("\nChoose how summaries are written:")
     for i, name in enumerate(options, 1):
         typer.echo(f"  {i}. {labels.get(name, name)}" + ("  [recommended]" if i == 1 else ""))
     while True:
@@ -1506,7 +1506,7 @@ def _wizard_backend(vault: Path) -> bool:
         llm = build_llm(config, vault, log=_progress)
         line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
     except (LlmError, OSError, ValueError) as exc:
-        typer.echo(f"Not ready yet: {exc}\\nFix it, then run rpipe model setup")
+        typer.echo(f"Not ready yet: {exc}\nFix it, then run rpipe model setup")
         return False
     typer.echo(f"Ready: {line}")
     return True
@@ -1521,7 +1521,7 @@ def model_setup(vault: VaultOption = None) -> None:
     try:
         ready = _wizard_backend(ctx.vault)
     except (typer.Abort, KeyboardInterrupt, EOFError):
-        typer.echo("\\nStopped. Nothing further was changed; run rpipe model setup to continue.")
+        typer.echo("\nStopped. Nothing further was changed; run rpipe model setup to continue.")
         raise typer.Exit(code=130) from None
     if not ready:
         raise typer.Exit(code=1)

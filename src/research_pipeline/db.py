@@ -514,12 +514,15 @@ def shelf_embedding_id(name: str, idx: int) -> str:
 
 
 def _delete_shelf_embeddings(conn: sqlite3.Connection, name: str) -> None:
-    # Escape LIKE wildcards in the name so "a_b" cannot match "axb" and "a" cannot match "ab".
-    escaped = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    conn.execute(
-        "DELETE FROM embeddings WHERE item_id LIKE ? ESCAPE '\\'",
-        (f"shelf:{escaped}#%",),
-    )
+    # Only this item's own chunk ids: "shelf:<name>#<digits>". A bare prefix match would also
+    # hit item "notes#2" (ids "shelf:notes#2#0") when deleting item "notes".
+    prefix = f"shelf:{name}#"
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    rows = conn.execute(
+        "SELECT item_id FROM embeddings WHERE item_id LIKE ? ESCAPE '\\'", (escaped + "%",)
+    ).fetchall()
+    own = [r[0] for r in rows if r[0].startswith(prefix) and r[0][len(prefix):].isdigit()]
+    conn.executemany("DELETE FROM embeddings WHERE item_id = ?", [(i,) for i in own])
 
 
 def upsert_shelf_item(

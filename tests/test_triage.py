@@ -161,3 +161,56 @@ def test_triage_without_my_work_ignores_shelf(conn, embedder):
     run_triage(conn, embedder, PROFILE, SEEDS)
     assert not any("shelf" in r for p in ("2501.00001", "2501.00002")
                    for r in json.loads(get_paper(conn, p)["triage_reasons"]))
+
+
+def _shelved_run(conn, embedder, my_work):
+    fill(conn)
+    run_triage(conn, embedder, PROFILE.model_copy(update={"top_n": 4}), SEEDS, my_work=my_work)
+    assert "near your shelf: cooking_pasta" in json.loads(get_paper(conn, "2501.00002")["triage_reasons"])
+    conn.execute("UPDATE papers SET status = 'new', triage_score = NULL, triage_reasons = NULL")
+    conn.commit()
+
+
+def _no_shelf_effect(conn, embedder, my_work, baseline):
+    run_triage(conn, embedder, PROFILE.model_copy(update={"top_n": 4}), SEEDS, my_work=my_work)
+    for p in ("2501.00001", "2501.00002", "2501.00003", "2501.00004"):
+        row = get_paper(conn, p)
+        assert not any("shelf" in r for r in json.loads(row["triage_reasons"]))
+        assert row["triage_score"] == pytest.approx(baseline[p])
+
+
+def _baseline(tmp_path, embedder):
+    c = open_db(tmp_path / "base.db")
+    fill(c)
+    run_triage(c, embedder, PROFILE.model_copy(update={"top_n": 4}), SEEDS)
+    out = {p: get_paper(c, p)["triage_score"] for p in ("2501.00001", "2501.00002", "2501.00003", "2501.00004")}
+    c.close()
+    return out
+
+
+def test_removed_shelf_note_no_longer_boosts(conn, embedder, tmp_path):
+    from research_pipeline.shelf import remove_from_shelf
+
+    my_work = tmp_path / "my_work"
+    my_work.mkdir()
+    (my_work / "cooking_pasta.md").write_text("tomato basil\n", encoding="utf-8")
+    _shelved_run(conn, embedder, my_work)
+    remove_from_shelf(conn, my_work, "cooking_pasta")
+    _no_shelf_effect(conn, embedder, my_work, _baseline(tmp_path, embedder))
+
+
+def test_hand_deleted_shelf_note_no_longer_boosts(conn, embedder, tmp_path):
+    my_work = tmp_path / "my_work"
+    my_work.mkdir()
+    (my_work / "cooking_pasta.md").write_text("tomato basil\n", encoding="utf-8")
+    _shelved_run(conn, embedder, my_work)
+    (my_work / "cooking_pasta.md").unlink()
+    _no_shelf_effect(conn, embedder, my_work, _baseline(tmp_path, embedder))
+
+
+def test_shelf_syncs_even_when_no_new_papers(conn, embedder, tmp_path):
+    my_work = tmp_path / "my_work"
+    my_work.mkdir()
+    (my_work / "idea.md").write_text("tomato basil sauce experiments\n", encoding="utf-8")
+    assert run_triage(conn, embedder, PROFILE, SEEDS, my_work=my_work)["triaged"] == 0
+    assert [r["item_id"] for r in conn.execute("SELECT item_id FROM embeddings WHERE item_id LIKE 'shelf:%'")]

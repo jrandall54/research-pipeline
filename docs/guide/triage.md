@@ -118,9 +118,9 @@ Worked example: you up-voted paper L 60 days ago (weight 0.5^(60/60) = 0.5) and 
 
 ### Your shelf
 
-At the start of triage, `run_triage` is given the vault's `my_work/` folder and calls `sync_shelf` (`shelf.py`), which embeds any new or edited notes (unchanged notes are not re-embedded). `rank.build_shelf_vectors` then loads every chunk's stored vector, and `score_papers` adds `0.20 ×` the cosine to the nearest chunk. With an empty shelf, or no folder, scores are exactly what they were before. `rpipe run` and `rpipe triage` both pass the folder.
+`run_triage` is given the vault's `my_work/` folder and calls `sync_shelf` (`shelf.py`) as its very first step, before it even checks for new papers (so the index follows your files on quiet nights too). Sync embeds any new or edited notes (unchanged notes are not re-embedded). `rank.build_shelf_vectors` then loads every chunk's stored vector, and `score_papers` adds `0.20 ×` the cosine to the nearest chunk. With an empty shelf, or no folder, scores are exactly what they were before. `rpipe run` and `rpipe triage` both pass the folder.
 
-Worked example: a note `cooking_pasta.md` holds "tomato basil". A paper whose title and abstract are "Cooking pasta / tomato basil" has cosine 1.0 to that chunk, gains 0.20 and gets the reason `near your shelf: cooking_pasta`. A paper at cosine 0.55 gains 0.11 and no reason (below the 0.70 floor).
+Worked example: a note `cooking_pasta.md` holds "tomato basil". A paper whose title and abstract are "Cooking pasta / tomato basil" has cosine 1.0 to that chunk (idealised: the text is nearly identical; a real model scores even close matches lower, typically 0.7 to 0.9), gains 0.20 and gets the reason `near your shelf: cooking_pasta`. A paper at cosine 0.55 gains 0.11 and no reason (below the 0.70 floor).
 
 The 0.70 reason floor is borrowed from the feedback floor and has not been tuned separately for note chunks. A note chunk compared with an abstract may score lower than paper-to-paper, so the reason may fire rarely on short or informal notes; the boost itself applies at any cosine.
 

@@ -136,7 +136,11 @@ def sync_shelf(conn: sqlite3.Connection, my_work: Path, embedder: Embedder) -> S
     files, res.ignored = _shelf_files(my_work)
     existing = {r["name"]: r for r in db.list_shelf_items(conn)}
     for name, path in files.items():
-        data = path.read_bytes()
+        try:
+            data = path.read_bytes()
+        except OSError as exc:  # unreadable or vanished mid-sync: skip it, keep the rest going
+            res.ignored.append(f"{path.name} (could not be read: {exc.strerror or exc})")
+            continue
         digest = hashlib.sha256(data).hexdigest()
         row = existing.get(name)
         if (
@@ -170,14 +174,22 @@ def sync_shelf(conn: sqlite3.Connection, my_work: Path, embedder: Embedder) -> S
 
 
 def _taken_stems(my_work: Path) -> set[str]:
-    return {p.stem for p in my_work.iterdir() if p.is_file() and p.suffix.lower() in EXTENSIONS}
+    return {p.stem.casefold() for p in my_work.iterdir() if p.is_file() and p.suffix.lower() in EXTENSIONS}
 
 
-def _unique(stem: str, taken: set[str]) -> str:
-    if stem not in taken:
+def _unique(stem: str, taken: set[str], folder: Path | None = None, suffix: str = "") -> str:
+    """First of ``stem``, ``stem-2``, ... whose casefolded name is not in ``taken``.
+
+    With ``folder``, also skip any name whose file already exists there, so a case-insensitive
+    filesystem (where ``Idea.md`` and ``idea.md`` are one file) can never be overwritten.
+    """
+    def free(cand: str) -> bool:
+        return cand.casefold() not in taken and not (folder is not None and (folder / f"{cand}{suffix}").exists())
+
+    if free(stem):
         return stem
     n = 2
-    while f"{stem}-{n}" in taken:
+    while not free(f"{stem}-{n}"):
         n += 1
     return f"{stem}-{n}"
 
@@ -200,31 +212,47 @@ def add_to_shelf(conn: sqlite3.Connection, my_work: Path, embedder: Embedder, so
                 f"{src.name}: the shelf takes .md and .txt files only. Convert it to text, "
                 "or paste the text with `rpipe shelf add \"your note\"`."
             )
-        name = _unique(src.stem, _taken_stems(my_work))
-        shutil.copyfile(src, my_work / f"{name}{src.suffix.lower()}")
+        suffix = src.suffix.lower()
+        name = _unique(src.stem, _taken_stems(my_work), my_work, suffix)
+        with open(src, "rb") as fin, open(my_work / f"{name}{suffix}", "xb") as fout:  # "x": never overwrite
+            shutil.copyfileobj(fin, fout)
     else:
         if not source.strip():
             raise ValueError("Nothing to add. Give a file path or the note text: `rpipe shelf add \"your note\"`.")
         slug = "-".join(re.findall(r"[a-z0-9]+", source.lower())[:6]) or "note"
-        name = _unique(slug, _taken_stems(my_work))
-        (my_work / f"{name}.md").write_text(source.strip() + "\n", encoding="utf-8")
+        name = _unique(slug, _taken_stems(my_work), my_work, ".md")
+        with open(my_work / f"{name}.md", "x", encoding="utf-8") as fh:  # "x": never overwrite
+            fh.write(source.strip() + "\n")
     sync_shelf(conn, my_work, embedder)
     return name
 
 
-def remove_from_shelf(conn: sqlite3.Connection, my_work: Path, name: str) -> None:
-    """Move the item's file to ``my_work/.removed/`` (never deleting it) and drop it from the index."""
+def remove_from_shelf(conn: sqlite3.Connection, my_work: Path, name: str) -> list[str]:
+    """Move every file of the item to ``my_work/.removed/`` (never deleting) and drop it from the index.
+
+    Returns the names the files now have in ``.removed/``. All ``.md``/``.txt`` files with that
+    stem move, otherwise a leftover ``a.txt`` would come back as item ``a`` at the next sync.
+    """
     files, _ = _shelf_files(my_work)
     known = {r["name"] for r in db.list_shelf_items(conn)}
     if name not in files and name not in known:
         matches = difflib.get_close_matches(name, sorted(files.keys() | known), n=3)
         hint = f" Close matches: {', '.join(matches)}." if matches else ""
         raise KeyError(f"No shelf item named '{name}'.{hint} List them with `rpipe shelf list`.")
-    path = files.get(name)
-    if path is not None:
-        trash = my_work / ".removed"
-        trash.mkdir(exist_ok=True)
-        taken = {p.stem for p in trash.iterdir()}
-        dest = _unique(path.stem, taken)
-        shutil.move(str(path), trash / f"{dest}{path.suffix.lower()}")
+    moved: list[str] = []
+    if my_work.is_dir():
+        paths = [
+            p for p in sorted(my_work.iterdir())
+            if p.is_file() and not p.name.startswith(".") and p.stem == name and p.suffix.lower() in EXTENSIONS
+        ]
+        if paths:
+            trash = my_work / ".removed"
+            trash.mkdir(exist_ok=True)
+            for path in paths:
+                suffix = path.suffix.lower()
+                taken = {p.stem.casefold() for p in trash.iterdir() if p.suffix.lower() == suffix}
+                dest = _unique(path.stem, taken, trash, suffix)
+                shutil.move(str(path), trash / f"{dest}{suffix}")
+                moved.append(f"{dest}{suffix}")
     db.delete_shelf_item(conn, name)
+    return moved

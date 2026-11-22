@@ -79,3 +79,25 @@ def test_delete_name_with_like_wildcards(tmp_path):
     _emb(conn, "shelf:axb#0")
     delete_shelf_item(conn, "a_b")
     assert _emb_ids(conn) == ["shelf:axb#0"]
+
+
+def test_hash_in_item_name_does_not_collide(tmp_path):
+    from research_pipeline.rank import build_shelf_vectors
+    from conftest import FakeEmbedder
+
+    conn = open_db(tmp_path / "v.sqlite")
+    emb = FakeEmbedder()
+    for name in ("notes", "notes#2"):
+        upsert_shelf_item(conn, name, "h", ["x", "y"])
+        for i in range(2):
+            conn.execute(
+                "INSERT INTO embeddings (item_id, embedding_model, vector, dim) VALUES (?, ?, ?, 1)",
+                (shelf_embedding_id(name, i), emb.model_name, b"\x00\x00\x80\x3f"),
+            )
+    conn.commit()
+    assert sorted(build_shelf_vectors(conn, emb).names) == ["notes", "notes", "notes#2", "notes#2"]
+    upsert_shelf_item(conn, "notes", "h2", ["z"])  # re-index drops only notes' own vectors
+    assert "shelf:notes#2#0" in _emb_ids(conn) and "shelf:notes#2#1" in _emb_ids(conn)
+    assert "shelf:notes#0" not in _emb_ids(conn)
+    delete_shelf_item(conn, "notes")
+    assert _emb_ids(conn) == ["shelf:notes#2#0", "shelf:notes#2#1"]

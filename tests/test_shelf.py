@@ -239,3 +239,77 @@ def test_shelf_is_local_only():
     banned = ("research_pipeline.llm", "requests", "httpx", "urllib", "http", "aiohttp")
     for n in names:
         assert not any(n == b or n.startswith(b + ".") for b in banned), n
+
+
+# ---- fix wave: case collisions, unreadable files, multi-extension remove ----
+
+
+class _Emb:
+    model_name = "fake-bow"
+
+    def embed(self, texts):
+        import numpy as np
+
+        return np.ones((len(texts), 4), dtype=np.float32)
+
+
+def test_add_note_does_not_overwrite_case_variant_file(conn, my_work):
+    mine = my_work / "Fuzzing-Ideas.md"
+    mine.write_text("my precious text\n", encoding="utf-8")
+    name = shelf.add_to_shelf(conn, my_work, _Emb(), "fuzzing ideas")
+    assert name != "fuzzing-ideas"
+    assert mine.read_text(encoding="utf-8") == "my precious text\n"
+    assert (my_work / f"{name}.md").read_text(encoding="utf-8") == "fuzzing ideas\n"
+
+
+def test_add_file_does_not_overwrite_case_variant_file(conn, my_work, tmp_path):
+    mine = my_work / "Idea.md"
+    mine.write_text("mine\n", encoding="utf-8")
+    src = tmp_path / "idea.md"
+    src.write_text("other\n", encoding="utf-8")
+    name = shelf.add_to_shelf(conn, my_work, _Emb(), str(src))
+    assert name != "idea"
+    assert mine.read_text(encoding="utf-8") == "mine\n"
+    assert (my_work / f"{name}.md").read_text(encoding="utf-8") == "other\n"
+
+
+def test_remove_does_not_overwrite_case_variant_in_trash(conn, my_work):
+    (my_work / ".removed").mkdir()
+    old = my_work / ".removed" / "Idea.md"
+    old.write_text("earlier\n", encoding="utf-8")
+    (my_work / "idea.md").write_text("later\n", encoding="utf-8")
+    sync_shelf(conn, my_work, _Emb())
+    shelf.remove_from_shelf(conn, my_work, "idea")
+    assert old.read_text(encoding="utf-8") == "earlier\n"
+    moved = [p for p in (my_work / ".removed").iterdir() if p != old]
+    assert len(moved) == 1 and moved[0].read_text(encoding="utf-8") == "later\n"
+    assert moved[0].name.casefold() != "idea.md"
+
+
+def test_sync_skips_unreadable_file_and_continues(conn, my_work, monkeypatch):
+    (my_work / "good.md").write_text("fine\n", encoding="utf-8")
+    bad = my_work / "bad.md"
+    bad.write_text("nope\n", encoding="utf-8")
+    real = Path.read_bytes
+
+    def fake(self):
+        if self.name == "bad.md":
+            raise PermissionError("denied")
+        return real(self)
+
+    monkeypatch.setattr(Path, "read_bytes", fake)
+    res = sync_shelf(conn, my_work, _Emb())
+    assert res.added == ["good"]
+    assert any("bad.md" in i and "could not be read" in i for i in res.ignored)
+    assert _names(conn) == ["good"]
+
+
+def test_remove_moves_every_file_with_that_stem(conn, my_work):
+    (my_work / "a.md").write_text("one\n", encoding="utf-8")
+    (my_work / "a.txt").write_text("two\n", encoding="utf-8")
+    sync_shelf(conn, my_work, _Emb())
+    moved = shelf.remove_from_shelf(conn, my_work, "a")
+    assert sorted(moved) == ["a.md", "a.txt"]
+    assert not (my_work / "a.md").exists() and not (my_work / "a.txt").exists()
+    assert sync_shelf(conn, my_work, _Emb()).added == []
+    assert _names(conn) == []

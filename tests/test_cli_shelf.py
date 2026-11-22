@@ -137,3 +137,28 @@ def test_sync_shows_ignored_files(vault):
     assert "Ignored 2" in res.output
     assert "paper.pdf" in res.output and "a.txt" in res.output
     assert ".md and .txt" in res.output
+
+
+def test_remove_reports_every_file_moved(vault):
+    work = vault / "my_work"
+    work.mkdir(exist_ok=True)
+    (work / "a.md").write_text("one\n", encoding="utf-8")
+    (work / "a.txt").write_text("two\n", encoding="utf-8")
+    assert run(vault, "sync").exit_code == 0
+    res = run(vault, "remove", "a")
+    assert res.exit_code == 0, res.output
+    assert "a.md" in res.output and "a.txt" in res.output
+    assert not (work / "a.txt").exists()
+
+
+def test_sync_prints_ignored_reason(vault, monkeypatch):
+    work = vault / "my_work"
+    work.mkdir(exist_ok=True)
+    (work / "bad.md").write_text("x\n", encoding="utf-8")
+    from pathlib import Path
+
+    orig = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda self: (_ for _ in ()).throw(PermissionError(13, "Permission denied")) if self.name == "bad.md" else orig(self))
+    res = run(vault, "sync")
+    assert res.exit_code == 0, res.output
+    assert "bad.md" in res.output and "could not be read" in res.output

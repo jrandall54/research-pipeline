@@ -31,9 +31,11 @@ def run_triage(
 ) -> dict[str, int]:
     """Rank `new` papers; top `profile.top_n` become triaged, the rest skipped.
 
-    With `my_work`, the shelf is synced first (new or edited notes are embedded) and papers near
+    With `my_work`, the shelf is synced first, even when there are no new papers (new or edited notes are embedded) and papers near
     your own notes get a boost.
     """
+    if my_work is not None:
+        sync_shelf(conn, my_work, embedder)  # always, so the index follows your files even on quiet nights
     papers = papers_with_status(conn, Status.new)
     if not papers:
         return {"triaged": 0, "skipped": 0, "embedded": 0}
@@ -66,7 +68,6 @@ def run_triage(
     )
     shelf = None
     if my_work is not None:
-        sync_shelf(conn, my_work, embedder)
         shelf = build_shelf_vectors(conn, embedder)
     ranked = score_papers(papers, paper_vecs, profile, pv, feedback, shelf)
 

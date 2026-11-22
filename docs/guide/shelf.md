@@ -54,9 +54,9 @@ kernel-fuzzing / Related work
 
 A one-line note with no heading gives one chunk, `idea\nTry retrieval for malware triage.`. An empty or whitespace-only file is stored with zero chunks (it is still listed, and does not crash anything).
 
-**Add** (`add_to_shelf`). If the argument is an existing `.md` or `.txt` file it is copied into `my_work/` under its own name; a clash gets `-2`, `-3` ... so nothing is overwritten. Otherwise the argument is note text, saved as `my_work/<slug>.md` where the slug is the first six words, lowercased, letters, digits and hyphens only (`note` if nothing is left), made unique the same way. Empty text, or a file that is not `.md`/`.txt`, raises an error that says what to do. Then sync runs and the item name is returned.
+**Add** (`add_to_shelf`). If the argument is an existing `.md` or `.txt` file it is copied into `my_work/` under its own name; a clash gets `-2`, `-3` ... so nothing is overwritten. Names are compared ignoring case (`Idea.md` and `idea.md` clash, as they are the same file on macOS and Windows), and files are created in exclusive mode, so an existing file is never overwritten whatever the filesystem. Otherwise the argument is note text, saved as `my_work/<slug>.md` where the slug is the first six words, lowercased, letters, digits and hyphens only (`note` if nothing is left), made unique the same way. Empty text, or a file that is not `.md`/`.txt`, raises an error that says what to do. Then sync runs and the item name is returned.
 
-**Remove** (`remove_from_shelf`). The file is moved to `my_work/.removed/` (renamed `-2` ... if that name is taken there), then the item, its chunks and its vectors are deleted. Your file is never deleted; to bring it back, move it out of `.removed/` and run `rpipe shelf sync`. An unknown name raises an error listing the closest names (`difflib.get_close_matches`).
+**Remove** (`remove_from_shelf`). Every `.md`/`.txt` file with that name (so both `a.md` and `a.txt`, otherwise the leftover would come back as item `a` at the next sync) is moved to `my_work/.removed/` (renamed `-2` ... if that name is taken there, ignoring case, so an earlier removal is never overwritten); the names it now has are returned and printed. Then the item, its chunks and its vectors are deleted. Your file is never deleted; to bring it back, move it out of `.removed/` and run `rpipe shelf sync`. An unknown name raises an error listing the closest names (`difflib.get_close_matches`).
 
 ## Why it's built this way
 
@@ -72,7 +72,7 @@ A one-line note with no heading gives one chunk, `idea\nTry retrieval for malwar
 Nobody has to touch files by hand: four `rpipe shelf` commands cover everything.
 
 - `rpipe shelf add <text-or-file>`: save a note (any text) or copy in a `.md`/`.txt` file, then index it.
-- `rpipe shelf list`: show every item with its chunk count and the day it was added.
+- `rpipe shelf list`: show every item with its chunk count and the day it was last indexed (a re-index after an edit refreshes it).
 - `rpipe shelf remove <name>`: move the item's file to `my_work/.removed/` and drop it from the index.
 - `rpipe shelf sync`: re-index after you dropped, edited or deleted files in `my_work/` yourself (the nightly triage also does this).
 
@@ -105,7 +105,7 @@ Removed 'gamma'. The file is in my_work/.removed/ if you want it back.
 Two guards the command line adds on top of `add_to_shelf`:
 
 - **Mistyped paths.** `add_to_shelf` treats anything that is not an existing file as note text. That is wrong for `notes/idea.md` with a typo in the folder: you would get a note whose text is the path. So the command first checks: if the argument is one word (no whitespace) ending `.md` or `.txt`, or names a directory, and is not an existing file, it prints "File not found" and exits with code 1. A note with spaces, like `rewrite the README.md`, is still a note.
-- **Nothing skipped silently.** `sync` prints the `ignored` files (other extensions such as a PDF, or `a.txt` when `a.md` exists, because both would be item `a`) with a one-line reason.
+- **Nothing skipped silently.** `sync` prints the `ignored` files (other extensions such as a PDF, or `a.txt` when `a.md` exists, because both would be item `a`) with a one-line reason. A file that cannot be read (permission denied, or deleted while syncing) is listed the same way, as `name (could not be read: ...)`; it is skipped and the rest of the shelf still syncs, so one bad file cannot stop the nightly run.
 
 An unknown name for `remove` exits with code 1 and lists the closest names. `list` and `remove` do not load the embedding model; `add` and `sync` do.
 

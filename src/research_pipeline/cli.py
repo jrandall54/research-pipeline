@@ -832,12 +832,15 @@ def shelf_remove(
     """Take an item off the shelf (its file is moved to my_work/.removed/, not deleted)."""
     ctx = _open(vault)
     try:
-        remove_from_shelf(ctx.conn, ctx.vault / "my_work", name)
+        moved = remove_from_shelf(ctx.conn, ctx.vault / "my_work", name)
     except KeyError as exc:
         raise _fail(str(exc.args[0])) from exc
     except ValueError as exc:
         raise _fail(str(exc)) from exc
-    typer.echo(f"Removed '{name}'. The file is in my_work/.removed/ if you want it back.")
+    if len(moved) > 1:
+        typer.echo(f"Removed '{name}'. Moved {len(moved)} files to my_work/.removed/: {', '.join(moved)}.")
+    else:
+        typer.echo(f"Removed '{name}'. The file is in my_work/.removed/ if you want it back.")
 
 
 @shelf_app.command("sync")

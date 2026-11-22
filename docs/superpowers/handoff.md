@@ -11,7 +11,8 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
   - `rpipe serve` (Datasette over Tailscale; vote and save forms where you type the paper id).
   - `rpipe profile suggest` and a guided `rpipe init` that propose topics and seeds from a description.
 - Earlier, on `main`: Phase 2 (full text, cited summaries, gold set, eval) and auto model and context (`rpipe model fit|show|check|set|set-url|set-context`).
-- Tests: `uv run pytest -q` gives 563 passing. Docs: `docs/guide/` (new `scheduling.md` and `browsing.md`; `triage`, `data-model`, `digest`, `profile`, `running`, `glossary` updated).
+- Parked-list cleanup (the parked-fixes segment of this branch) is done: `uv run pytest -q` gives 623 passing.
+- Earlier Phase 3 count: 563 passing. Docs: `docs/guide/` (new `scheduling.md` and `browsing.md`; `triage`, `data-model`, `digest`, `profile`, `running`, `glossary` updated).
 
 ## Owner actions not yet done
 - Merge `phase-3-daily-habit` into `main` when happy.
@@ -34,13 +35,22 @@ Phase 3:
 - `rpipe serve` allows only localhost, loopback and Tailscale hosts (allowlist, not blocklist); `datasette` pinned `>=0.65,<1` because 1.0 moved canned queries to `datasette.yaml` (unverified) (`browsing.md`).
 - Votes are append-only; a down vote beats a save of the same paper.
 
+Parked-fixes branch segment:
+- Run lock covers only `rpipe run`; `summarize`, `collect`, `triage`, `eval run`, `model fit` can still overlap a nightly run (parked, see below).
+- `save_summary` provenance stays optional; the digest footer tolerates missing fields.
+- Locked run exits 75; unit file unchanged.
+- Probing deadlines: fit/run/check 900 s, `model show` 10 s, fixed constants.
+- Pinned num_ctx is cached as given; the 8192 floor applies to auto-chosen values only.
+
 From before:
 - A pinned model needs to fit at 8192 only; an auto-chosen one at 16384 or more. `llm_num_ctx` floor is 8192.
 - Summary retries: same-day recovery, cap 3 (`MAX_SUMMARY_TRIES`); a failure left to a later day is not retried.
 - Hidden-text stripping has documented gaps (`fulltext.md`).
 
 ## Parked (not fixed, no owner decision needed yet)
-(none: all parked items are fixed.)
+Fixed, or closed by a ruling (see Rulings), apart from these new ones:
+- Only `rpipe run` takes the run lock; other writers (`summarize`, `collect`, `triage`, `eval run`, `model fit`) can overlap a nightly run.
+- `ollama_fit._request`/`fits`: after an HTTP error, `session.check()` decides deadline-vs-does-not-fit by clock comparison; timer precision could misclassify (theoretical).
 
 Dropped as resolved in Phase 3: no way to add a gold fact (`rpipe gold add-fact` exists).
 

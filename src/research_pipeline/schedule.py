@@ -21,9 +21,15 @@ def default_unit_dir() -> Path:
 
 
 def system_runner(cmd: list[str]) -> int:
-    """Run a command with output going straight to the terminal; return its exit code."""
+    """Run a command with output going straight to the terminal; return its exit code.
+
+    The `show-environment` reachability probe is silent: its output is the whole systemd user
+    environment (which can hold secrets) and only its exit code matters.
+    """
+    quiet = "show-environment" in cmd
+    out = subprocess.DEVNULL if quiet else None
     try:
-        return subprocess.run(cmd, check=False).returncode
+        return subprocess.run(cmd, check=False, stdout=out, stderr=out).returncode
     except OSError as exc:
         raise ScheduleError("systemctl not found (is systemd available?)") from exc
 

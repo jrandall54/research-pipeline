@@ -60,7 +60,7 @@ def test_failing_probe_writes_nothing(tmp_path):
 
 
 def test_system_runner_missing_systemctl_raises_schedule_error(monkeypatch):
-    def boom(cmd, check):
+    def boom(cmd, check, **kwargs):
         raise FileNotFoundError("systemctl")
     monkeypatch.setattr(schedule.subprocess, "run", boom)
     with pytest.raises(schedule.ScheduleError, match="systemctl not found"):
@@ -235,3 +235,45 @@ def test_cli_status_without_systemctl_binary_fails_cleanly(fake, monkeypatch):
     assert res.exit_code == 1 and "systemctl not found" in res.output
     assert "Traceback" not in res.output
     assert calls == []
+
+
+REAL_RUNNER = schedule.system_runner  # the fake fixture replaces the module attribute
+
+
+@pytest.fixture
+def noisy_systemctl(tmp_path, monkeypatch):
+    """A real `systemctl` on PATH whose show-environment prints a secret."""
+    real_runner = REAL_RUNNER
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    script = bindir / "systemctl"
+    script.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        '  *show-environment*) echo "API_TOKEN=hunter2"; echo "err-secret" >&2; exit 0;;\n'
+        '  *is-enabled*) exit 1;;\n'
+        "esac\nexit 0\n"
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    return real_runner
+
+
+def test_status_does_not_print_the_systemd_environment(fake, noisy_systemctl, monkeypatch, capfd):
+    calls, unit_dir, vault = fake
+    monkeypatch.setattr(schedule, "system_runner", noisy_systemctl)
+    res = runner.invoke(cli.app, ["schedule", "status"])
+    out = capfd.readouterr()
+    assert res.exit_code == 0
+    assert "hunter2" not in res.output + out.out + out.err
+    assert "err-secret" not in res.output + out.out + out.err
+
+
+def test_install_does_not_print_the_systemd_environment(fake, noisy_systemctl, monkeypatch, capfd):
+    calls, unit_dir, vault = fake
+    monkeypatch.setattr(schedule, "system_runner", noisy_systemctl)
+    res = runner.invoke(cli.app, ["schedule", "install", "--vault", str(vault)])
+    out = capfd.readouterr()
+    assert res.exit_code == 0, res.output
+    assert "hunter2" not in res.output + out.out + out.err
+    assert "err-secret" not in res.output + out.out + out.err

@@ -844,9 +844,9 @@ def gold_list(vault: VaultOption = None) -> None:
         papers = load_gold(ctx.vault)
     typer.echo(f"Gold set: {len(papers)}/{GOLD_TARGET} papers")
     for p in papers:
-        typer.echo(f"\n{p.paper_id}  {p.title}")
+        typer.echo(f"\n{profile_edit.normalise_text(p.paper_id)}  {profile_edit.normalise_text(p.title)}")
         for n, fact in enumerate(p.key_facts, 1):
-            typer.echo(f"  {n}. {fact}")
+            typer.echo(f"  {n}. {profile_edit.normalise_text(fact)}")
 
 
 @gold_app.command("remove")

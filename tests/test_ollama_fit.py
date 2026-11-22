@@ -591,3 +591,21 @@ def test_hand_pinned_context_below_the_floor_is_cached_not_reprobed_every_night(
     fake.generate_calls.clear()
     assert resolve(URL, tmp_path, "auto", 4096) == first
     assert fake.generate_calls == []
+
+
+def test_cached_auto_context_below_the_floor_is_rejected_and_reprobed(mock, tmp_path):
+    import json as _json
+
+    fake = three_models()
+    fake.install(mock)
+    first = resolve(URL, tmp_path, "auto", "auto")
+    path = tmp_path / "cache" / "llm_fit.json"
+    data = _json.loads(path.read_text())
+    data["num_ctx"] = 4096  # damaged or hand-edited cache entry for an auto-chosen context
+    path.write_text(_json.dumps(data))
+    fake.generate_calls.clear()
+    logs: list[str] = []
+    again = resolve(URL, tmp_path, "auto", "auto", log=logs.append)
+    assert fake.probes()  # probed again instead of trusting 4096
+    assert again.num_ctx >= 8192 and again == first
+    assert any("outside what it supports" in line for line in logs)

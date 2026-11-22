@@ -13,6 +13,7 @@ research-vault/
   config.yaml      pipeline settings            (Phase 1)
   profile.yaml     what you care about          (Phase 1)
   vault.sqlite     all paper state, runs, search index  (Phase 1)
+  .run.lock        held while `rpipe run` is running so two runs cannot overlap; safe to ignore, never edit
   digests/         one markdown digest per day  (Phase 1)
   cache/           small caches; seeds.json holds the text of your seed papers (Phase 1)
   raw/             downloaded PDFs              (reserved, unused so far)

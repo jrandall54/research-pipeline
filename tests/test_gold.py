@@ -271,3 +271,10 @@ def test_cli_add_fact_and_edit_fact_clean_and_reject_control_only_text(vault):
     assert grun(vault, "add-fact", "2307.15043", "\x07‮").exit_code == 1
     assert grun(vault, "edit-fact", "2307.15043", "1", "\x07‮").exit_code == 1
     assert facts(vault) == ["one", "two", "three"]
+
+
+def test_gold_list_cleans_hand_edited_control_and_bidi_text(vault):
+    add_gold(vault, GoldPaper(paper_id="2307.15043", title="Ti\x1b[31mtle\u202e", key_facts=["fa\x07ct\u202e one"]))
+    out = grun(vault, "list").output
+    assert "\x1b" not in out and "\x07" not in out and "\u202e" not in out
+    assert "Ti [31mtle" in out and "fa ct one" in out

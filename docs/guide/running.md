@@ -129,7 +129,7 @@ Illustrative commands; see `evaluation.md` for a sample report.
 
 Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
-**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, or `--date` is not a date.
+**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `75` when another `rpipe run` already holds the run lock (the lock file is `.run.lock` in the vault; the nightly unit is unchanged). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, `--date` is not a date, or `vault.sqlite` was written by a newer rpipe (it stops and says to upgrade rather than touch it).
 
 ### A real run, step by step
 

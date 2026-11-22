@@ -239,3 +239,7 @@
 **stderr** — the second output channel of a program, meant for messages about what it is doing rather than its results. Progress goes there so that stdout (the results) stays clean when piped. See `running.md`, Progress.
 
 **Heartbeat** — a "still waiting: ..." line printed every 30 seconds of silence while a long step runs, so a slow model call is visibly alive and not frozen. See `running.md`, Progress.
+
+**AST (abstract syntax tree)** — the parsed structure of a Python file: every import, function and expression as a node in a tree. Tests read source files with Python's `ast` module to check what they import, without running them. See `shelf.md`, What never leaves your machine.
+
+**Boundary test** — a test that enforces a rule about the architecture rather than a behaviour, for example "no module that talks to a model may import the private shelf". It fails the build if the rule is broken. See `shelf.md`, What never leaves your machine.

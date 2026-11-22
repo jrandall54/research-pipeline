@@ -78,6 +78,10 @@ Your shelf is personal, so no text derived from it may be sent to a backend that
 
 Future code that would send shelf text to a model must first call `llm.require_local(llm, "your shelf")`, which raises `PrivacyError` (and sends nothing) unless the backend's `local` attribute is True. Re-run this audit (`grep -rn "generate(" src/`) whenever a new call site is added.
 
+**The boundary test enforces this.** `tests/test_boundaries.py` parses (with `ast`, Python's syntax-tree reader) every module that builds a prompt or calls a model (`prompts.py`, `llm.py`, `summarize.py`, `onboarding.py`, `evaluate.py` and everything in `backends/`) and fails if any of them imports `research_pipeline.shelf`. It catches every import form: `import research_pipeline.shelf as s`, `from research_pipeline import shelf`, `from research_pipeline.shelf import X`, and the relative forms (`from . import shelf`, `from ..shelf import X`). A second test plants such an import in a temporary file and checks the checker flags it, so the first test cannot pass by accident. Ranking (`rank.py`, `triage.py`) is not checked on purpose: it reads shelf embeddings, which are numbers, not text.
+
+When the first feature that needs shelf text in a prompt is written, it must call `llm.require_local` and update `tests/test_boundaries.py` in the same commit. Until then the test stays as it is and a failure means shelf text is reaching model code: remove the import, do not weaken the test.
+
 ## The commands
 
 Nobody has to touch files by hand: four `rpipe shelf` commands cover everything.

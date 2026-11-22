@@ -24,6 +24,14 @@ Read this first in a new session.
 ## NOT verified on the default tier (do before merging)
 Everything run for real on 2026-11-22 used the **claude-code** backend. The **Ollama** path (the default tier) has only offline tests with a fake model. Test it for real: `rpipe model set-backend ollama`, `rpipe model check`, `rpipe summarize 2611.25005`, read the result, and judge the new prompts (`PROMPT_VERSION` 2026-11-p4, claim-count limits), the factory (`backends`/`build_backend`) and time per paper on the local model. The nightly timer uses whichever backend is configured (currently claude-code, so it spends plan quota).
 
+## Owner requirement: no step may look frozen (project-wide, not built)
+Any step that waits (network, model, processing) must show visible progress: a spinner or progress bar with elapsed time and, where the total is known, a count (`[2/3] ...`). Today only `rpipe summarize` prints a line per paper, and it is silent *during* a paper (~30 s on Claude Code, longer on slow models).
+Sketch for a design/plan (brainstorm first, then write a plan):
+- Audit every waiting step: collect (arXiv 3 s spacing, HF), seed lookup, full-text fetch, embedder load and embedding, triage, summarize (per paper and per call), `model fit` (minutes), `model pull`, `model check`, eval run/grade, shelf sync, digest, `schedule`, `serve` start.
+- One shared helper (a single module) so behaviour is consistent: a spinner/bar with elapsed time on a terminal; plain one-line-per-event output when stderr is not a TTY (systemd timer, pipes, logs) so the nightly log stays readable. Progress goes to stderr so stdout stays parseable.
+- Tests: the helper is unit-tested offline; each stage gets a test that it reports progress via the callback.
+- Docs: a "progress" section in `docs/guide/running.md`; add the convention to CLAUDE.md so future steps follow it (ask the owner before editing CLAUDE.md).
+
 ## Next up (owner asked for, not built)
 1. `rpipe show <id>...` (print one paper's summary and critique, no voting; accepts ids or title fragments) and `rpipe show --recent`.
 2. A reader page in `rpipe serve` (it shows raw JSON today). `rpipe review` is a vote loop, not for reading.

@@ -1,4 +1,45 @@
-# Handoff — state after Phase 4 slice 1, the shelf (2026-11-22)
+# Handoff — Phase 5 planned, not started (2026-11-21)
+
+Read this first in a new session.
+
+## Next: execute Phase 5 (Shareable)
+- **Design (approved by owner):** `specs/2026-11-21-phase5-shareable-design.md`. Its "Builder-check resolutions" section overrides the body where they conflict. Research behind it: `specs/2026-11-21-cli-backends-research.md`.
+- **Plan (approved by owner):** `plans/2026-11-21-phase5-shareable.md`, 8 tasks. Task 8 (master plan doc + handoff) is the coordinator's, not a subagent's.
+- **Execution method chosen by owner:** subagent-driven (`superpowers:subagent-driven-development`).
+- **SDD workspace already set up** (git-ignored): `.superpowers/sdd/2026-11-21-phase5-shareable/`, holding:
+  - `progress.md`: the ledger, with the pre-flight scan and rulings R1-R3 already done;
+  - `global-constraints.md`: hand to every implementer and reviewer;
+  - `reviewer-template.txt`;
+  - `task-1-brief.md`.
+
+  The skill's resuming reference applies: the ledger says Task 1 has not started.
+- **First step:** `git checkout -b phase-5-shareable` from `main`, then dispatch Task 1. All branches before this are merged into `main`.
+
+## What Phase 5 is (owner decisions, 2026-11-21)
+- The target is anyone on any machine, not the AI club specifically. The ideal and default is the owner's setup: a GPU plus Ollama.
+- Three tiers, picked by a hardware-aware walkthrough:
+  1. local GPU + Ollama;
+  2. a **subscription** AI CLI (Claude Code first; API keys are "way down the road, if at all");
+  3. abstracts-only.
+- `rpipe` never installs Ollama. It pulls a model only after a yes/no. `rpipe model setup` re-runs the backend part.
+- Backends are one adapter per tool, in code, with the safety flags hard-wired. Paper text is untrusted and these CLIs are agents.
+- MIT licence, `Copyright (c) 2026 jrandall54`. Docker is dropped.
+- Plan-time correction (owner informed): in `rpipe init` the backend step comes **first**, because the "describe your research" step already calls the model.
+
+## Separate projects recorded (not Phase 5)
+- **Optimised CPU pipeline:** for machines with no GPU and no subscription. It needs its own brainstorming session; don't cram it into a phase (owner).
+- **Antigravity (`agy`) investigation:** an agent-driven deep dive into making `agy` a safe backend. Gemini Pro is free for students with a school email, so this would make tier 2 free for them. Open problems (see the research file):
+  - no-TTY hangs;
+  - no tools-off switch;
+  - long prompts need `--input-format stream-json`;
+  - consumer-plan wording on wrapping.
+- **Codex adapter:** waits until someone verifies it on a real install. It cannot switch tools off.
+- **Master plan doc** (Claude Docs) is not yet updated for this scope. That's plan Task 8, done by the coordinator at the end.
+
+## Still open from Phase 4
+The shelf slice is done and merged. Remaining slices: a local-model judge for overlap callouts plus `links` rows, the feasibility tag, weekly synthesis. Follow-up: check `SHELF_REASON_FLOOR` against real bge-small scores.
+
+## Earlier state (before Phase 5 planning)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next.
 

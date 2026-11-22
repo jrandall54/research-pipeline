@@ -169,3 +169,9 @@
 **Review queue** — the digest papers you have not yet voted on or skipped, oldest digest first and highest triage score first within a day. A paper whose vote was cleared is back in it. See `data-model.md`.
 
 **Review later** — the list of skipped papers still without a vote, oldest skip first. Skipping a paper again sends it to the back of this list. See `data-model.md`.
+
+**Chunk** — a piece of a longer text, small enough for the embedding model to read at once (here 200 to 1500 characters). Shelf notes are split into chunks, each embedded separately and prefixed with its note name and nearest heading. See `shelf.md`.
+
+**Shelf** — the notes, ideas and writing you keep in `my_work/` so the pipeline can compare new papers with your own work. Add and remove items at any time. See `shelf.md`.
+
+**Nearest neighbour** — the stored item whose vector is closest (highest cosine similarity) to a given vector. For the shelf, a paper's nearest neighbour is the single shelf chunk most like it; only that one counts, so a big shelf does not dilute the signal. See `shelf.md`.

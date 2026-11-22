@@ -19,12 +19,13 @@ research-vault/
   raw/             downloaded PDFs              (reserved, unused so far)
   markdown/        PDFs converted to markdown   (reserved, unused so far)
   summaries/       generated summaries          (reserved; summaries live in vault.sqlite)
-  my_work/         your own writing, used to bias ranking (Phase 4)
+  my_work/         your own notes and writing (the shelf); .md/.txt files are read and indexed, see shelf.md
+    .removed/      files taken off the shelf are moved here, never deleted
   gold/            gold.json: papers you know well plus the facts a summary must get right (see evaluation.md)
   eval/            one .json and .md per `rpipe eval run`, created on first use (see evaluation.md)
 ```
 
-The pipeline currently writes `vault.sqlite` (which also holds full texts and summaries), `digests/`, `cache/`, `gold/` (created by `init`, filled by `rpipe gold`) and `eval/` (the only one created later, by `rpipe eval run`), plus the two YAML files. `raw/`, `markdown/`, `summaries/` and `my_work/` are created now but nothing writes to them yet; they are reserved so the layout never changes later.
+The pipeline currently writes `vault.sqlite` (which also holds full texts and summaries), `digests/`, `cache/`, `gold/` (created by `init`, filled by `rpipe gold`) and `eval/` (the only one created later, by `rpipe eval run`), plus the two YAML files. `my_work/` is read by the shelf (see [shelf.md](shelf.md)) and `rpipe shelf add` writes notes into it. `raw/`, `markdown/` and `summaries/` are created now but nothing writes to them yet; they are reserved so the layout never changes later.
 
 ### `config.yaml` fields
 

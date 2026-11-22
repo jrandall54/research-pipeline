@@ -49,10 +49,11 @@ New to the project? Read in this order:
 12. [scheduling.md](scheduling.md): `rpipe schedule` and the nightly systemd timer
 13. [browsing.md](browsing.md): `rpipe serve`, browsing and voting from your phone over Tailscale
 14. [review.md](review.md): `rpipe review`, reading and voting on the digest in the terminal, and the review-later list
+15. [shelf.md](shelf.md): the shelf in `my_work/`, how notes are chunked, embedded, added and removed
 15. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`, `schedule.py`, `serve.py`, `review.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`, `schedule.py`, `serve.py`, `review.py`, `shelf.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.

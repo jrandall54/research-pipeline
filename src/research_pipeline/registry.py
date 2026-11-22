@@ -78,6 +78,9 @@ def plugins(group: str) -> dict[str, Plugin]:
         if ep.name in found and found[ep.name].origin == "built-in":
             found[f"{ep.name} ({dist})"] = Plugin(ep.name, None, dist, "name taken by a built-in")
             continue
+        if ep.name in found:  # a second third-party plug-in with the same name: first wins, loudly
+            found[f"{ep.name} ({dist})"] = Plugin(ep.name, None, dist, f"name already taken by {found[ep.name].origin}")
+            continue
         try:
             found[ep.name] = Plugin(ep.name, ep.load(), dist)
         except (Exception, SystemExit) as exc:  # a broken plug-in must never stop the pipeline

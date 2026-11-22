@@ -31,6 +31,18 @@ def test_plugins_merges_entry_points_and_reports_broken(monkeypatch):
     assert p["arxiv (fake-dist)"].factory is None
 
 
+def test_duplicate_third_party_name_is_reported_and_first_wins(monkeypatch):
+    def g(config):
+        return None
+
+    first, second = fake_ep("mine", lambda: f, "pkg-a"), fake_ep("mine", lambda: g, "pkg-b")
+    monkeypatch.setattr(registry, "_entry_points", lambda group: [first, second])
+    p = registry.plugins(registry.SOURCE_GROUP)
+    assert p["mine"].factory is f and p["mine"].origin == "pkg-a"
+    dup = p["mine (pkg-b)"]
+    assert dup.factory is None and dup.error == "name already taken by pkg-a"
+
+
 def test_builtin_sources_present(monkeypatch):
     monkeypatch.setattr(registry, "_entry_points", lambda group: [])
     assert list(registry.plugins(registry.SOURCE_GROUP)) == ["arxiv", "hf_daily"]

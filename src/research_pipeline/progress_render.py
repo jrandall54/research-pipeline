@@ -105,7 +105,7 @@ class LineRenderer:
                 elif event.kind == "start":
                     self._waiting_label = event.label or event.stage
                 else:
-                    self._waiting_label = event.stage
+                    self._waiting_label = event.label or event.stage
                 self._waiting_since = now
             self._last_output = now
 
@@ -150,6 +150,8 @@ class LiveRenderer:
             TimeElapsedColumn(),
             console=self._console,
             transient=True,
+            redirect_stdout=False,
+            redirect_stderr=False,
         )
         self._live = self._progress.live
         self._tasks: dict[str, TaskID] = {}

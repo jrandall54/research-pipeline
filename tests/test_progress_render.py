@@ -115,3 +115,23 @@ def test_cli_reporter_always_closes():
     except RuntimeError:
         pass
     assert rep._thread is None or not rep._thread.is_alive() or rep._stop.is_set()
+
+
+def test_live_renderer_does_not_hijack_stdout(capsys):
+    buf = Tty()
+    r = LiveRenderer(buf)
+    r.emit(ProgressEvent("collect", "start", label="x"))
+    print("RESULT-LINE")
+    r.close()
+    assert "RESULT-LINE" in capsys.readouterr().out
+    assert "RESULT-LINE" not in buf.getvalue()
+
+
+def test_heartbeat_names_latest_step_label():
+    now = [0.0]
+    buf = io.StringIO()
+    r = LineRenderer(buf, heartbeat=30.0, clock=lambda: now[0], start_thread=False)
+    r.emit(ProgressEvent("summarize", "step", label="2611.25005", current=1, total=3))
+    now[0] = 40.0
+    r.tick()
+    assert "still waiting: 2611.25005 (40s)" in buf.getvalue()

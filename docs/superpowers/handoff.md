@@ -33,3 +33,6 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 ## Process notes
 - Plans were executed subagent-driven (implementer, per-task review, final opus review, one fix wave). The T6 implementer wrote code before tests, and the Phase 2 fix wave was not strictly test-first; both were disclosed.
 - Project rules are in `CLAUDE.md`: docs in the same commit as code, and every user setting needs an `rpipe` command.
+
+## Watching: truncation
+The health line shows `truncated N` when papers were too long for the context window. If it is often above zero, revisit chunking (map-reduce summaries: split sections into chunks, summarize each, then combine the claims; costs more calls and weakens cross-section critique). Cheaper alternative first: pin the 143K-context model (`q3f-14b-143k`).

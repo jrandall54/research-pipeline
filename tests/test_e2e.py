@@ -797,6 +797,34 @@ def test_summarize_backlog_prints_preface_and_respects_limit(vault, monkeypatch)
     assert count_summaries(vault) == 2
 
 
+def test_summarize_backlog_tells_how_to_refresh_older_digests(vault, monkeypatch):
+    from datetime import timedelta
+    install(monkeypatch)
+    seed_backlog(vault, 3)
+    res = run_cli("summarize", "--backlog", "--limit", "2", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    d1, d2, d3 = (date.today() - timedelta(days=i) for i in (1, 2, 3))
+    assert "Older digests do not show new summaries until you refresh them:" in res.output
+    assert f"rpipe digest --date {d1.isoformat()}" in res.output
+    assert f"rpipe digest --date {d2.isoformat()}" in res.output
+    assert f"--date {d3.isoformat()}" not in res.output  # not summarized this run
+
+
+def test_summarize_backlog_empty_but_normal_work_says_so(vault, monkeypatch):
+    from research_pipeline.db import open_db, set_status, upsert_paper
+    from research_pipeline.models import Status
+    install(monkeypatch)
+    conn = open_db(vault / "vault.sqlite")
+    upsert_paper(conn, PaperMeta(id="2501.09999", title="T", abstract="A", source="arxiv", url="u"))
+    set_status(conn, "2501.09999", Status.triaged, score=0.5, reasons=["r"])
+    conn.close()
+    res = run_cli("summarize", "--backlog", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert "No older digest papers are missing a summary." in res.output
+    assert "Backlog: 0 of 0" not in res.output
+    assert "Older digests" not in res.output  # the paper was never in a digest
+
+
 def test_summarize_backlog_default_limit_is_10(vault, monkeypatch):
     install(monkeypatch)
     seed_backlog(vault, 12)

@@ -503,14 +503,44 @@ def summarize(
         raise _fail(NO_MODEL)
     cap = (limit or 10) if backlog else None
     if backlog:
-        typer.echo(f"Backlog: {min(cap, total)} of {total} papers missing a summary (newest first; raise --limit for more)")
+        if total:
+            typer.echo(f"Backlog: {min(cap, total)} of {total} papers missing a summary (newest first; raise --limit for more)")
+        else:
+            typer.echo("No older digest papers are missing a summary.")
+    done: list[str] = []
+    show = _paper_progress(typer.echo)
+
+    def progress(index: int, total_: int, pid: str, outcome: str, seconds: float, detail: str) -> None:
+        if outcome == "done":
+            done.append(pid)
+        show(index, total_, pid, outcome, seconds, detail)
+
     counts, errors = run_summarize(
         ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
         today=today, backlog_limit=cap, paper_ids=paper_ids or None,
-        on_progress=_paper_progress(typer.echo), refetch=refetch,
+        on_progress=progress, refetch=refetch,
     )
     typer.echo("Summarized:")
     _report(counts, errors)
+    _refresh_hint(ctx.conn, done, today)
+
+
+def _refresh_hint(conn: sqlite3.Connection, paper_ids: list[str], today: date) -> None:
+    """Name the older digests that gained summaries; their files are only rewritten by `rpipe digest`."""
+    if not paper_ids:
+        return
+    marks = ",".join("?" * len(paper_ids))
+    dates = [
+        r[0] for r in conn.execute(
+            f"SELECT DISTINCT digest_date FROM papers WHERE id IN ({marks})"
+            " AND digest_date IS NOT NULL AND digest_date != ? ORDER BY digest_date DESC",
+            (*paper_ids, today.isoformat()),
+        )
+    ]
+    if dates:
+        typer.echo("Older digests do not show new summaries until you refresh them:")
+        for d in dates:
+            typer.echo(f"  rpipe digest --date {d}")
 
 
 @app.command()

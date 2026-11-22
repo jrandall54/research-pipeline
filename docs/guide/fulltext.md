@@ -84,7 +84,7 @@ To refresh a stored full text (after an extractor improvement, or because a pape
 rpipe summarize 2611.23375 --refetch
 ```
 
-`--refetch` works only with explicit paper ids (`rpipe summarize ID... --refetch`) and is an error with `--backlog` or with no ids. For each named paper it downloads the HTML again (using the same 3-second arXiv spacing), re-parses it, replaces the stored sections in `fulltexts`, then summarizes as usual (a re-summary). If the paper has no usable HTML now, the run says so (`no usable HTML version now; kept the stored full text`, or `using the abstract` if nothing was stored) and carries on with what it has. A network or server error fails that paper as usual and the stored text is left untouched. Papers fetched before the math rules existed keep their old text until you do this; there is no automatic bulk re-parse.
+`--refetch` works only with explicit paper ids (`rpipe summarize ID... --refetch`) and is an error with `--backlog` or with no ids. For each named paper it downloads the HTML again (using the same 3-second arXiv spacing), re-parses it, replaces the stored sections in `fulltexts`, then summarizes as usual (a re-summary). If the paper has no usable HTML now, the run says so (`no usable HTML version now; kept the stored full text`, or `using the abstract` if nothing was stored) and carries on with what it has. A network or server error keeps the stored text and summarizes from it, with a note (`could not re-download (...); kept the stored full text`); only when nothing is stored does it fail that paper as usual, to be retried later. Papers fetched before the math rules existed keep their old text until you do this; there is no automatic bulk re-parse.
 
 ## Where the code is
 

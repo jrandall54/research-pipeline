@@ -171,6 +171,10 @@ def run_summarize(
                 except FullTextUnavailable:
                     kept = "kept the stored full text" if sections is not None else "using the abstract"
                     errors.append(f"summarize {pid}: no usable HTML version now; {kept}")
+                except SourceError as exc:
+                    if sections is None:
+                        raise  # nothing stored to fall back on: a normal failure, retried later
+                    errors.append(f"summarize {pid}: could not re-download ({exc}); kept the stored full text")
             elif sections is None:
                 try:
                     sections = ensure_usable(fetch(pid))

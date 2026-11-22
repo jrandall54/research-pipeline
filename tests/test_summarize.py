@@ -604,6 +604,21 @@ def test_refetch_without_html_falls_back_to_stored_text_and_says_so(conn):
     assert len(errors) == 1 and "2501.00001" in errors[0] and "kept the stored full text" in errors[0]
 
 
+def test_refetch_network_error_keeps_stored_text_and_says_so(conn):
+    from research_pipeline.sources.base import SourceError
+    add_triaged(conn, "2501.00001")
+    save_fulltext(conn, "2501.00001", SECTIONS)
+
+    def down(pid):
+        raise SourceError("arXiv HTML request failed: timeout")
+
+    counts, errors = run_summarize(conn, FakeLLM([summary(), critique()]), down, 32768,
+                                   paper_ids=["2501.00001"], refetch=True)
+    assert counts["summarized"] == 1 and counts["summary_failed"] == 0
+    assert get_fulltext(conn, "2501.00001") == SECTIONS
+    assert len(errors) == 1 and "kept the stored full text" in errors[0] and "timeout" in errors[0]
+
+
 def test_refetch_without_html_and_nothing_stored_uses_abstract(conn):
     add_triaged(conn, "2501.00001")
 

@@ -123,6 +123,8 @@ def test_votes_and_saves_reach_ranking(conn, embedder):
 
 def test_vote_on_paper_without_embedding_is_ignored(conn, embedder):
     fill(conn)
-    record_vote(conn, "9999.99999", 1)  # never embedded
+    add(conn, "9999.99999", "Never embedded")
+    conn.execute("UPDATE papers SET status = 'skipped' WHERE id = '9999.99999'")  # triage skips it
+    record_vote(conn, "9999.99999", 1)  # a real paper, but never embedded
     counts = run_triage(conn, embedder, Profile(topics=[], seeds=[], top_n=10), {})
     assert counts["triaged"] == 4

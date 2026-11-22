@@ -130,7 +130,7 @@ Worked example: you up-voted paper L 60 days ago (weight 0.5^(60/60) = 0.5) and 
 ## How to run / check it
 
 - Tuning: edit weights in `rank.py`; change `top_n`, topics, seeds, authors and keywords with `rpipe profile ...` (see `profile.md`). Add a few seeds that are truly representative (10 to 20 is plenty); too-broad topics make everything look similar.
-- Implicit profile: `rpipe vote <id> up` or `rpipe save <id>`; the effect shows on the next `rpipe run` (or `rpipe collect` then `rpipe triage`), because `rpipe triage` only ranks papers that are still `new`, not ones already ranked. Look for `liked similar:` in a paper's reasons. Change the fade speed with `rpipe profile set-feedback-halflife DAYS` (1 to 3650). Tests: `tests/test_rank.py` (decay ratio exact to 1e-9, no dilution with 20 likes, floor both sides), `tests/test_triage.py`.
+- Implicit profile: `rpipe vote <id> up` or `rpipe save <id>`; the effect shows on the next `rpipe run` (or `rpipe collect` then `rpipe triage`), because `rpipe triage` only ranks papers that are still `new`, not ones already ranked. Look for `liked similar:` in a paper's reasons. Change the fade speed with `rpipe profile set-feedback-halflife DAYS` (1 to 3650). Tests: `tests/test_rank.py` (decay ratio exact to 1e-9, no dilution with 20 likes, floor both sides, an old dislike keeps its reason and a decayed penalty), `tests/test_triage.py`.
 - Inspect results: a paper's `triage_score` and `triage_reasons` columns show exactly why it ranked (also for `skipped` ones, to see what just missed the cut).
 - Tests: `uv run pytest tests/test_rank.py tests/test_triage.py tests/test_seeds.py -q`. They use a fake hashed bag-of-words embedder, so no model is downloaded.
 

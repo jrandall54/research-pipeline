@@ -10,6 +10,7 @@ from research_pipeline.embed import SentenceTransformerEmbedder
 from research_pipeline.models import PaperMeta, Profile
 from research_pipeline.rank import (
     FEEDBACK_BOOST,
+    FEEDBACK_PENALTY,
     FEEDBACK_REASON_FLOOR,
     FeedbackVectors,
     ProfileVectors,
@@ -246,6 +247,7 @@ def test_no_feedback_scores_unchanged(tmp_path):
 
 def test_up_then_clear_contributes_nothing(tmp_path):
     conn = open_db(tmp_path / "v.db")
+    upsert_paper(conn, meta("L", "Liked"))
     record_vote(conn, "L", 1)
     record_vote(conn, "L", 0)
     fv = build_feedback_vectors(current_votes(conn), [], {"L": E1}, 60.0, NOW)
@@ -287,6 +289,20 @@ def test_reason_floor_both_sides(tmp_path):
 
     assert reasons(FEEDBACK_REASON_FLOOR + 0.01) == ["liked similar: L"]
     assert reasons(FEEDBACK_REASON_FLOOR - 0.01) == []
+
+
+def test_old_dislike_still_gets_reason_and_decayed_penalty(tmp_path):
+    v = np.array([0.9, (1 - 0.81) ** 0.5])
+    old = build_feedback_vectors([row("D", -1, "2026-07-24T12:00:00+00:00")], [], {"D": v}, 60.0, NOW)
+    base = fb_score(tmp_path, None)["2501.00001"].score
+    got = fb_score(tmp_path, old)["2501.00001"]
+    assert old.disliked[0][2] == pytest.approx(0.25, abs=1e-3)  # 120 days = 2 half-lives
+    assert "disliked similar: D" in got.reasons  # raw 0.9 is above the floor, however old
+    assert got.score - base == pytest.approx(-FEEDBACK_PENALTY * old.disliked[0][2] * 0.9, abs=1e-9)
+    # Below the floor the reason is hidden even though the (small) penalty still applies.
+    far = np.array([0.6, 0.8])
+    weak = build_feedback_vectors([row("D", -1, "2026-07-24T12:00:00+00:00")], [], {"D": far}, 60.0, NOW)
+    assert fb_score(tmp_path, weak)["2501.00001"].reasons == []
 
 
 def test_old_like_still_gets_reason_and_decayed_score(tmp_path):

@@ -116,6 +116,8 @@
 
 **`user_version`** — a spare integer SQLite stores in the database file header (`PRAGMA user_version`). We use it as the schema version so `open_db()` knows whether an older vault needs upgrading. See `data-model.md`.
 
+**Foreign key** — a column that must hold an id existing in another table (`votes.paper_id` must be a real `papers.id`). SQLite only enforces this when `PRAGMA foreign_keys=ON` is set on the connection, which `open_db()` does. See `data-model.md`.
+
 **Migration** — a small step that upgrades an existing database from an older schema to the current one, run automatically on open. See `data-model.md`.
 
 **Vote** — your thumbs up or down on a digest paper, recorded with `rpipe vote`. Votes are appended, never overwritten: the latest one counts and `clear` records a neutral vote. See `digest.md`.

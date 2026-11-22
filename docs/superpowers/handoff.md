@@ -40,22 +40,19 @@ From before:
 
 ## Parked (not fixed, no owner decision needed yet)
 Phase 3:
-- `db.py`: no foreign-key enforcement, so callers must validate paper ids.
 - `cli.py`: `_resolve_paper` picker duplicates `_choose` (about 8 lines).
 - `digest.py`: `_provenance_line` hard-indexes provenance keys (KeyError on a partial dict); `save_summary` provenance is optional.
 - `cli.py` run: `finish_run` itself could raise and mask the original error.
 - No run lock: `Persistent=true` catch-up can overlap a manual `rpipe run`.
-- No guard when the database's `user_version` is greater than `SCHEMA_VERSION` (a newer vault opened by older code).
 - `schedule.py`: `status` hint is misleading if the user manager is unreachable.
 - `profile_edit`/onboarding: C1 and bidi control characters are not stripped from topics; `seed_queries` are not cleaned (never shown raw).
-- Tests: weak assertions on some messages and exit codes; weak negative digest test; no test for the disliked-side old-vote floor.
+- Tests: weak assertions on some messages and exit codes; weak negative digest test.
 
 From Phase 2 and auto-model:
 - Cached `num_ctx` is not re-checked against bounds.
 - A failed unload after a probe is swallowed silently.
 - No overall time limit on probing (a hung Ollama could stall about 30 minutes); `rpipe model show` can take about 30 s if Ollama hangs.
 - The 1024-token margin is also applied when a model fits at its full trained context.
-- Layering inversion: `db.py` imports `summarize`.
 - Tests: duplicate `AlwaysSummary`, and test-to-test imports.
 - No command to edit or remove a single gold fact (`gold add-fact` now adds one; there is still no edit or remove).
 - No stop after the first LLM timeout in a run.

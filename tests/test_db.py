@@ -251,3 +251,35 @@ def test_old_summary_without_provenance_loads(tmp_path):
     )
     assert get_summary(conn, "2401.00001") == result
     assert get_provenance(conn, "2401.00001") is None
+
+
+def test_newer_database_is_refused_and_left_untouched(tmp_path):
+    import sqlite3
+
+    import pytest
+
+    from research_pipeline.db import SCHEMA_VERSION, SchemaTooNewError
+
+    path = tmp_path / "p.db"
+    raw = sqlite3.connect(path)
+    raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    raw.execute("CREATE TABLE marker (x)")
+    raw.commit()
+    raw.close()
+    before = path.read_bytes()
+    with pytest.raises(SchemaTooNewError, match="upgrade rpipe"):
+        open_db(path)
+    assert path.read_bytes() == before
+    check = sqlite3.connect(path)
+    assert check.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION + 1
+    assert [r[0] for r in check.execute("SELECT name FROM sqlite_master")] == ["marker"]
+    check.close()
+
+
+def test_db_does_not_import_summarize():
+    import subprocess
+    import sys
+
+    code = "import sys, research_pipeline.db; print('research_pipeline.summarize' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"

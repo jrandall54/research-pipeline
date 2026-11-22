@@ -9,11 +9,10 @@ from collections.abc import Callable
 from datetime import date
 from typing import Literal, TypeVar
 
-from pydantic import BaseModel, Field
-
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.llm import LLM, LlmError
 from research_pipeline.models import Section, Status
+from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
 from research_pipeline.sources.base import SourceError
 from research_pipeline.prompts import (
     PROMPT_VERSION,
@@ -22,35 +21,6 @@ from research_pipeline.prompts import (
     citation_feedback,
     fit_to_budget,
 )
-
-
-class Claim(BaseModel):
-    """One statement about the paper and the section titles it comes from."""
-
-    text: str
-    sections: list[str] = Field(min_length=1)
-
-
-class Summary(BaseModel):
-    one_line: str
-    problem: Claim
-    approach: Claim
-    results: Claim
-    limitations: Claim
-
-
-class Critique(BaseModel):
-    strengths: list[Claim]
-    weaknesses: list[Claim]
-    questions: list[str]
-
-
-class PaperSummary(BaseModel):
-    summary: Summary
-    critique: Critique
-    basis: Literal["full_text", "abstract"]
-    truncated: bool
-    unverified: list[str]  # claim texts whose citations could not be verified
 
 
 T = TypeVar("T", Summary, Critique)

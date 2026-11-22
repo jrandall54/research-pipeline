@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from research_pipeline.models import PaperMeta, Section, Status
-from research_pipeline.summarize import Critique, PaperSummary, Summary
+from research_pipeline.summary_models import Critique, PaperSummary, Summary
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -99,6 +99,14 @@ def _now() -> str:
 SCHEMA_VERSION = 1
 
 
+class SchemaTooNewError(RuntimeError):
+    """The database was written by a newer rpipe than the one running."""
+
+
+class UnknownPaperError(ValueError):
+    """A vote or save named a paper id that is not in the database."""
+
+
 def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     """Bring an older database up to SCHEMA_VERSION (one ``if`` step per version)."""
     if from_version < 1:
@@ -109,9 +117,18 @@ def open_db(path: Path) -> sqlite3.Connection:
     """Open (creating if needed) the database with all tables, WAL and Row access."""
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    # Check the version before anything that could write to the file (WAL, tables, migration).
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version > SCHEMA_VERSION:
+        conn.close()
+        raise SchemaTooNewError(
+            f"{path} has database version {version}, but this rpipe only understands up to"
+            f" {SCHEMA_VERSION}. It was written by a newer rpipe. Please upgrade rpipe;"
+            " the file was not changed."
+        )
+    conn.execute("PRAGMA foreign_keys=ON")  # per connection, so set on every open
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version < SCHEMA_VERSION:
         _migrate(conn, version)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -119,12 +136,18 @@ def open_db(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _require_paper(conn: sqlite3.Connection, paper_id: str) -> None:
+    if get_paper(conn, paper_id) is None:
+        raise UnknownPaperError(f"No paper with id {paper_id!r} in the database.")
+
+
 def record_vote(
     conn: sqlite3.Connection, paper_id: str, vote: int, now: str | None = None
 ) -> None:
-    """Append a vote (+1, -1, or 0 to clear). Commits."""
+    """Append a vote (+1, -1, or 0 to clear). Commits. Raises UnknownPaperError for a bad id."""
     if vote not in (-1, 0, 1):
         raise ValueError(f"vote must be -1, 0 or 1, got {vote!r}")
+    _require_paper(conn, paper_id)
     conn.execute(
         "INSERT INTO votes (paper_id, vote, created_at) VALUES (?, ?, ?)",
         (paper_id, vote, now or _now()),
@@ -144,8 +167,9 @@ def current_votes(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 def set_saved(
     conn: sqlite3.Connection, paper_id: str, saved: bool, now: str | None = None
 ) -> None:
-    """Save or unsave a paper (idempotent). Commits."""
+    """Save or unsave a paper (idempotent). Commits. Saving an unknown id raises UnknownPaperError."""
     if saved:
+        _require_paper(conn, paper_id)
         conn.execute(
             "INSERT OR IGNORE INTO saves (paper_id, created_at) VALUES (?, ?)",
             (paper_id, now or _now()),

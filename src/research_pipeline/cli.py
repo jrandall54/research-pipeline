@@ -19,7 +19,7 @@ from typing import Annotated
 import typer
 
 from research_pipeline.collect import run_collect
-from research_pipeline.db import current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
+from research_pipeline.db import SchemaTooNewError, UnknownPaperError, current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
 from research_pipeline.digest import write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
@@ -159,7 +159,11 @@ def _open(vault: Path | None) -> _Context:
         raise _fail(str(exc)) from exc
     # The folder actually opened is the vault, even if it was moved since `rpipe init`.
     config = config.model_copy(update={"vault_path": path})
-    return _Context(path, config, open_db(path / "vault.sqlite"))
+    try:
+        conn = open_db(path / "vault.sqlite")
+    except SchemaTooNewError as exc:
+        raise _fail(str(exc)) from exc
+    return _Context(path, config, conn)
 
 
 def _load_profile(ctx: _Context) -> Profile:
@@ -1174,6 +1178,8 @@ def vote(
     try:
         pid = _resolve_paper(ctx.conn, paper)
         record_vote(ctx.conn, pid, _VOTES[direction])
+    except UnknownPaperError as exc:
+        raise _fail(str(exc)) from exc
     finally:
         ctx.conn.close()
     typer.echo(f"Recorded vote {direction} for {pid}." if direction != "clear" else f"Cleared vote for {pid}.")
@@ -1190,6 +1196,8 @@ def _save_command(saved: bool) -> None:
         try:
             pid = _resolve_paper(ctx.conn, paper)
             set_saved(ctx.conn, pid, saved)
+        except UnknownPaperError as exc:
+            raise _fail(str(exc)) from exc
         finally:
             ctx.conn.close()
         typer.echo(f"{'Saved' if saved else 'Unsaved'} {pid}.")

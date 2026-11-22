@@ -243,3 +243,18 @@ def test_set_context_rejects_bad_values_and_leaves_file(vault):
         res = model(vault, "set-context", arg)
         assert res.exit_code == 1 and "Traceback" not in res.output and "auto" in res.output
     assert cfg.read_text() == before
+
+
+def test_model_show_reports_unknown_choice_when_probing_times_out(vault, monkeypatch):
+    from research_pipeline.ollama_fit import ProbeTimeout
+
+    def hung(*args, **kwargs):
+        raise ProbeTimeout("probing Ollama took longer than 10 seconds")
+
+    monkeypatch.setattr(cli.ollama_fit, "cached_fit", hung)
+    model(vault, "set", "auto")
+    res = model(vault, "show")
+    assert res.exit_code == 0
+    # The configured settings are printed first; the timeout only replaces the last-choice line.
+    assert res.output.index("model: auto") < res.output.index("server:") < res.output.index("context window")
+    assert "last choice: unknown. Ollama did not answer in time" in res.output

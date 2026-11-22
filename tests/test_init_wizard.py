@@ -5,7 +5,7 @@ from research_pipeline import cli
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import init_vault, load_config, load_profile
 
-from test_cli_profile import StubArxiv, paper
+from fakes import StubArxiv, paper
 
 runner = CliRunner()
 ABORT = "Saved what you entered so far. Re-run rpipe init to continue."

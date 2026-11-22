@@ -8,7 +8,7 @@ from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import init_vault, load_profile
 
 from conftest import FakeLLM
-from test_cli_profile import StubArxiv, paper
+from fakes import StubArxiv, paper
 
 runner = CliRunner()
 DESC = "I work on security of LLM agents, especially prompt injection."
@@ -215,6 +215,8 @@ def test_topic_equal_to_template_example_still_offered(tmp_path, monkeypatch):
 
 
 def test_c1_bidi_stripped_non_latin_kept_and_seed_queries_cleaned():
+    # ESC (\x1b) is a control character so it becomes a space; the "[31m" after it is
+    # ordinary text and stays.
     llm = FakeLLM([ProposedProfile(
         topics=["bi‮di\x9b topic", "أمن الذكاء الاصطناعي", "大模型安全"],
         seed_queries=["  attention \x1b[31mis\x85 all   you‮ need  ", "\x1b\x07"],

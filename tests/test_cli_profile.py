@@ -3,37 +3,12 @@ import json
 import pytest
 from typer.testing import CliRunner
 
+from fakes import StubArxiv, paper
 from research_pipeline import cli
-from research_pipeline.models import PaperMeta
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import init_vault, load_config, load_profile
 
 runner = CliRunner()
-
-
-def paper(pid="2307.15043", title="Universal and Transferable Adversarial Attacks"):
-    return PaperMeta(
-        id=pid, title=title, abstract="An abstract.", authors=["Andy Zou", "Zifan Wang"],
-        source="arxiv", url=f"https://arxiv.org/abs/{pid}", published="2023-07-27",
-    )
-
-
-class StubArxiv:
-    def __init__(self, by_id=None, by_title=None, error=None):
-        self.by_id, self.by_title, self.error = by_id or [], by_title or [], error
-        self.calls = []
-
-    def fetch_by_ids(self, ids):
-        self.calls.append(("id", ids))
-        if self.error:
-            raise self.error
-        return self.by_id
-
-    def search_title(self, query, max_results=5):
-        self.calls.append(("title", query))
-        if self.error:
-            raise self.error
-        return self.by_title
 
 
 @pytest.fixture

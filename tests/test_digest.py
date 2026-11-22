@@ -157,7 +157,9 @@ def test_digest_includes_fetched_status_without_summary(conn, tmp_path):
     add(conn, "2501.00001", 0.9, status=Status.fetched)
     text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
     assert "Title 2501.00001" in text and "Abstract 2501.00001" in text
-    assert "Summary" not in text.split("# Research digest")[1]
+    for marker in ("**Summary:**", "**Problem:**", "**Approach:**", "**Results:**",
+                   "**Limitations:**", "**Strengths**", "**Weaknesses**", "**Questions to ask**"):
+        assert marker not in text
     assert get_paper(conn, "2501.00001")["status"] == "in_digest"
 
 

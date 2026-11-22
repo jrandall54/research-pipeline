@@ -7,7 +7,7 @@ from research_pipeline import cli
 from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, load_gold, remove_fact, remove_gold
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import ConfigError, init_vault
-from test_cli_profile import StubArxiv, paper
+from fakes import StubArxiv, paper
 
 runner = CliRunner()
 
@@ -122,10 +122,12 @@ def test_cli_list_remove_add_fact(vault):
     add_gold(vault, gp())
     out = grun(vault, "list").output
     assert "1/10" in out and "a fact" in out
-    assert grun(vault, "add-fact", "2307.15043", "another").exit_code == 0
+    res = grun(vault, "add-fact", "2307.15043", "another")
+    assert res.exit_code == 0 and "Added a fact to 2307.15043." in res.output
     assert "another" in grun(vault, "list").output
     assert grun(vault, "add-fact", "1111.1111", "x").exit_code == 1
-    assert grun(vault, "remove", "2307.15043").exit_code == 0
+    res = grun(vault, "remove", "2307.15043")
+    assert res.exit_code == 0 and "Removed 2307.15043." in res.output
     assert grun(vault, "remove", "2307.15043").exit_code == 1
     assert "0/10" in grun(vault, "list").output
 

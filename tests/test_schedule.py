@@ -149,8 +149,10 @@ def test_cli_install_bad_time_and_missing_rpipe(fake, monkeypatch):
 def test_cli_remove_and_status(fake):
     calls, unit_dir, vault = fake
     runner.invoke(cli.app, ["schedule", "install", "--vault", str(vault)])
-    assert runner.invoke(cli.app, ["schedule", "status"]).exit_code == 0
-    assert runner.invoke(cli.app, ["schedule", "remove"]).exit_code == 0
+    res = runner.invoke(cli.app, ["schedule", "status"])
+    assert res.exit_code == 0 and "Traceback" not in res.output
+    res = runner.invoke(cli.app, ["schedule", "remove"])
+    assert res.exit_code == 0 and "removed" in res.output
     assert not list(unit_dir.iterdir())
 
 

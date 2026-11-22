@@ -49,7 +49,7 @@ def saved(vault, pid):
 
 def test_vote_up_records_row(vault):
     res = run(vault, "vote", "2307.15043", "up")
-    assert res.exit_code == 0
+    assert res.exit_code == 0 and "Recorded vote up for 2307.15043." in res.output
     assert votes(vault) == [("2307.15043", 1)]
 
 
@@ -91,9 +91,11 @@ def test_vote_ambiguous_cancel_writes_nothing(vault):
 
 
 def test_save_and_unsave(vault):
-    assert run(vault, "save", "2401.00001").exit_code == 0
+    res = run(vault, "save", "2401.00001")
+    assert res.exit_code == 0 and "Saved 2401.00001." in res.output
     assert saved(vault, "2401.00001")
-    assert run(vault, "unsave", "2401.00001").exit_code == 0
+    res = run(vault, "unsave", "2401.00001")
+    assert res.exit_code == 0 and "Unsaved 2401.00001." in res.output
     assert not saved(vault, "2401.00001")
 
 
@@ -151,4 +153,4 @@ def test_init_exits_cleanly_on_too_new_database(vault):
     _make_too_new(vault)
     res = runner.invoke(cli.app, ["init", "--vault", str(vault)])
     assert res.exit_code == 1 and "upgrade rpipe" in res.output
-    assert res.exception is None or isinstance(res.exception, SystemExit)
+    assert isinstance(res.exception, SystemExit) and res.exception.code == 1

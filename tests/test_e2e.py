@@ -6,7 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import FakeEmbedder, FakeLLM
-from conftest import SECTIONS, critique, summary
+from conftest import SECTIONS, AlwaysSummary, critique, summary
 from research_pipeline.llm import LlmError
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
@@ -50,14 +50,6 @@ def vault(tmp_path):
 
 def fetch_text(pid):
     return SECTIONS
-
-
-class AlwaysSummary(FakeLLM):
-    """Answers every request with a valid summary or critique, whatever the order."""
-
-    def generate(self, system, user, schema):
-        self.calls.append((system, user))
-        return summary() if schema.__name__ == "Summary" else critique()
 
 
 def make_llm():
@@ -395,7 +387,7 @@ def test_e2e_version_bump_resummarises_from_new_text(vault, monkeypatch):
 import httpx
 import respx
 
-from test_ollama_fit import GB, URL as OLLAMA, FakeOllama
+from fakes import GB, URL as OLLAMA, FakeOllama
 
 
 def install_real_llm(monkeypatch, vault):

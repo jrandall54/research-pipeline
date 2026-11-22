@@ -239,3 +239,17 @@ def test_normalise_text_strips_c1_and_bidi_controls_but_keeps_scripts():
 def test_add_topic_strips_bidi_override(vault):
     assert pe.add_topic(vault, "safe‮topic") is True
     assert "safetopic" in prof(vault).topics
+
+
+def test_normalise_text_keeps_zwj_and_zwnj():
+    # Deliberately kept: needed for Persian, Indic scripts and emoji sequences.
+    for text in ("می\u200cخواهم", "क्\u200dष", "👩\u200d💻"):
+        assert pe.normalise_text(text) == text
+
+
+def test_add_author_and_keyword_strip_control_and_bidi(vault):
+    assert pe.add_author(vault, "Ev\u202eil\x1b Name\x85") is True
+    assert pe.add_keyword(vault, "jail\u202ebreak\x07 attack") is True
+    p = prof(vault)
+    assert "Evil Name" in p.followed_authors
+    assert "jailbreak attack" in p.keywords

@@ -20,3 +20,4 @@ The pipeline is for the owner and for others (AI club members) with different in
 - The CLI is `rpipe` (long alias `research-pipeline`). Use `rpipe` in docs, messages and examples.
 - Engine separate from data: nothing personal (profile, vault, notes) in the repo.
 - Tests run offline (fixtures + fake embedder). `uv run pytest -q`.
+- Every step that waits reports through `progress.py` (stages emit events; the CLI renders them). See docs/guide/running.md, Progress.

@@ -147,7 +147,7 @@ def run_summarize(
         set_status,
     )
 
-    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "summary_failed": 0}
+    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "truncated": 0, "summary_failed": 0}
     errors: list[str] = []
     today = today or date.today()
     for paper in papers_given_up_on(conn, today):
@@ -177,6 +177,7 @@ def run_summarize(
             else:
                 set_status(conn, pid, Status.summarized)  # commits the summary rows too
             counts["summarized"] += 1
+            counts["truncated"] += int(result.truncated)
         except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
             counts["summary_failed"] += 1
             message = f"{type(exc).__name__}: {exc}" if not isinstance(exc, (LlmError, SourceError)) else str(exc)

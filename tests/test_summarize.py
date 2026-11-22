@@ -183,7 +183,7 @@ def test_run_summarize_happy_path(conn):
     add_triaged(conn, "2501.00002")
     llm = FakeLLM([summary(), critique(), summary(), critique()])
     counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
-    assert counts == {"fetched": 2, "summarized": 2, "abstract_only": 0, "summary_failed": 0}
+    assert counts == {"fetched": 2, "summarized": 2, "abstract_only": 0, "truncated": 0, "summary_failed": 0}
     assert errors == []
     for pid in ("2501.00001", "2501.00002"):
         assert get_paper(conn, pid)["status"] == "summarized"
@@ -289,7 +289,7 @@ def test_prior_day_in_digest_paper_is_not_touched(conn):
     add_triaged(conn, "2501.00001")
     mark_in_digest(conn, ["2501.00001"], TODAY - timedelta(days=1))
     counts, errors = run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, today=TODAY)
-    assert counts == {"fetched": 0, "summarized": 0, "abstract_only": 0, "summary_failed": 0}
+    assert counts == {"fetched": 0, "summarized": 0, "abstract_only": 0, "truncated": 0, "summary_failed": 0}
     assert errors == [] and get_summary(conn, "2501.00001") is None
 
 

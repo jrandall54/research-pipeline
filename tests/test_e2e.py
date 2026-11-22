@@ -585,3 +585,9 @@ def test_model_fit_and_check_turn_odd_failures_into_one_clean_line(vault, monkey
 def test_model_check_help_mentions_probing():
     res = run_cli("model", "check", "--help")
     assert "probe" in res.output.lower()
+
+
+def test_health_line_counts_truncated_summaries():
+    line = cli.health_line(date(2026, 11, 21), {"summarized": 3, "truncated": 2}, [])
+    assert "truncated 2" in line
+    assert "truncated" not in cli.health_line(date(2026, 11, 21), {"summarized": 3}, [])

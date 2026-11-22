@@ -194,6 +194,8 @@ def health_line(day: date, counts: dict[str, int], errors: list[str]) -> str:
     extras = ""
     if counts.get("abstract_only"):
         extras += f" · abstract-only {counts['abstract_only']}"
+    if counts.get("truncated"):
+        extras += f" · truncated {counts['truncated']}"
     if counts.get("summary_failed"):
         extras += f" · summary failures {counts['summary_failed']}"
     return (

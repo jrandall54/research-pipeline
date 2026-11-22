@@ -363,3 +363,28 @@ def test_set_backend_message_says_reset_only_when_backend_changes(vault):
     assert load_config(vault / "config.yaml").llm_model == "qwen3:14b"
     changed = run(vault, "model", "set-backend", "none", "--force")
     assert "model reset to auto" in changed.output
+
+
+def test_model_fit_progress_notes_appear_once_on_stderr(vault, monkeypatch):
+    def fake_resolve(url, vault_, model, num_ctx, force=False, log=lambda s: None, **kw):
+        log("trying fake-model at 8192 tokens")
+        return SimpleNamespace(model="fake-model", num_ctx=8192)
+
+    monkeypatch.setattr(cli.ollama_fit, "resolve", fake_resolve)
+    result = runner.invoke(cli.app, ["model", "fit", "--vault", str(vault)])
+    assert result.exit_code == 0, result.output
+    assert result.stderr.count("trying fake-model at 8192 tokens") == 1
+    assert "model fit done (" in result.stderr
+    assert "Using model fake-model with a context of 8192 tokens" in result.stdout
+
+
+def test_pull_model_progress_emits_steps_when_percent_changes():
+    from research_pipeline.progress import ListReporter, stage
+
+    rep = ListReporter()
+    with stage(rep, "model pull") as h:
+        cb = cli._pull_progress(h, "m:1")
+        for line in ("pulling manifest", "downloading 10%", "downloading 10%", "downloading 43%"):
+            cb(line)
+    steps = [(e.label, e.detail) for e in rep.events if e.kind == "step"]
+    assert steps == [("m:1", "10%"), ("m:1", "43%")]

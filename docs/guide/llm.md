@@ -61,7 +61,16 @@ If you pinned only one setting, the other is still searched: a pinned model with
 
 ### What probing costs
 
-Probing loads and unloads real models, which takes seconds to a minute each. The first run (and the first run after you install or change a model) can take a few minutes; short progress lines (`probing NAME at N tokens ...`) go to stderr so it is not silent (`rpipe model check`, `run`, `summarize`, `eval run` and `model fit` all show them). After that the cached answer is used and no probe happens.
+Probing loads and unloads real models, which takes seconds to a minute each. The first run (and the first run after you install or change a model) can take a few minutes; short progress lines go to stderr so it is not silent. `rpipe model fit` and `rpipe model check` open a stage around the probe, and each log line from the probe becomes a note under it (the CLI hands `ollama_fit` the stage's `note` method as its `log` callback, so a line is printed once, never twice):
+
+```
+model fit…
+  trying qwen3:14b at 8192 tokens
+  trying qwen3:14b at 16384 tokens
+model fit done (1m48s)
+```
+
+(`rpipe run`, `summarize` and `eval run` print the same probe lines as plain indented lines before their own stage starts.) A model download (`rpipe model setup`) shows `model pull…`, then a step with the percent each time it changes (`m:1 43%`), then `model pull done (...)`: a live bar on a terminal. After that the cached answer is used and no probe happens.
 
 Two things can make a probe see less memory than the nightly run will have, and the pipeline guards against both:
 
@@ -88,7 +97,7 @@ One broken model never blocks the rest: if Ollama cannot describe one installed 
 ### Where the code is
 
 - `src/research_pipeline/ollama_fit.py`: `list_models`, `loaded_models`, `fits`, `max_context`, `choose`, `resolve`, `cached_fit`, and `ProbeSession` (the deadline and the once-only unload warning).
-- `src/research_pipeline/cli.py`: `_release_gpu_memory` (called by `run` before the model is resolved) and `_progress` (stderr progress lines).
+- `src/research_pipeline/cli.py`: `_release_gpu_memory` (called by `run` before the model is resolved) `_progress` (stderr probe lines outside a stage) and `_pull_progress` (turns download percentages into progress steps).
 - `tests/test_ollama_fit.py`: a small fake Ollama with a deterministic memory boundary (no real Ollama needed); `tests/test_e2e.py` ("auto model and context") runs `rpipe run` and `rpipe model fit` against it.
 
 ## Second user: onboarding

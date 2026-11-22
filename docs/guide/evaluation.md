@@ -111,6 +111,15 @@ rpipe eval report            counts, PASS or FAIL, and which papers failed and w
 ```
 
 1. **`rpipe eval run`** refuses if the gold set is empty (and tells you to use `rpipe gold add`), warns if it has fewer than 10 papers, then for each gold paper fetches the full text (the same fetcher as the nightly run), writes a summary and critique with the same code as the nightly run, and records the result. A paper with no HTML version is summarized from its abstract (looked up on arXiv by id) and labelled `ABSTRACT ONLY`. A paper that fails (model error, no text and no abstract) gets an error entry and the others carry on.
+   Progress goes to stderr (stdout is unchanged): a live bar on a terminal, plain lines otherwise, one step per gold paper (`ok` or `failed`, the same outcome the report records), and a `still waiting: ...` line after 30 s of silence:
+
+   ```
+   eval…
+     [1/10] 2401.00000 ok
+     [2/10] 2401.00001 failed: model fell over
+   eval done (6m12s)
+   ```
+
 2. It writes two files in `<vault>/eval/`, named by date: `2026-11-21.json` (entries and your grades) and `2026-11-21.md`, a report you can read in any editor. Per paper the markdown has the key facts as a checklist, the summary, and, under each claim, the text of the section it cites, so you can judge a claim without opening the PDF. It ends with the automatic result: how many papers have every citation verified (`citations_ok`).
 3. **`rpipe eval grade`** works on the latest eval (the newest file in `eval/`). For each paper not yet graded it shows the title, your key facts and the summary, then asks `Is this summary accurate? [y/n]` and an optional note. Each grade is written to disk (atomically) the moment you give it. Ctrl-C or end of input stops cleanly: grades already given are kept, and running `rpipe eval grade` again continues with the next ungraded paper.
 4. **`rpipe eval report`** prints the counts: graded, accurate, citation-clean, PASS or FAIL against the pass mark, then the failed papers with your notes and the papers not graded yet. Ungraded papers count as **not** accurate, so a PASS is never claimed early. A paper whose summary failed to generate counts as failed.

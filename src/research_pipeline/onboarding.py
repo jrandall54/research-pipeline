@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from research_pipeline.llm import LLM
 from research_pipeline.models import PaperMeta
 from research_pipeline.profile_edit import normalise_text
+from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import ONBOARDING_SYSTEM
 from research_pipeline.seed_input import find_seed_candidates
 from research_pipeline.sources.arxiv import ArxivSource
@@ -80,14 +81,16 @@ def _best_match(query: str, candidates: list[PaperMeta]) -> PaperMeta | None:
 
 
 def resolve_seeds(
-    queries: list[str], arxiv: ArxivSource
+    queries: list[str], arxiv: ArxivSource, *, reporter: Reporter | None = None
 ) -> list[tuple[str, PaperMeta | None]]:
     """Look each proposed title up on arXiv. No close match gives None. SourceError propagates."""
     out: list[tuple[str, PaperMeta | None]] = []
-    for q in queries:
-        try:
-            candidates = find_seed_candidates(q, arxiv)
-        except ValueError:  # looked like a bad link: not a title we can search
-            candidates = []
-        out.append((q, _best_match(q, candidates)))
+    with stage(reporter, "seeds", total=len(queries), label="looking up proposed papers on arXiv") as handle:
+        for n, q in enumerate(queries, 1):
+            handle.note(f"[{n}/{len(queries)}] {q}")
+            try:
+                candidates = find_seed_candidates(q, arxiv)
+            except ValueError:  # looked like a bad link: not a title we can search
+                candidates = []
+            out.append((q, _best_match(q, candidates)))
     return out

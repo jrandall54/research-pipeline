@@ -16,6 +16,7 @@ from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.gold import GoldPaper, load_gold
 from research_pipeline.llm import LLM
 from research_pipeline.models import Section
+from research_pipeline.progress import Reporter, stage
 from research_pipeline.summarize import Claim, PaperSummary, summarize_paper
 from research_pipeline.vault import ConfigError
 
@@ -148,6 +149,8 @@ def run_eval(
     num_ctx: int,
     today: date,
     abstract_for: Callable[[str], str] | None = None,
+    *,
+    reporter: Reporter | None = None,
 ) -> Path:
     """Summarize every gold paper and write `eval/<today>.json` and `.md`; return the .md path.
 
@@ -158,27 +161,31 @@ def run_eval(
     entries: list[EvalEntry] = []
     sections_by_id: dict[str, list[Section]] = {}
     gold = load_gold(vault)
-    for g in gold:
-        try:
+    with stage(reporter, "eval", total=len(gold)) as handle:
+        for n, g in enumerate(gold, 1):
             try:
-                sections: list[Section] | None = ensure_usable(fetch(g.paper_id))
-            except FullTextUnavailable:
-                sections = None
-            abstract = ""
-            if sections is None:
-                abstract = abstract_for(g.paper_id) if abstract_for else ""
-                if not abstract.strip():
-                    raise ValueError("no full text and no abstract could be found")
-                sections_by_id[g.paper_id] = [Section(title="Abstract", text=abstract)]
-            else:
-                sections_by_id[g.paper_id] = sections
-            result = summarize_paper(llm, g.title, abstract, sections, num_ctx)
-            entries.append(
-                EvalEntry(paper_id=g.paper_id, title=g.title, summary=result, citations_ok=not result.unverified)
+                try:
+                    sections: list[Section] | None = ensure_usable(fetch(g.paper_id))
+                except FullTextUnavailable:
+                    sections = None
+                abstract = ""
+                if sections is None:
+                    abstract = abstract_for(g.paper_id) if abstract_for else ""
+                    if not abstract.strip():
+                        raise ValueError("no full text and no abstract could be found")
+                    sections_by_id[g.paper_id] = [Section(title="Abstract", text=abstract)]
+                else:
+                    sections_by_id[g.paper_id] = sections
+                result = summarize_paper(llm, g.title, abstract, sections, num_ctx)
+                entries.append(
+                    EvalEntry(paper_id=g.paper_id, title=g.title, summary=result, citations_ok=not result.unverified)
+                )
+            except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
+                msg = " ".join(str(exc).split()) or type(exc).__name__
+                entries.append(EvalEntry(paper_id=g.paper_id, title=g.title, error=msg))
+            handle.step(
+                g.paper_id, current=n, outcome="failed" if entries[-1].error else "ok", detail=entries[-1].error or ""
             )
-        except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
-            msg = " ".join(str(exc).split()) or type(exc).__name__
-            entries.append(EvalEntry(paper_id=g.paper_id, title=g.title, error=msg))
 
     _write_json(vault, EvalFile(day=today, entries=entries))
     ok = sum(e.citations_ok for e in entries)

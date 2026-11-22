@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import platform
+import re
 import shutil
 import signal
 import sqlite3
@@ -64,7 +65,7 @@ from research_pipeline.gold import (
 from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
 from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, stage
+from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, review_queue
@@ -106,6 +107,21 @@ def _reporter() -> Iterator[LineRenderer | LiveRenderer]:
         yield reporter
     finally:
         reporter.close()
+
+
+def _pull_progress(handle: StageHandle, tag: str) -> Callable[[str], None]:
+    """A `pull_model` progress callback: a step event when the whole percent changes, a note otherwise."""
+    last: list[str] = []
+
+    def emit(line: str) -> None:
+        match = re.search(r"(\d+)%$", line)
+        if match is None:
+            handle.note(line)
+        elif not last or last[0] != match.group(1):
+            last[:] = [match.group(1)]
+            handle.step(tag, detail=f"{match.group(1)}%")
+
+    return emit
 
 
 class _Tee:
@@ -877,7 +893,8 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
     arxiv = make_arxiv(config)
     try:
         try:
-            resolved = onboarding.resolve_seeds(proposal.seed_queries, arxiv)
+            with _reporter() as reporter:
+                resolved = onboarding.resolve_seeds(proposal.seed_queries, arxiv, reporter=reporter)
         except SourceError as exc:
             typer.echo(f"Could not reach arXiv: {exc}. No seeds were added.")
             return True
@@ -1273,7 +1290,9 @@ def eval_run(vault: VaultOption = None) -> None:
         typer.echo(f"Replacing today's earlier eval ({today.isoformat()}); its grades are cleared.")
     typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
     with _clean_errors():
-        md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for)
+        with _reporter() as reporter:
+            md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
+                          reporter=reporter)
     typer.echo(f"Report written: {md}")
     typer.echo("Next: rpipe eval grade")
 
@@ -1467,9 +1486,10 @@ def model_fit(vault: VaultOption = None) -> None:
             typer.echo(build_llm(cfg, ctx.vault).check())
             return
         typer.echo("Probing Ollama: this loads and unloads models and can take a few minutes.")
-        fit = ollama_fit.resolve(
-            cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True, log=_progress,
-        )
+        with _reporter() as reporter, stage(reporter, "model fit") as handle:
+            fit = ollama_fit.resolve(
+                cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True, log=handle.note,
+            )
     except (LlmError, OSError, ValueError) as exc:
         raise _fail(str(exc)) from exc
     typer.echo(f"Using model {fit.model} with a context of {fit.num_ctx} tokens")
@@ -1481,8 +1501,10 @@ def model_check(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     _require_model(ctx.config)
     try:
-        llm = build_llm(ctx.config, ctx.vault, log=_progress)
-        typer.echo(llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured.")
+        with _reporter() as reporter, stage(reporter, "model check") as handle:
+            llm = build_llm(ctx.config, ctx.vault, log=handle.note)
+            line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
+        typer.echo(line)
     except (LlmError, OSError, ValueError) as exc:
         raise _fail(str(exc)) from exc
 
@@ -1606,7 +1628,8 @@ def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> No
     if rec.pull is not None and rec.backend == "ollama" and info.ollama_installed:
         if typer.confirm(f"Pull {rec.pull.tag} now ({rec.pull.download_gb:g} GB download)?", default=True):
             try:
-                pull_model(config.llm_url, rec.pull.tag, lambda line: typer.echo(f"  {line}"))
+                with _reporter() as reporter, stage(reporter, "model pull", label=rec.pull.tag) as handle:
+                    pull_model(config.llm_url, rec.pull.tag, _pull_progress(handle, rec.pull.tag))
             except LlmError as exc:
                 typer.echo(f"Pull failed: {exc}")
     profile_edit.set_llm_backend(vault, "ollama", known)
@@ -1682,8 +1705,9 @@ def _check_backend(vault: Path) -> bool:
         typer.echo("Ready: abstracts-only mode needs nothing else.")
         return True
     try:
-        llm = build_llm(config, vault, log=_progress)
-        line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
+        with _reporter() as reporter, stage(reporter, "model check") as handle:
+            llm = build_llm(config, vault, log=handle.note)
+            line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
     except (LlmError, OSError, ValueError) as exc:
         typer.echo(f"Not ready yet: {exc}\nFix it, then run rpipe model setup")
         return False

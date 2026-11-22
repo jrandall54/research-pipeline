@@ -181,3 +181,16 @@ def test_run_eval_thin_page_falls_back_to_abstract(vault):
     add_papers(vault, 1)
     run(vault, fetcher=lambda pid: [Section(title="Intro", text="x")], abstract_for=lambda pid: "We study X.")
     assert load_eval(vault, DAY).entries[0].summary.basis == "abstract"
+
+
+def test_run_eval_emits_one_step_per_paper(vault):
+    from research_pipeline.progress import ListReporter
+
+    add_papers(vault, 2)
+    llm = FailFirst()
+    rep = ListReporter()
+    run_eval(vault, llm, fetch, 32768, DAY, None, reporter=rep)
+    steps = [(e.label, e.outcome) for e in rep.events if e.kind == "step"]
+    assert steps == [("2401.00000", "failed"), ("2401.00001", "ok")]
+    assert rep.events[0].kind == "start" and rep.events[0].total == 2
+    assert rep.events[-1].kind == "done"

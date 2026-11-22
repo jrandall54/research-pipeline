@@ -223,3 +223,12 @@ def test_c1_bidi_stripped_non_latin_kept_and_seed_queries_cleaned():
     result = propose(llm, DESC)
     assert result.topics == ["bidi topic", "أمن الذكاء الاصطناعي", "大模型安全"]
     assert result.seed_queries == ["attention [31mis all you need"]
+
+
+def test_resolve_seeds_notes_each_lookup():
+    from research_pipeline.progress import ListReporter
+
+    rep = ListReporter()
+    resolve_seeds(["Universal and Transferable Adversarial Attacks", "Another Long Paper Title Here"],
+                  StubArxiv([]), reporter=rep)
+    assert len([e for e in rep.events if e.kind == "note"]) == 2

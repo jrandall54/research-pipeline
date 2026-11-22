@@ -53,7 +53,7 @@ def run_triage(
         )
     }
     todo = [p for p in papers if p["id"] not in stored]
-    with stage(reporter, "triage", total=len(todo) or None) as handle:
+    with stage(reporter, "triage", total=None) as handle:
         if todo:
             handle.note(f"embedding {len(todo)} papers")  # one embed call, so no per-paper steps
             new_vecs = np.asarray(embedder.embed([_text(p) for p in todo]), dtype=np.float32)

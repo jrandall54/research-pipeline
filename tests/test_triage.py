@@ -235,3 +235,14 @@ def test_progress_notes_how_many_papers_are_embedded(conn, embedder):
     n = len(papers_with_status(conn, Status.triaged)) + len(papers_with_status(conn, Status.skipped))
     assert n > 0
     assert rep.events[1].label == f"embedding {n} papers"
+
+
+def test_progress_embedding_stage_has_no_total(conn, embedder):
+    """One embed call means no steps, so a total would leave a live bar stuck at 0/N."""
+    from research_pipeline.progress import ListReporter
+
+    fill(conn)
+    rep = ListReporter()
+    run_triage(conn, embedder, PROFILE, SEEDS, reporter=rep)
+    starts = [e for e in rep.events if e.kind == "start" and e.stage == "triage"]
+    assert starts and starts[0].total is None

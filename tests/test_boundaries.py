@@ -91,3 +91,50 @@ def test_checker_accepts_unrelated_imports(tmp_path):
     clean = tmp_path / "clean.py"
     clean.write_text("from research_pipeline import llm\nfrom . import rank\nimport shelfish\n", encoding="utf-8")
     assert _offending_imports(clean, "research_pipeline.backends") == []
+
+
+PRIVATE_STRINGS = ("shelf_chunks", "my_work")
+
+
+def _private_strings(path: Path) -> list[str]:
+    """One line per forbidden name found anywhere in the source text of `path`."""
+    text = path.read_text(encoding="utf-8")
+    return [f"{path.name}: mentions {s}" for s in PRIVATE_STRINGS if s in text]
+
+
+def test_model_modules_do_not_mention_shelf_storage():
+    files = [PACKAGE_ROOT / name for name in MODEL_MODULES]
+    files += sorted((PACKAGE_ROOT / "backends").glob("*.py"))
+    found = [line for f in files for line in _private_strings(f)]
+    assert found == [], "model code must not name the shelf table or my_work:\n" + "\n".join(found)
+
+
+@pytest.mark.parametrize("source", ['q = "SELECT text FROM shelf_chunks"\n', "path = config.my_work\n"])
+def test_string_checker_flags_planted_names(tmp_path, source):
+    planted = tmp_path / "planted.py"
+    planted.write_text(source, encoding="utf-8")
+    assert _private_strings(planted)
+
+
+def _research_pipeline_imports(path: Path, package: str) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [a.name for a in node.names if a.name.split(".")[0] == "research_pipeline"]
+        elif isinstance(node, ast.ImportFrom):
+            resolved = _resolve(node, package)
+            if resolved.split(".")[0] == "research_pipeline":
+                found.append(resolved)
+    return found
+
+
+def test_progress_module_imports_nothing_from_the_package():
+    """progress.py is shared by every layer, so it must stay free of package imports."""
+    assert _research_pipeline_imports(PACKAGE_ROOT / "progress.py", "research_pipeline") == []
+
+
+def test_package_import_checker_can_fail(tmp_path):
+    planted = tmp_path / "planted.py"
+    planted.write_text("from .llm import LLM\n", encoding="utf-8")
+    assert _research_pipeline_imports(planted, "research_pipeline")

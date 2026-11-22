@@ -232,3 +232,13 @@ def test_resolve_seeds_notes_each_lookup():
     resolve_seeds(["Universal and Transferable Adversarial Attacks", "Another Long Paper Title Here"],
                   StubArxiv([]), reporter=rep)
     assert len([e for e in rep.events if e.kind == "note"]) == 2
+
+
+def test_suggest_reports_progress_for_the_model_call(vault, monkeypatch):
+    use_llm(monkeypatch, FakeLLM([PROPOSAL]))
+    use_arxiv(monkeypatch, StubArxiv(by_id=[paper()], by_title=[paper()]))
+    result = suggest(vault, DESC, "--yes")
+    assert result.exit_code == 0, result.output
+    assert "suggest: asking the model for topics and papers…" in result.stderr
+    assert "suggest done" in result.stderr
+    assert "suggest" not in result.stdout.split("Proposed topics")[0]  # stdout unchanged

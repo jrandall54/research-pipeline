@@ -873,7 +873,8 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
             typer.echo(
                 f"Your description will be sent to {llm.name} (model {llm.model_name}) to suggest topics."
             )
-        proposal = onboarding.propose(llm, description)
+        with _reporter() as reporter, stage(reporter, "suggest", label="asking the model for topics and papers"):
+            proposal = onboarding.propose(llm, description)  # no prompt while this reporter is open
     except (LlmError, OSError) as exc:
         typer.echo(f"{LLM_DOWN} ({exc})")
         return False

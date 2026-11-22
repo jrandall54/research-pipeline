@@ -41,7 +41,7 @@ def format_line(event: ProgressEvent) -> str | None:
         return f"  {event.label}" if event.label else None
     if event.kind == "step":
         if event.stage == "summarize" and event.outcome in ("done", "stopped", "failed"):
-            # Exactly today's per-paper line (cli._paper_progress).
+            # The per-paper line format fixed by the plan.
             if event.outcome == "done":
                 # `detail` carries this paper's own time (`41s`); elapsed is the whole stage's.
                 took = event.detail or f"{event.elapsed:.0f}s"

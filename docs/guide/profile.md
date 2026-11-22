@@ -165,7 +165,7 @@ Other messages: adding something already there prints "already in your profile" 
 
 ### Guided suggestions: `rpipe profile suggest`
 
-If the summary backend is not local (Claude Code), the command first prints "Your description will be sent to claude-code (model sonnet) to suggest topics." so you know where the text goes. Under the `none` backend it prints "No summary model is set up..." and exits 1 (the init description step prints it and moves on). See `backends.md`.
+While the model works, stderr shows `suggest: asking the model for topics and papers…` and the usual "still waiting" heartbeat, so a cold model load that takes a minute does not look like a freeze (no question is asked until that line finishes). If the summary backend is not local (Claude Code), the command first prints "Your description will be sent to claude-code (model sonnet) to suggest topics." so you know where the text goes. Under the `none` backend it prints "No summary model is set up..." and exits 1 (the init description step prints it and moves on). See `backends.md`.
 
 **What it does.** You write a few sentences about your research ("I work on security of LLM agents, mostly prompt injection and sandboxing"). The local model (see `llm.md`) proposes 3 to 8 topic phrases and up to 10 titles of well-known papers. You approve each one; nothing is added without a yes (or `--yes`).
 

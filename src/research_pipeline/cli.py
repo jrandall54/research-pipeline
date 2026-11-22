@@ -1413,6 +1413,23 @@ def model_set_effort(
     typer.echo(f"effort is now {level.strip().lower()}{note}.")
 
 
+@model_app.command("set-embedding")
+def model_set_embedding(
+    name: Annotated[str, typer.Argument(help="Sentence-embedding model name, e.g. BAAI/bge-small-en-v1.5.")],
+    vault: VaultOption = None,
+) -> None:
+    """Choose the model that measures how similar papers are to your profile."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_embedding_model(ctx.vault, name)
+    typer.echo(f"embedding model is now {name.strip()}.")
+    typer.echo(
+        "The next run downloads the model (the first download can take a while; progress is shown) "
+        "and re-embeds everything, because vectors from different models cannot be compared."
+    )
+    typer.echo("To go back: rpipe model set-embedding BAAI/bge-small-en-v1.5")
+
+
 @model_app.command("set-backend")
 def model_set_backend(
     name: Annotated[str, typer.Argument(help="Backend: ollama, claude-code, none, or an installed plug-in.")],
@@ -2137,6 +2154,18 @@ def sources_list(vault: VaultOption = None) -> None:
     for name in ctx.config.sources:
         if name not in registry.plugins(registry.SOURCE_GROUP):
             typer.echo(f"{name}  on  not installed")
+
+
+@sources_app.command("set-max-results")
+def sources_set_max_results(
+    n: Annotated[int, typer.Argument(help="Most papers to fetch from arXiv per run (50 to 5000).")],
+    vault: VaultOption = None,
+) -> None:
+    """Set the safety cap on arXiv papers fetched per run (50 to 5000)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_arxiv_max_results(ctx.vault, n)
+    typer.echo(f"arXiv fetches at most {n} papers per run.")
 
 
 @sources_app.command("enable")

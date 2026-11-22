@@ -273,3 +273,41 @@ def test_disable_last_source_refused(vault):
 def test_enable_unknown_source_lists_known(vault):
     with pytest.raises(ValueError, match="arxiv, hf_daily"):
         pe.enable_source(vault, "nope", {"arxiv", "hf_daily"})
+
+
+def cfg(vault):
+    return load_config(vault / "config.yaml")
+
+
+def test_set_arxiv_max_results_round_trips_and_keeps_comments(vault):
+    pe.set_arxiv_max_results(vault, 250)
+    assert cfg(vault).arxiv_max_results == 250
+    assert "# Most papers to fetch from arXiv per run" in (vault / "config.yaml").read_text()
+
+
+@pytest.mark.parametrize("bad", [10, 49, 5001, 0, -5])
+def test_set_arxiv_max_results_rejects_out_of_range(vault, bad):
+    before = (vault / "config.yaml").read_bytes()
+    with pytest.raises(ValueError, match="between 50 and 5000"):
+        pe.set_arxiv_max_results(vault, bad)
+    assert (vault / "config.yaml").read_bytes() == before
+
+
+def test_set_arxiv_max_results_accepts_bounds(vault):
+    pe.set_arxiv_max_results(vault, 50)
+    pe.set_arxiv_max_results(vault, 5000)
+    assert cfg(vault).arxiv_max_results == 5000
+
+
+def test_set_embedding_model_round_trips_and_keeps_comments(vault):
+    pe.set_embedding_model(vault, "  all-MiniLM-L6-v2 ")
+    assert cfg(vault).embedding_model == "all-MiniLM-L6-v2"
+    assert "# Sentence-embedding model" in (vault / "config.yaml").read_text()
+
+
+@pytest.mark.parametrize("bad", ["", "   "])
+def test_set_embedding_model_rejects_empty(vault, bad):
+    before = (vault / "config.yaml").read_bytes()
+    with pytest.raises(ValueError, match="empty"):
+        pe.set_embedding_model(vault, bad)
+    assert (vault / "config.yaml").read_bytes() == before

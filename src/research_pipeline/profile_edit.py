@@ -234,6 +234,34 @@ def set_top_n(vault: Path, n: int) -> None:
     _edit(_profile_path(vault), Profile, change)
 
 
+MAX_RESULTS_RANGE = (50, 5000)
+
+
+def set_arxiv_max_results(vault: Path, n: int) -> None:
+    """Most papers fetched from arXiv per run (50 to 5000)."""
+    lo, hi = MAX_RESULTS_RANGE
+    if not lo <= n <= hi:
+        raise ValueError(f"{n} is out of range: give a number between {lo} and {hi}")
+
+    def change(data) -> bool:
+        data["arxiv_max_results"] = n
+        return True
+
+    _edit(_config_path(vault), Config, change)
+
+
+def set_embedding_model(vault: Path, name: str) -> None:
+    """Sentence-embedding model used to rank papers (any name sentence-transformers can load)."""
+    name = name.strip()
+    if not name:
+        raise ValueError("embedding model name must not be empty")
+
+    def change(data) -> bool:
+        data["embedding_model"] = name
+        return True
+
+    _edit(_config_path(vault), Config, change)
+
 def set_feedback_halflife(vault: Path, days: float | str) -> None:
     """Days after which a vote or save counts half as much (1 to 3650)."""
     try:

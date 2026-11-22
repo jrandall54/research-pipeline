@@ -37,10 +37,10 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 | Field | Meaning |
 | --- | --- |
 | `vault_path` | Informational (required): the vault used is set by `--vault` / `$RESEARCH_VAULT` / the default, not by this field. |
-| `arxiv_max_results` | Cap on arXiv papers fetched per run. Default 1000, at least 1. |
+| `arxiv_max_results` | Cap on arXiv papers fetched per run. Default 1000; the command accepts 50 to 5000 (`rpipe sources set-max-results`). |
 | `arxiv_categories` | arXiv categories to collect. Default `cs.LG, cs.CL, cs.CR, cs.OS, cs.SE`, or exactly `["all"]` for every computer-science category (`cs.*`). |
-| `embedding_model` | Model used to turn text into vectors. Default `BAAI/bge-small-en-v1.5`. |
-| `rss_feeds` | Extra RSS feed URLs; default none. |
+| `embedding_model` | Model used to turn text into vectors. Default `BAAI/bge-small-en-v1.5`; change with `rpipe model set-embedding`. |
+| `rss_feeds` | Reserved for the future RSS source; not in the default template, still accepted in old files. |
 | `llm_model`, `llm_url`, `llm_num_ctx` | The local model for summaries (`llm.md`). `llm_model` and `llm_num_ctx` default to `auto`; a pinned `llm_num_ctx` (for example 32768) must be at least 8192. Change them with `rpipe model set`, `rpipe model set-url` and `rpipe model set-context`. |
 | `llm_effort` | Claude Code thinking effort: `low` (default), `medium` or `high`; set with `rpipe model set-effort`. Missing in an older vault means `low`. |
 | `llm_backend`, `llm_cli_path` | Which backend writes summaries (default `ollama`; see `backends.md`) and the full path of a subscription CLI. Missing keys in an older vault mean Ollama. |

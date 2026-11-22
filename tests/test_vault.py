@@ -160,3 +160,9 @@ def test_default_templates_still_load(tmp_path):
     init_vault(tmp_path / "v")
     assert load_profile(tmp_path / "v" / "profile.yaml").topics
     assert load_config(tmp_path / "v" / "config.yaml").arxiv_max_results == 1000
+
+
+def test_fresh_config_has_no_rss_feeds_line(tmp_path):
+    init_vault(tmp_path)
+    assert "rss_feeds" not in (tmp_path / "config.yaml").read_text()
+    assert load_config(tmp_path / "config.yaml").rss_feeds == []

@@ -193,7 +193,10 @@ Tests are offline: HTTP is mocked with `respx` and `tests/fixtures/hf_daily.json
 rpipe sources list              # every available source: on/off, where it comes from, any load error
 rpipe sources enable NAME
 rpipe sources disable NAME      # refused for the last enabled source
+rpipe sources set-max-results N  # most papers arXiv fetches per run, 50 to 5000
 ```
+
+`rpipe sources set-max-results N` sets `arxiv_max_results`, the safety cap described under "arXiv" above. It accepts 50 to 5000 and anything else exits 1 with "between 50 and 5000", changing nothing. The first run on an empty database fetches up to the cap, so a larger number means a longer first run; later runs stop earlier at the first already-stored paper. Code: `profile_edit.set_arxiv_max_results`, `sources_set_max_results` in `cli.py`.
 
 Extra sources come from installed plug-ins (see `plugins.md`). A source named in `sources` that is no longer installed or fails to start is skipped and reported in the health line; the run and digest carry on. Looking up seed papers (`rpipe profile add-seed`, the seed text used in triage) always uses arXiv, whichever sources are enabled, because seeds are arXiv ids. When `arxiv` is enabled the seed lookup reuses the very same client object as collection, so its 3-second spacing between requests carries over (a fresh client would fire at once and risk arXiv 429 errors); when it is not enabled, one private client is made on first use. Code: `registry.build_sources`, `build_pipeline` in `cli.py`.
 

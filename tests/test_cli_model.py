@@ -388,3 +388,19 @@ def test_pull_model_progress_emits_steps_when_percent_changes():
             cb(line)
     steps = [(e.label, e.detail) for e in rep.events if e.kind == "step"]
     assert steps == [("m:1", "10%"), ("m:1", "43%")]
+
+
+def test_set_embedding_saves_and_explains_consequences(vault):
+    res = run(vault, "model", "set-embedding", "all-MiniLM-L6-v2")
+    assert res.exit_code == 0, res.output
+    assert load_config(vault / "config.yaml").embedding_model == "all-MiniLM-L6-v2"
+    out = " ".join(res.output.split())
+    assert "downloads the model" in out and "re-embeds everything" in out
+    assert "rpipe model set-embedding BAAI/bge-small-en-v1.5" in out
+
+
+def test_set_embedding_blank_exits_1(vault):
+    before = (vault / "config.yaml").read_bytes()
+    res = run(vault, "model", "set-embedding", "  ")
+    assert res.exit_code == 1
+    assert (vault / "config.yaml").read_bytes() == before

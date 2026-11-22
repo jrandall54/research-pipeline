@@ -54,3 +54,18 @@ def test_cli_plugins_reports_broken(vault, monkeypatch):
     assert res.exit_code == 0, res.output
     assert "research_pipeline.sources" in res.output and "arxiv" in res.output and "built-in" in res.output
     assert "broken" in res.output and "ImportError" in res.output
+
+
+def test_set_max_results_saves(vault):
+    res = run(vault, "sources", "set-max-results", "300")
+    assert res.exit_code == 0, res.output
+    assert load_config(vault / "config.yaml").arxiv_max_results == 300
+    assert "300" in res.output
+
+
+def test_set_max_results_out_of_range_exits_1_and_changes_nothing(vault):
+    before = (vault / "config.yaml").read_bytes()
+    res = run(vault, "sources", "set-max-results", "10")
+    assert res.exit_code == 1
+    assert "between 50 and 5000" in res.output
+    assert (vault / "config.yaml").read_bytes() == before

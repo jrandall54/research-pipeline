@@ -218,7 +218,7 @@
 
 **sentence-transformers** — the Python library that runs the embedding model on your computer. The default model is `BAAI/bge-small-en-v1.5` (config field `embedding_model`), which turns text into 384 numbers. See `running.md`.
 
-**RSS** — a standard format for a website to publish a list of new items that programs can read. The config has an `rss_feeds` setting for it, but it is not used yet. See `vault-and-config.md`.
+**RSS** — a standard format for a website to publish a list of new items that programs can read. The config model keeps a reserved `rss_feeds` setting for it, but there is no RSS source yet and the default config no longer lists it. See `vault-and-config.md`.
 
 **MCP (Model Context Protocol)** — a standard way to plug extra tool servers into an AI tool. The Claude Code backend runs with `--strict-mcp-config` so none are loaded. See `backends.md`.
 

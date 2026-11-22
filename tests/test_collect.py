@@ -106,3 +106,43 @@ def test_source_failing_midway_leaves_no_rows_from_that_source(conn):
     ids = {r[0] for r in conn.execute("SELECT id FROM papers")}
     assert ids == {"2501.00001"}
     assert conn.execute("SELECT COUNT(*) FROM papers_fts").fetchone()[0] == 1
+
+
+def test_collect_reports_each_source(conn):
+    from research_pipeline.progress import ListReporter
+
+    rep = ListReporter()
+    good = StubSource("fake", [paper(), paper("2501.00002"), paper("2501.00003")])
+    bad = StubSource("bad", error=SourceError("HTTP 500"))
+    run_collect(conn, [good, bad], reporter=rep)
+    steps = [(e.label, e.outcome, e.detail) for e in rep.events if e.kind == "step"]
+    assert steps == [("fake", "ok", "3 papers"), ("bad", "failed", "HTTP 500")]
+    notes = [e.label for e in rep.events if e.kind == "note"]
+    assert notes == ["fake: fetching", "bad: fetching"]
+    assert [e.kind for e in rep.events][0] == "start"
+    assert [e.kind for e in rep.events].count("done") == 1
+
+
+def test_collect_zero_papers_single_done(conn):
+    from research_pipeline.progress import ListReporter
+
+    rep = ListReporter()
+    run_collect(conn, [StubSource("fake", [])], reporter=rep)
+    kinds = [e.kind for e in rep.events]
+    assert kinds.count("done") == 1
+    assert all(e.total is None for e in rep.events)
+
+
+def test_collect_hands_the_stage_handle_to_sources_that_want_it(conn):
+    from research_pipeline.progress import ListReporter
+
+    class Chatty(StubSource):
+        def set_reporter(self, handle):
+            self.handle = handle
+
+        def fetch(self):
+            self.handle.note("page 1")
+            return []
+
+    run_collect(conn, [Chatty("chatty")], reporter=(rep := ListReporter()))
+    assert "page 1" in [e.label for e in rep.events if e.kind == "note"]

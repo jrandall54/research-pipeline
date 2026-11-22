@@ -374,7 +374,10 @@ def _run_locked(ctx: _Context) -> None:
             try:
                 embedder = _load_embedder(pipeline, ctx.config.embedding_model)
                 stage = "collect"
-                counts, errors2 = run_collect(ctx.conn, pipeline.sources, run_id)
+                with _reporter() as reporter:
+                    counts, errors2 = run_collect(
+                        ctx.conn, pipeline.sources, run_id, reporter=reporter
+                    )
                 errors += errors2
                 stage = "triage"
                 seeds = _seed_texts(ctx, profile, pipeline, errors)
@@ -475,7 +478,8 @@ def collect(vault: VaultOption = None) -> None:
     """Fetch new papers from every source into the database."""
     ctx = _open(vault)
     pipeline = build_pipeline(ctx.config)
-    counts, errors = run_collect(ctx.conn, pipeline.sources)
+    with _reporter() as reporter:
+        counts, errors = run_collect(ctx.conn, pipeline.sources, reporter=reporter)
     typer.echo("Collected:")
     _report(counts, [*pipeline.startup_errors, *errors])
 

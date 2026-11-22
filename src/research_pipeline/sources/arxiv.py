@@ -9,6 +9,7 @@ from datetime import date
 import httpx
 
 from research_pipeline.models import PaperMeta
+from research_pipeline.progress import StageHandle
 from research_pipeline.sources.base import SourceError
 
 API_URL = "https://export.arxiv.org/api/query"
@@ -79,6 +80,7 @@ class ArxivSource:
         self._sleep = sleep
         self._clock = clock
         self._last_call: float | None = None
+        self._reporter: StageHandle | None = None
 
     def close(self) -> None:
         """Release the HTTP connection pool."""
@@ -109,6 +111,10 @@ class ArxivSource:
         """Install the "is this id already stored?" test (the caller owns the DB)."""
         self._is_known = is_known
 
+    def set_reporter(self, handle: StageHandle) -> None:
+        """Install the progress handle; `fetch()` then notes each page (optional, like the checker)."""
+        self._reporter = handle
+
     def fetch(self) -> list[PaperMeta]:
         """Newest papers in the configured categories.
 
@@ -125,6 +131,9 @@ class ArxivSource:
         papers: list[PaperMeta] = []
         while len(papers) < self.max_results:
             size = min(PAGE_SIZE, self.max_results - len(papers))
+            if self._reporter is not None:
+                page_no = len(papers) // PAGE_SIZE + 1
+                self._reporter.note(f"arXiv page {page_no} ({len(papers)} papers so far)")
             page = self._get(
                 {
                     "search_query": query,

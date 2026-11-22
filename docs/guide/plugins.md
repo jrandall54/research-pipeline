@@ -50,6 +50,8 @@ def make_source(config):  # config: research_pipeline.models.Config
 
 Install it into the same environment as `rpipe`, then `rpipe sources enable mysource`.
 
+Optional: a source that fetches in several slow steps may define `set_reporter(self, handle)`; `run_collect` calls it if present, and `handle.note("page 2 ...")` then shows live progress (see `sources.md`). Sources without it work unchanged.
+
 ## Why it's built this way
 
 - **Entry points, not a plug-in folder:** installing and removing are ordinary `pip`/`uv` operations, and nobody edits files.

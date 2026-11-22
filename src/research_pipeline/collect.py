@@ -3,11 +3,13 @@
 import sqlite3
 
 from research_pipeline.db import get_paper, upsert_paper
+from research_pipeline.progress import Reporter, stage
 from research_pipeline.sources.base import Source
 
 
 def run_collect(
-    conn: sqlite3.Connection, sources: list[Source], run_id: int | None = None
+    conn: sqlite3.Connection, sources: list[Source], run_id: int | None = None,
+    *, reporter: Reporter | None = None,
 ) -> tuple[dict[str, int], list[str]]:
     """Fetch each source in order and store its papers; return (counts, errors).
 
@@ -19,25 +21,36 @@ def run_collect(
     counts across stages and finishes the run once. ``run_id`` is optional (the standalone
     ``collect`` command has no run) and is currently unused: reserved for future
     per-run tagging.
+
+    Progress: one ``collect`` stage; per source a note ``"<name>: fetching"`` and then a step
+    (``ok`` with ``"<n> papers"``, or ``failed`` with the error). Sources that offer
+    ``set_reporter`` get the stage handle so they can add finer notes (arXiv: one per page).
     """
     counts = {"inserted": 0, "updated": 0, "unchanged": 0, "source_errors": 0}
     errors: list[str] = []
     def is_known(paper_id: str) -> bool:
         return get_paper(conn, paper_id) is not None
 
-    for source in sources:
-        if hasattr(source, "set_known_checker"):
-            source.set_known_checker(is_known)
-        try:
-            papers = source.fetch()
-            for paper in papers:
-                counts[upsert_paper(conn, paper)] += 1
-            conn.commit()
-            warning = getattr(source, "last_warning", None)
-            if warning:
-                errors.append(warning)
-        except Exception as exc:  # noqa: BLE001 - isolate every source failure
-            conn.rollback()
-            counts["source_errors"] += 1
-            errors.append(f"{source.name}: {exc}")
+    with stage(reporter, "collect") as handle:
+        for source in sources:
+            if hasattr(source, "set_known_checker"):
+                source.set_known_checker(is_known)
+            if hasattr(source, "set_reporter"):
+                source.set_reporter(handle)
+            handle.note(f"{source.name}: fetching")
+            try:
+                papers = source.fetch()
+                for paper in papers:
+                    counts[upsert_paper(conn, paper)] += 1
+                conn.commit()
+                warning = getattr(source, "last_warning", None)
+                if warning:
+                    errors.append(warning)
+            except Exception as exc:  # noqa: BLE001 - isolate every source failure
+                conn.rollback()
+                counts["source_errors"] += 1
+                errors.append(f"{source.name}: {exc}")
+                handle.step(source.name, outcome="failed", detail=str(exc) or type(exc).__name__)
+            else:
+                handle.step(source.name, outcome="ok", detail=f"{len(papers)} papers")
     return counts, errors

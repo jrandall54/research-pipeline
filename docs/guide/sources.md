@@ -262,7 +262,22 @@ Errors are plain strings `"<source name>: <message>"` returned to the caller. Th
 uv run pytest tests/test_collect.py -q
 ```
 
-Tests use stub source classes (no network): cross-source dedupe with upvote merge, a failing source not stopping the others, a second run inserting nothing, and a version bump counting as updated.
+While it runs, `rpipe collect` (and the collect stage of `rpipe run`) writes progress to stderr. In a log or pipe it looks like this (on a terminal the same information replaces itself on one spinner line):
+
+```
+collect…
+  arxiv: fetching
+  arXiv page 1 (0 papers so far)
+  arXiv page 2 (100 papers so far)
+  arxiv ok: 130 papers
+  hf_daily: fetching
+  hf_daily ok: 48 papers
+collect done (9s)
+```
+
+A source that fails shows `  arxiv failed: arXiv API returned HTTP 500` and the next source carries on; the error is still recorded in `runs.errors` as before. The page lines are why a first run (many pages, 3 seconds apart) no longer looks frozen. `run_collect` takes an optional keyword `reporter` (default none, silent). It hands the progress handle to a source only if the source has a `set_reporter(handle)` method, the same optional duck-typing as `set_known_checker`, so the `Source` protocol is unchanged; `ArxivSource.set_reporter` makes `fetch()` note each page. Display details are in `running.md` ("Progress").
+
+Tests use stub source classes (no network): cross-source dedupe with upvote merge, a failing source not stopping the others, a second run inserting nothing, a version bump counting as updated, and the progress events (one step per source, failed sources, a single `done` for zero papers). `tests/test_arxiv.py` checks the per-page notes.
 
 ### Where the code is
 

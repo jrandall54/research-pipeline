@@ -265,3 +265,22 @@ def test_all_categories_stops_at_known_paper():
                       is_known=_known({"2601.00050"}))
     assert len(src.fetch()) == 100
     assert len(route.calls) == 1 and src.last_warning is None
+
+
+@respx.mock
+def test_fetch_notes_each_page_to_the_reporter():
+    from research_pipeline.progress import ListReporter, stage
+
+    respx.get(API).mock(
+        side_effect=[
+            httpx.Response(200, text=feed(100, 0)),
+            httpx.Response(200, text=feed(30, 100)),
+        ]
+    )
+    rep = ListReporter()
+    src = ArxivSource(["cs.CR"], max_results=200, sleep=lambda s: None, clock=Clock())
+    with stage(rep, "collect") as handle:
+        src.set_reporter(handle)
+        src.fetch()
+    notes = [e.label for e in rep.events if e.kind == "note"]
+    assert notes == ["arXiv page 1 (0 papers so far)", "arXiv page 2 (100 papers so far)"]

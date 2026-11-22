@@ -51,7 +51,7 @@ def make_claude_code(config: Config, vault: Path, log: Callable[[str], None]) ->
             "Claude Code not found (looked at the recorded path, PATH and ~/.local/bin); "
             f"{SETUP_HINT}"
         )
-    return ClaudeCodeClient(config.llm_model, path)
+    return ClaudeCodeClient(config.llm_model, path, effort=config.llm_effort)
 
 
 def make_none(config: Config, vault: Path, log: Callable[[str], None]) -> None:

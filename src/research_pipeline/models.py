@@ -73,6 +73,8 @@ class Config(BaseModel):
     llm_num_ctx: Annotated[int, Field(ge=8192)] | Literal["auto"] = "auto"
     # Which backend writes summaries ("ollama", "claude-code" or an installed plug-in).
     llm_backend: str = Field(default="ollama", pattern=NAME_PATTERN)
+    # How hard a subscription model thinks per call (claude-code only; see docs/guide/backends.md).
+    llm_effort: Literal["low", "medium", "high"] = "low"
     # Full path of a subscription CLI such as `claude`, recorded by `rpipe model setup`.
     llm_cli_path: str | None = None
     # Enabled paper sources, in collection order (see `rpipe sources list`).

@@ -84,3 +84,21 @@ def test_sources_must_be_nonempty_unique_and_named_sanely(bad):
 def test_llm_backend_name_pattern():
     with pytest.raises(ValidationError):
         Config(vault_path="/v", llm_backend="Not Ok")
+
+
+def test_llm_effort_defaults_to_low_and_old_config_lacks_key(tmp_path):
+    from research_pipeline.models import Config
+    assert Config(vault_path=tmp_path).llm_effort == "low"
+
+
+@pytest.mark.parametrize("value", ["low", "medium", "high"])
+def test_llm_effort_accepts_allowed(tmp_path, value):
+    from research_pipeline.models import Config
+    assert Config(vault_path=tmp_path, llm_effort=value).llm_effort == value
+
+
+@pytest.mark.parametrize("value", ["max", "xhigh", "", "LOW", "fast"])
+def test_llm_effort_rejects_others(tmp_path, value):
+    from research_pipeline.models import Config
+    with pytest.raises(ValidationError):
+        Config(vault_path=tmp_path, llm_effort=value)

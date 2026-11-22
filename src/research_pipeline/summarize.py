@@ -5,6 +5,7 @@ title against the real section titles. See docs/guide/summaries.md.
 """
 
 import sqlite3
+import time
 from collections.abc import Callable
 from datetime import date
 from typing import Literal, TypeVar
@@ -98,6 +99,7 @@ def run_summarize(
     today: date | None = None,
     backlog_limit: int | None = None,
     paper_ids: list[str] | None = None,
+    on_progress: Callable[[int, int, str, str, float, str], None] | None = None,
 ) -> tuple[dict[str, int], list[str]]:
     """Summarise the papers that need it: full text (stored, else fetched), then the model.
 
@@ -110,6 +112,9 @@ def run_summarize(
     summary (newest first). ``paper_ids`` instead summarises exactly those papers (any status,
     ignoring the retry cap, replacing an existing summary). `in_digest`, `skipped` and any
     other status except `triaged`/`fetched` is kept; the summary is just saved.
+    ``on_progress(index, total, paper_id, outcome, seconds, detail)`` is called once per paper
+    as it finishes (outcome ``done``, ``failed`` or ``stopped``; detail is the short failure
+    reason); total counts every queued paper, backlog and explicit ids included.
     See docs/guide/running.md.
     """
     # Imported here because db.py imports the schemas defined above.
@@ -140,8 +145,15 @@ def run_summarize(
         queue = papers_to_summarize(conn, today)
         if backlog_limit is not None:
             queue = queue + papers_missing_summary(conn, today, backlog_limit)
-    for paper in queue:
+    total = len(queue)
+    for index, paper in enumerate(queue, start=1):
         pid = paper["id"]
+        started = time.monotonic()
+
+        def report(outcome: str, detail: str = "") -> None:
+            if on_progress is not None:
+                on_progress(index, total, pid, outcome, time.monotonic() - started, detail)
+
         # Only triaged/fetched papers move on to `summarized`; every other status stays.
         listed = paper["status"] not in (Status.triaged.value, Status.fetched.value)
         try:
@@ -168,10 +180,12 @@ def run_summarize(
                 set_status(conn, pid, Status.summarized)  # commits the summary rows too
             counts["summarized"] += 1
             counts["truncated"] += int(result.truncated)
+            report("done")
         except LlmLimitReached:
             # Not the paper's fault: no retry is burned, it stays queued for the next run.
             if paper["status"] == Status.triaged.value:
                 set_status(conn, pid, Status.triaged)  # undo the early `fetched` mark
+            report("stopped")
             errors.append(
                 "summarize: summaries stopped: usage limit reached;"
                 " remaining papers wait for the next run"
@@ -182,6 +196,7 @@ def run_summarize(
             message = f"{type(exc).__name__}: {exc}" if not isinstance(exc, (LlmError, SourceError)) else str(exc)
             record_failure(conn, pid, message)
             errors.append(f"summarize {pid}: {' '.join(message.split())}")
+            report("failed", " ".join(message.split())[:120])
             if isinstance(exc, LlmTimeout):
                 # A hung model would make every remaining paper wait out the full timeout.
                 errors.append(

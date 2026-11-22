@@ -196,3 +196,20 @@ def test_check_with_missing_or_moved_binary_names_model_setup():
 def test_check_when_logged_out_still_says_log_in():
     with pytest.raises(LlmError, match="not logged in"):
         client(FakeRunner(ok("", 1))).check()
+
+
+def test_argv_defaults_to_low_effort_and_honours_the_setting():
+    assert _flag(ClaudeCodeClient("auto", "/opt/claude").argv("S", Out), "--effort") == "low"
+    assert _flag(ClaudeCodeClient("auto", "/opt/claude", effort="high").argv("S", Out), "--effort") == "high"
+
+
+def test_effort_does_not_remove_any_safety_flag():
+    argv = ClaudeCodeClient("haiku", "/opt/claude", effort="medium").argv("SYS", Out)
+    for flag in ("-p", "--no-session-persistence", "--strict-mcp-config", "--tools",
+                 "--setting-sources", "--permission-mode", "--system-prompt", "--json-schema"):
+        assert flag in argv
+    assert _flag(argv, "--permission-mode") == "dontAsk" and _flag(argv, "--tools") == ""
+
+
+def _flag(argv, name):
+    return argv[argv.index(name) + 1]

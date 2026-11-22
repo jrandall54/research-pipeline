@@ -310,6 +310,22 @@ def set_llm_model(vault: Path, name: str) -> None:
     _edit(_config_path(vault), Config, change)
 
 
+EFFORTS = ("low", "medium", "high")
+
+
+def set_llm_effort(vault: Path, level: str) -> None:
+    """How hard Claude Code thinks per call: low, medium or high (other backends ignore it)."""
+    level = level.strip().lower()
+    if level not in EFFORTS:
+        raise ValueError(f"unknown effort {level!r}: choose one of {', '.join(EFFORTS)}")
+
+    def change(data) -> bool:
+        data["llm_effort"] = level
+        return True
+
+    _edit(_config_path(vault), Config, change)
+
+
 def set_llm_url(vault: Path, url: str) -> None:
     url = url.strip()
     if not re.match(r"^https?://\S+$", url):

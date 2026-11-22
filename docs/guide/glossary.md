@@ -199,3 +199,7 @@
 **Walkthrough** — the guided, step-by-step prompts of `rpipe model setup` (also the first step of `rpipe init`): look at your computer, recommend a backend, set it up, test it. See `setup.md`.
 
 **Backlog** — papers that were listed in an earlier digest but never got a summary (the model failed that night, or summaries did not exist yet). `rpipe summarize --backlog` works through them newest first, a few at a time. See `running.md`.
+
+**Effort** — a setting (`low`, `medium`, `high`) telling Claude how much to think before it answers. Lower is faster and cheaper but can be shallower. rpipe passes it to Claude Code as `--effort` and defaults to `low`; change it with `rpipe model set-effort`. See `backends.md`.
+
+**Thinking tokens** — the words (counted in tokens) a model writes to itself while working out an answer, before the answer you see. You do not see them, but you wait for them and they use up your subscription allowance. Without a limit, Haiku wrote about 13,000 of them for one critique. See Effort.

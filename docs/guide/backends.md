@@ -29,8 +29,9 @@ Worked example: you run `rpipe model set-backend claude-code` while logged out. 
 | Command | ollama | claude-code | none |
 |---|---|---|---|
 | `set-backend NAME [--force]` | yes | yes | yes |
-| `show` | yes (first line `backend: ollama`) | yes (model and `claude` path) | yes (just says so) |
+| `show` | yes (first line `backend: ollama`) | yes (model, effort and `claude` path) | yes (just says so) |
 | `set NAME` | any Ollama model, or `auto` | `sonnet`, `haiku`, `opus`, a full `claude-...` name, or `auto` | refused |
+| `set-effort low\|medium\|high` | accepted and saved, but ignored (`show` says so) | yes: how hard Claude thinks per call | accepted, ignored |
 | `check` | server up and model installed | logged in, one tiny test call | refused |
 | `fit`, `set-url`, `set-context` | yes | refused: "only applies to the ollama backend (current: claude-code). Nothing was changed." | refused (same wording) |
 
@@ -58,7 +59,7 @@ For each summary the pipeline runs Claude Code in headless mode (`claude -p`: pr
    ```
    claude -p --output-format json --json-schema <schema> --system-prompt <instructions>
           --tools "" --setting-sources "" --strict-mcp-config --no-session-persistence
-          --permission-mode dontAsk --model sonnet
+          --permission-mode dontAsk --model sonnet --effort low
    ```
 2. Create a fresh empty temporary folder and run the command inside it.
 3. Send the (possibly huge) paper text on **stdin**, not in the command line, because command lines have a length limit.
@@ -81,6 +82,17 @@ Worked example: a failed night where the login expired. `claude` prints `{"is_er
 | `--no-session-persistence` | does not save the conversation to disk |
 | `--permission-mode dontAsk` | never stops to ask a question nobody can answer |
 | `--model` | `sonnet` by default; `haiku`, `opus` or a full `claude-...` name allowed |
+| `--effort` | how much hidden thinking the model may do: `low` (our default), `medium` or `high`; see below |
+
+### Effort: why the default is `low`
+
+**What it does.** `llm_effort` (`rpipe model set-effort low|medium|high`, shown by `rpipe model show`) is passed to Claude Code as `--effort`. It limits how long the model "thinks" before it answers (see "Effort" and "Thinking tokens" in `glossary.md`). Only the `claude-code` backend uses it; Ollama and `none` ignore it, and third-party plug-in backends are built the same way as before. A vault whose `config.yaml` has no `llm_effort` line behaves as `low`.
+
+**Why it exists (measured on 2026-11-22 with Haiku).** Without the flag the critique call made Haiku produce about 13,000 hidden thinking tokens: 70 to 127 seconds and roughly 17,000 output tokens per critique. With `--effort low` the same call took about 9 seconds and about 2,000 output tokens. The summary call was already fast. A paper took about two minutes before the change; the output tokens are also what a subscription's usage allowance is spent on, so low effort is cheaper as well as faster.
+
+**The trade-off.** Less thinking can mean a shallower critique. The summary and critique are still checked by code (every cited section must exist, see `summaries.md`), so a shallow answer cannot invent sections, but it may miss subtler weaknesses. If you care more about depth than speed, try `rpipe model set-effort medium` or `high`, then run `rpipe eval run` and compare the accuracy with the earlier result (see `evaluation.md`); keep whichever setting scores acceptably for the time and quota it costs.
+
+**Rejected alternatives.** Leaving the flag off (what we had: slow and costly for little visible benefit); hard-coding `low` with no setting (users with different needs could not change it, and CLAUDE.md requires every setting to have a command); offering `xhigh` and `max` (they only make the slow behaviour worse for this job).
 
 We never use `--bare`: it would skip the login and fall back to API-key billing.
 
@@ -164,4 +176,4 @@ Install it next to `rpipe`, then `rpipe model set-backend echo` (it only accepts
 
 ## Where the code is
 
-`src/research_pipeline/backends/claude_code.py` (`ClaudeCodeClient`, `find_claude`, `logged_in`, `resolve_model`); shared errors, `NO_MODEL` and `require_local` in `src/research_pipeline/llm.py`; backend names and `build_backend` in `src/research_pipeline/registry.py`; the `rpipe model` commands in `src/research_pipeline/cli.py` and their config edits (`set_llm_backend`, backend-aware `set_llm_model`) in `src/research_pipeline/profile_edit.py`.
+`src/research_pipeline/backends/claude_code.py` (`ClaudeCodeClient` with its `effort` argument, `find_claude`, `logged_in`, `resolve_model`); shared errors, `NO_MODEL` and `require_local` in `src/research_pipeline/llm.py`; backend names and `build_backend` in `src/research_pipeline/registry.py`; the `rpipe model` commands in `src/research_pipeline/cli.py` and their config edits (`set_llm_backend`, backend-aware `set_llm_model`, `set_llm_effort`) in `src/research_pipeline/profile_edit.py`.

@@ -34,6 +34,9 @@ llm_num_ctx: auto
 # Which backend writes summaries: ollama (a model on this computer, the default) or
 # claude-code (your Claude subscription). Choose with `rpipe model setup`.
 llm_backend: ollama
+# How hard Claude Code thinks per call: low (fast, the default), medium or high (slower, more
+# hidden thinking). Only the claude-code backend uses it. Change with `rpipe model set-effort`.
+llm_effort: low
 # Full path of the subscription CLI (for example claude). Recorded by `rpipe model setup`;
 # leave empty for Ollama.
 llm_cli_path: null

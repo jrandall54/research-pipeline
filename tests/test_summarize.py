@@ -537,3 +537,33 @@ def test_failure_in_backlog_records_and_others_carry_on(conn):
     counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, today=TODAY, backlog_limit=10)
     assert counts["summary_failed"] == 1 and counts["summarized"] == 1
     assert get_paper(conn, "2501.00001")["retry_count"] == 1
+
+
+def test_progress_callback_called_per_paper_with_position_and_outcome(conn):
+    add_triaged(conn, "2501.00001")
+    add_triaged(conn, "2501.00002")
+    llm = FakeLLM([LlmError("bad json"), summary(), critique()])
+    events = []
+    run_summarize(conn, llm, lambda pid: SECTIONS, 32768,
+                  on_progress=lambda i, n, pid, outcome, secs, detail: events.append((i, n, pid, outcome, detail)))
+    assert [e[:4] for e in events] == [(1, 2, "2501.00001", "failed"), (2, 2, "2501.00002", "done")]
+    assert "bad json" in events[0][4]
+
+
+def test_progress_callback_reports_usage_limit_stop(conn):
+    add_triaged(conn, "2501.00001")
+    events = []
+    run_summarize(conn, FakeLLM([LlmLimitReached("weekly")]), lambda pid: SECTIONS, 32768,
+                  on_progress=lambda i, n, pid, outcome, secs, detail: events.append((i, n, pid, outcome)))
+    assert events == [(1, 1, "2501.00001", "stopped")]
+
+
+def test_progress_count_includes_backlog_and_default_is_none(conn):
+    add_triaged(conn, "2501.00001")
+    add_digested(conn, "2501.00002", TODAY - timedelta(days=1))
+    events = []
+    run_summarize(conn, FakeLLM([summary(), critique()] * 2), lambda pid: SECTIONS, 32768, today=TODAY,
+                  backlog_limit=5, on_progress=lambda i, n, *r: events.append((i, n)))
+    assert events == [(1, 2), (2, 2)]
+    add_triaged(conn, "2501.00003")
+    run_summarize(conn, FakeLLM([summary(), critique()]), lambda pid: SECTIONS, 32768, today=TODAY)  # no callback: fine

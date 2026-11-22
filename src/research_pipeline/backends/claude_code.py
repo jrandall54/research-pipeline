@@ -18,6 +18,7 @@ CALL_TIMEOUT = 600.0  # seconds for one generate call
 STATUS_TIMEOUT = 15.0  # seconds for `claude auth status`
 DEFAULT_MODEL = "sonnet"
 ALIASES = ("sonnet", "haiku", "opus")
+DEFAULT_EFFORT = "low"  # `claude --effort`: low keeps the hidden thinking short (see backends.md)
 
 # (argv, stdin text, timeout seconds, working directory, environment)
 Runner = Callable[[list[str], str, float, Path, dict[str, str]], subprocess.CompletedProcess[str]]
@@ -126,12 +127,14 @@ class ClaudeCodeClient:
         num_ctx: int = CONTEXT_BUDGET,
         timeout: float = CALL_TIMEOUT,
         runner: Runner = subprocess_runner,
+        effort: str = DEFAULT_EFFORT,
     ) -> None:
         self.model_name = resolve_model(model)
         self.cli_path = cli_path
         self.num_ctx = num_ctx
         self.timeout = timeout
         self.runner = runner
+        self.effort = effort
 
     def argv(self, system: str, schema: type[BaseModel]) -> list[str]:
         return [
@@ -145,6 +148,7 @@ class ClaudeCodeClient:
             "--no-session-persistence",
             "--permission-mode", "dontAsk",
             "--model", self.model_name,
+            "--effort", self.effort,
         ]  # fmt: skip
 
     def _call(self, system: str, user: str, schema: type[BaseModel]) -> dict:

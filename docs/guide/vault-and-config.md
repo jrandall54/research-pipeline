@@ -37,6 +37,7 @@ The pipeline currently writes `vault.sqlite` (which also holds full texts and su
 | `embedding_model` | `BAAI/bge-small-en-v1.5` | Model that turns text into vectors for similarity (see `glossary.md`). |
 | `rss_feeds` | `[]` | Extra feed URLs (read but not used yet: RSS collection is a later phase). |
 | `llm_model` | `auto` | Ollama model that writes summaries; `auto` picks the largest installed model that fits fully in GPU memory. Pin with `rpipe model set NAME`, go back with `rpipe model set auto`. See `llm.md`. |
+| `llm_effort` | `low` | Claude Code only: how hard it thinks per call (`low`, `medium` or `high`); `low` is about ten times faster for the critique. Change with `rpipe model set-effort LEVEL`. A missing key means `low`. See `backends.md`. |
 | `llm_url` | `http://localhost:11434` | Where the Ollama server listens. Change with `rpipe model set-url URL`. |
 | `llm_num_ctx` | `auto` | Context window in tokens: how much text the model reads at once. `auto` finds the largest that fits; a pinned number must be at least 8192 (smaller leaves no room for the paper). Change with `rpipe model set-context N` or `auto`. See `llm.md`. Vaults created before `auto` existed keep their explicit values (`qwen3:14b`, `32768`) unchanged. |
 | `llm_backend` | `ollama` | Which backend writes summaries: `ollama`, `claude-code` or an installed plug-in (letters, digits, `_`, `-`). Old vaults without the key use Ollama. See `backends.md`. |

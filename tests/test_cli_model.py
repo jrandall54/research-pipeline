@@ -244,3 +244,84 @@ def test_collect_reports_startup_errors(vault, monkeypatch):
     monkeypatch.setattr(cli, "build_pipeline", lambda c: pipe)
     result = run(vault, "collect")
     assert "source gone: not installed" in result.output
+
+
+def test_old_config_without_effort_key_behaves_as_low(vault):
+    text = "\n".join(l for l in (vault / "config.yaml").read_text().splitlines() if not l.startswith("llm_effort"))
+    (vault / "config.yaml").write_text(text + "\n")
+    assert load_config(vault / "config.yaml").llm_effort == "low"
+
+
+def test_new_vault_config_template_has_effort(vault):
+    assert "llm_effort: low" in (vault / "config.yaml").read_text()
+
+
+def test_set_effort_valid_writes_and_preserves_other_keys(vault):
+    set_config(vault, llm_backend="claude-code", llm_model="haiku")
+    result = run(vault, "model", "set-effort", "high")
+    assert result.exit_code == 0, result.output
+    cfg = load_config(vault / "config.yaml")
+    assert cfg.llm_effort == "high" and cfg.llm_model == "haiku" and cfg.llm_backend == "claude-code"
+    assert "effort is now high" in result.output
+
+
+@pytest.mark.parametrize("bad", ["max", "turbo", "LOWEST"])
+def test_set_effort_invalid_is_refused_and_changes_nothing(vault, bad):
+    before = (vault / "config.yaml").read_bytes()
+    result = run(vault, "model", "set-effort", bad)
+    assert result.exit_code == 1
+    assert "low, medium, high" in result.output
+    assert (vault / "config.yaml").read_bytes() == before
+
+
+def test_set_effort_accepts_capitals_and_spaces(vault):
+    assert run(vault, "model", "set-effort", " Medium ").exit_code == 0
+    assert load_config(vault / "config.yaml").llm_effort == "medium"
+
+
+def test_model_show_lists_effort_under_claude_code(vault):
+    set_config(vault, llm_backend="claude-code", llm_effort="medium")
+    assert "effort: medium" in run(vault, "model", "show").output
+
+
+def test_model_show_says_effort_only_applies_to_claude_code(vault):
+    out = run(vault, "model", "show").output  # default backend ollama
+    assert "effort: low (only applies to the claude-code backend)" in out
+
+
+def test_claude_code_factory_passes_effort(vault, monkeypatch):
+    monkeypatch.setattr(registry, "find_claude", lambda p: "/opt/claude")
+    cfg = load_config(vault / "config.yaml").model_copy(update={"llm_backend": "claude-code", "llm_effort": "high"})
+    client = registry.make_claude_code(cfg, vault, lambda s: None)
+    argv = client.argv("S", claude_code._Ping)
+    assert argv[argv.index("--effort") + 1] == "high"
+
+
+def test_ollama_backend_ignores_effort(vault, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(registry.ollama_fit, "resolve", lambda *a, **k: SimpleNamespace(model="m", num_ctx=8192))
+    cfg = load_config(vault / "config.yaml").model_copy(update={"llm_effort": "high"})
+    client = registry.make_ollama(cfg, vault, lambda s: None)
+    assert client.name == "ollama" and not hasattr(client, "effort")
+
+
+def test_summarize_command_prints_one_line_per_paper(vault, monkeypatch):
+    def fake(conn, llm, fetch, num_ctx, today=None, backlog_limit=None, paper_ids=None, on_progress=None):
+        on_progress(1, 2, "2611.26408", "done", 41.2, "")
+        on_progress(2, 2, "2611.26409", "failed", 3.0, "bad json")
+        on_progress(2, 2, "2611.26410", "stopped", 1.0, "")
+        return {}, []
+    monkeypatch.setattr(cli, "run_summarize", fake)
+    llm = SimpleNamespace(name="claude-code", local=False, model_name="haiku", num_ctx=1000)
+    monkeypatch.setattr(cli, "_ready_llm", lambda p: llm)
+    set_config(vault, llm_backend="claude-code")
+    from research_pipeline.db import open_db, upsert_paper
+    from research_pipeline.models import PaperMeta
+    conn = open_db(vault / "vault.sqlite")
+    upsert_paper(conn, PaperMeta(id="2611.26408", title="T", source="arxiv", url="http://x"))
+    conn.commit()
+    conn.close()
+    result = run(vault, "summarize", "2611.26408")
+    assert "[1/2] 2611.26408 done (summary + critique, 41s)" in result.output
+    assert "[2/2] 2611.26410 stopped: usage limit reached" in result.output
+    assert "[2/2] 2611.26409 failed: bad json" in result.output

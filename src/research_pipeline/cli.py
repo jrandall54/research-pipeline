@@ -62,6 +62,21 @@ def _progress(line: str) -> None:
     typer.echo(f"  {line}", err=True)
 
 
+def _paper_progress(echo: Callable[[str], None]) -> Callable[..., None]:
+    """One line per paper as it finishes: `[2/3] 2611.26408 done (summary + critique, 41s)`."""
+
+    def report(index: int, total: int, pid: str, outcome: str, seconds: float, detail: str) -> None:
+        if outcome == "done":
+            tail = f"done (summary + critique, {seconds:.0f}s)"
+        elif outcome == "stopped":
+            tail = "stopped: usage limit reached"
+        else:
+            tail = f"failed: {detail}"
+        echo(f"[{index}/{total}] {pid} {tail}")
+
+    return report
+
+
 def _release_gpu_memory() -> None:
     """Hand back GPU memory the embedding model held (never imports torch just for this)."""
     gc.collect()
@@ -339,7 +354,8 @@ def _run_locked(ctx: _Context) -> None:
                         counts["summaries_off"] = 1  # chosen, not a failure: abstracts-only digest
                     else:
                         sum_counts, sum_errors = run_summarize(
-                            ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
+                            ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+                            on_progress=_paper_progress(_progress),
                         )
                         counts |= sum_counts
                         errors += sum_errors
@@ -486,6 +502,7 @@ def summarize(
     counts, errors = run_summarize(
         ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
         today=today, backlog_limit=cap, paper_ids=paper_ids or None,
+        on_progress=_paper_progress(typer.echo),
     )
     typer.echo("Summarized:")
     _report(counts, errors)
@@ -1234,6 +1251,10 @@ def model_show(vault: VaultOption = None) -> None:
         typer.echo("No summary model: digests list abstracts only. Choose one with `rpipe model setup`.")
         return
     typer.echo(f"model: {cfg.llm_model}")
+    if cfg.llm_backend == "claude-code":
+        typer.echo(f"effort: {cfg.llm_effort}")
+    else:
+        typer.echo(f"effort: {cfg.llm_effort} (only applies to the claude-code backend)")
     if cfg.llm_backend != "ollama":
         if cfg.llm_backend == "claude-code":
             typer.echo(f"claude: {cfg.llm_cli_path or 'found on PATH when used'}")
@@ -1263,6 +1284,19 @@ def model_set(
     with _clean_errors():
         profile_edit.set_llm_model(ctx.vault, name)
     typer.echo(f"model is now {name.strip()}. Check it works with `rpipe model check`.")
+
+
+@model_app.command("set-effort")
+def model_set_effort(
+    level: Annotated[str, typer.Argument(help="low (fast, default), medium or high (slower, more thinking).")],
+    vault: VaultOption = None,
+) -> None:
+    """Choose how hard Claude Code thinks per call: low, medium or high (only the claude-code backend uses it)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_llm_effort(ctx.vault, level)
+    note = "" if ctx.config.llm_backend == "claude-code" else " (saved, but only the claude-code backend uses it)"
+    typer.echo(f"effort is now {level.strip().lower()}{note}.")
 
 
 @model_app.command("set-backend")

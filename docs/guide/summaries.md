@@ -37,6 +37,8 @@ Step by step:
 8. **Repeat steps 3 to 7 for the critique** (`build_critique_prompt`, `Critique` schema).
 9. Return a `PaperSummary`. `db.save_summary` stores it ([data-model.md](data-model.md)).
 
+**Progress while it works.** A model call can take minutes, so `run_summarize` tells a reporter what it is doing (it never prints; see the Progress section of `running.md`). Inside one `summarize` stage, before each step it sends a note: `fetching <id>` (only if the full text is not stored), `writing the summary for <id>` (step 4), `writing the critique for <id>` (step 8) and `retrying citations for <id>` (step 6, either time it happens). After each paper it sends one result event, shown as `[1/3] <id> done (summary + critique, 41s)`, `failed: <reason>` or `stopped: usage limit reached`. `summarize_paper` itself only takes an optional `on_phase` callback that `run_summarize` uses to produce those notes; with none it behaves as before.
+
 ### The schema, with a worked example
 
 | Object | Fields |
@@ -120,7 +122,7 @@ Rejected alternatives:
 uv run pytest tests/test_summarize.py -q
 ```
 
-The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They check the happy path, that the paper sits inside `<paper>` tags and the system prompt warns about instructions, that injected text (including a fake `</paper>`) stays inside the block, the one-retry rule and its feedback, flagging after a failed retry, abstract-only labelling, the context budget, and that model errors (`LlmError`) are passed on to the caller. `tests/test_db.py` checks that a saved summary loads back unchanged and that provenance round-trips (and is `None` for old rows).
+The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They check the happy path, the progress events (notes in order, one result per paper, the citation-retry note, backlog counted in the total), that the paper sits inside `<paper>` tags and the system prompt warns about instructions, that injected text (including a fake `</paper>`) stays inside the block, the one-retry rule and its feedback, flagging after a failed retry, abstract-only labelling, the context budget, and that model errors (`LlmError`) are passed on to the caller. `tests/test_db.py` checks that a saved summary loads back unchanged and that provenance round-trips (and is `None` for old rows).
 
 ## Where the code is
 

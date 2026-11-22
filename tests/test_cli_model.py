@@ -305,10 +305,11 @@ def test_ollama_backend_ignores_effort(vault, monkeypatch):
 
 
 def test_summarize_command_prints_one_line_per_paper(vault, monkeypatch):
-    def fake(conn, llm, fetch, num_ctx, today=None, backlog_limit=None, paper_ids=None, on_progress=None, refetch=False):
-        on_progress(1, 2, "2611.26408", "done", 41.2, "")
-        on_progress(2, 2, "2611.26409", "failed", 3.0, "bad json")
-        on_progress(2, 2, "2611.26410", "stopped", 1.0, "")
+    def fake(conn, llm, fetch, num_ctx, today=None, backlog_limit=None, paper_ids=None, *, reporter=None, refetch=False):
+        from research_pipeline.progress import ProgressEvent
+        for pid, n, outcome, detail in (("2611.26408", 1, "done", "41s"), ("2611.26409", 2, "failed", "bad json"),
+                                        ("2611.26410", 2, "stopped", "")):
+            reporter.emit(ProgressEvent("summarize", "step", label=pid, current=n, total=2, outcome=outcome, detail=detail))
         return {}, []
     monkeypatch.setattr(cli, "run_summarize", fake)
     llm = SimpleNamespace(name="claude-code", local=False, model_name="haiku", num_ctx=1000)
@@ -321,9 +322,9 @@ def test_summarize_command_prints_one_line_per_paper(vault, monkeypatch):
     conn.commit()
     conn.close()
     result = run(vault, "summarize", "2611.26408")
-    assert "[1/2] 2611.26408 done (summary + critique, 41s)" in result.output
-    assert "[2/2] 2611.26410 stopped: usage limit reached" in result.output
-    assert "[2/2] 2611.26409 failed: bad json" in result.output
+    assert "[1/2] 2611.26408 done (summary + critique, 41s)" in result.stderr
+    assert "[2/2] 2611.26410 stopped: usage limit reached" in result.stderr
+    assert "[2/2] 2611.26409 failed: bad json" in result.stderr
 
 
 def test_refetch_needs_ids_and_rejects_backlog(vault):

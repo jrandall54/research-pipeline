@@ -64,6 +64,7 @@ from research_pipeline.gold import (
 from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
 from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
+from research_pipeline.progress import ListReporter, ProgressEvent, Reporter
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, review_queue
@@ -107,19 +108,15 @@ def _reporter() -> Iterator[LineRenderer | LiveRenderer]:
         reporter.close()
 
 
-def _paper_progress(echo: Callable[[str], None]) -> Callable[..., None]:
-    """One line per paper as it finishes: `[2/3] 2611.26408 done (summary + critique, 41s)`."""
+class _Tee:
+    """Sends each progress event to several reporters (the display, plus one the command reads)."""
 
-    def report(index: int, total: int, pid: str, outcome: str, seconds: float, detail: str) -> None:
-        if outcome == "done":
-            tail = f"done (summary + critique, {seconds:.0f}s)"
-        elif outcome == "stopped":
-            tail = "stopped: usage limit reached"
-        else:
-            tail = f"failed: {detail}"
-        echo(f"[{index}/{total}] {pid} {tail}")
+    def __init__(self, *reporters: Reporter) -> None:
+        self._reporters = reporters
 
-    return report
+    def emit(self, event: ProgressEvent) -> None:
+        for r in self._reporters:
+            r.emit(event)
 
 
 def _release_gpu_memory() -> None:
@@ -398,10 +395,11 @@ def _run_locked(ctx: _Context) -> None:
                     if llm is None:
                         counts["summaries_off"] = 1  # chosen, not a failure: abstracts-only digest
                     else:
-                        sum_counts, sum_errors = run_summarize(
-                            ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
-                            on_progress=_paper_progress(_progress),
-                        )
+                        with _reporter() as reporter:
+                            sum_counts, sum_errors = run_summarize(
+                                ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+                                reporter=reporter,
+                            )
                         counts |= sum_counts
                         errors += sum_errors
             except KeyboardInterrupt:
@@ -552,22 +550,18 @@ def summarize(
             typer.echo(f"Backlog: {min(cap, total)} of {total} papers missing a summary (newest first; raise --limit for more)")
         else:
             typer.echo("No older digest papers are missing a summary.")
-    done: list[str] = []
-    show = _paper_progress(typer.echo)
-
-    def progress(index: int, total_: int, pid: str, outcome: str, seconds: float, detail: str) -> None:
-        if outcome == "done":
-            done.append(pid)
-        show(index, total_, pid, outcome, seconds, detail)
-
-    counts, errors = run_summarize(
-        ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
-        today=today, backlog_limit=cap, paper_ids=paper_ids or None,
-        on_progress=progress, refetch=refetch,
-    )
+    done = ListReporter()
+    with _reporter() as live:
+        counts, errors = run_summarize(
+            ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+            today=today, backlog_limit=cap, paper_ids=paper_ids or None,
+            reporter=_Tee(live, done), refetch=refetch,
+        )
     typer.echo("Summarized:")
     _report(counts, errors)
-    _refresh_hint(ctx.conn, done, today)
+    _refresh_hint(
+        ctx.conn, [e.label for e in done.events if e.kind == "step" and e.outcome == "done"], today
+    )
 
 
 def _refresh_hint(conn: sqlite3.Connection, paper_ids: list[str], today: date) -> None:

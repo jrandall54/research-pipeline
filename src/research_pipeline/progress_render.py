@@ -43,7 +43,9 @@ def format_line(event: ProgressEvent) -> str | None:
         if event.stage == "summarize" and event.outcome in ("done", "stopped", "failed"):
             # Exactly today's per-paper line (cli._paper_progress).
             if event.outcome == "done":
-                tail = f"done (summary + critique, {event.elapsed:.0f}s)"
+                # `detail` carries this paper's own time (`41s`); elapsed is the whole stage's.
+                took = event.detail or f"{event.elapsed:.0f}s"
+                tail = f"done (summary + critique, {took})"
             elif event.outcome == "stopped":
                 tail = "stopped: usage limit reached"
             else:

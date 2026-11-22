@@ -978,7 +978,11 @@ def model_show(vault: VaultOption = None) -> None:
     typer.echo(f"server: {cfg.llm_url}")
     typer.echo(f"context window (num_ctx): {cfg.llm_num_ctx}")
     if cfg.llm_model == "auto" or cfg.llm_num_ctx == "auto":
-        last = ollama_fit.cached_fit(cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
+        try:
+            last = ollama_fit.cached_fit(cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
+        except ollama_fit.ProbeTimeout as exc:
+            typer.echo(f"last choice: unknown. Ollama did not answer in time: {exc}")
+            return
         if last is None:
             typer.echo("last choice: not probed yet for these settings and installed models; "
                        "it is probed on next use (or now with `rpipe model fit`)")

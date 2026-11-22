@@ -203,7 +203,7 @@ def test_choose_skips_embedding_only_models(mock):
     })
     fake.install(mock)
     fit = choose(URL, list_models(URL), None, None)
-    assert fit == Fit(model="gen", num_ctx=15360)  # 16384 less the safety margin
+    assert fit == Fit(model="gen", num_ctx=16384)  # fits at its full trained context: no margin
     assert all(p["model"] != "emb" for p in fake.generate_calls)
 
 
@@ -490,3 +490,155 @@ def test_choose_pinned_ctx_skips_models_trained_on_less_context(mock):
     fit = choose(URL, models, None, 16384)
     assert fit == Fit(model="long", num_ctx=16384)
     assert all(c["model"] != "short" for c in fake.probes())
+
+
+# ---- Task 5: bounds on the cache, unload warning, deadline, margin at trained limit
+
+
+def _fit_cache(tmp_path, num_ctx):
+    path = tmp_path / "cache" / "llm_fit.json"
+    data = json.loads(path.read_text())
+    data["num_ctx"] = num_ctx
+    path.write_text(json.dumps(data))
+
+
+@pytest.mark.parametrize("bad", [4096, 8191, 99999])
+def test_cached_context_out_of_bounds_is_refitted_with_a_message(mock, tmp_path, bad):
+    fake = three_models()  # mid: trained context 40960
+    fake.install(mock)
+    good = resolve(URL, tmp_path, "auto", "auto")
+    _fit_cache(tmp_path, bad)
+    fake.generate_calls.clear()
+    logs: list[str] = []
+    assert resolve(URL, tmp_path, "auto", "auto", log=logs.append) == good
+    assert fake.probes()
+    assert any("saved context" in line and str(bad) in line for line in logs)
+    from research_pipeline.ollama_fit import cached_fit
+    _fit_cache(tmp_path, bad)
+    assert cached_fit(URL, tmp_path, "auto", "auto") is None
+
+
+def test_in_bounds_cached_context_is_still_used_without_probing(mock, tmp_path):
+    fake = three_models()
+    fake.install(mock)
+    first = resolve(URL, tmp_path, "auto", "auto")
+    fake.generate_calls.clear()
+    assert resolve(URL, tmp_path, "auto", "auto") == first
+    assert fake.generate_calls == []
+
+
+def test_failed_unload_warns_once_per_session(mock):
+    from research_pipeline.ollama_fit import ProbeSession
+
+    fake = boundary_fake(22528)
+    fake.install(mock)
+
+    def generate(request):
+        if json.loads(request.content)["keep_alive"] == 0:
+            raise httpx.ConnectError("gone")
+        return fake.generate(request)
+
+    mock.post(f"{URL}/api/generate").mock(side_effect=generate)
+    logs: list[str] = []
+    session = ProbeSession(None, logs.append)
+    choose(URL, list_models(URL), None, None, session=session)  # many probes, many failed unloads
+    warnings = [line for line in logs if "could not unload" in line]
+    assert len(warnings) == 1 and "m" in warnings[0]
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_probing_deadline_stops_the_session_with_a_clear_message_and_is_not_cached(
+    mock, tmp_path, monkeypatch
+):
+    from research_pipeline import ollama_fit
+    from research_pipeline.ollama_fit import ProbeTimeout
+
+    clock = Clock()
+    monkeypatch.setattr(ollama_fit, "_clock", clock)
+    fake = three_models()
+    fake.install(mock)
+    slow = fake.generate
+
+    def generate(request):
+        if json.loads(request.content)["keep_alive"] != 0:
+            clock.now += 100  # each probe is slow
+        return slow(request)
+
+    mock.post(f"{URL}/api/generate").mock(side_effect=generate)
+    with pytest.raises(ProbeTimeout) as exc:
+        resolve(URL, tmp_path, "auto", "auto", deadline=250)
+    assert "250 seconds" in str(exc.value) and "Ollama" in str(exc.value)
+    assert not (tmp_path / "cache" / "llm_fit.json").exists()
+    assert len(fake.probes()) <= 3
+
+
+def test_a_request_timeout_after_the_deadline_is_a_probe_timeout_not_no_fit(
+    mock, tmp_path, monkeypatch
+):
+    from research_pipeline import ollama_fit
+    from research_pipeline.ollama_fit import ProbeTimeout
+
+    clock = Clock()
+    monkeypatch.setattr(ollama_fit, "_clock", clock)
+    fake = three_models()
+    fake.install(mock)
+
+    def hang(request):
+        clock.now += 400
+        raise httpx.ReadTimeout("hung")
+
+    mock.post(f"{URL}/api/generate").mock(side_effect=hang)
+    with pytest.raises(ProbeTimeout):
+        resolve(URL, tmp_path, "auto", "auto")  # default deadline is 300 s
+    assert not (tmp_path / "cache" / "llm_fit.json").exists()
+
+
+def test_default_deadlines_are_five_minutes_and_ten_seconds():
+    from research_pipeline import ollama_fit
+
+    assert ollama_fit.FIT_DEADLINE == 300 and ollama_fit.SHOW_DEADLINE == 10
+
+
+def test_cached_fit_gives_up_when_ollama_hangs(mock, tmp_path, monkeypatch):
+    from research_pipeline import ollama_fit
+    from research_pipeline.ollama_fit import ProbeTimeout, cached_fit
+
+    clock = Clock()
+    monkeypatch.setattr(ollama_fit, "_clock", clock)
+
+    def hang(request):
+        clock.now += 11
+        raise httpx.ReadTimeout("hung")
+
+    mock.get(f"{URL}/api/tags").mock(side_effect=hang)
+    with pytest.raises(ProbeTimeout) as exc:
+        cached_fit(URL, tmp_path, "auto", "auto")
+    assert "10 seconds" in str(exc.value)
+
+
+def test_margin_is_skipped_when_the_model_fits_at_its_full_trained_context(mock):
+    fake = FakeOllama({"m": {"size": 4 * GB, "params": 8 * GB, "ctx": 20480}},
+                      free=20 * GB, kv_per_token=10_000)
+    fake.install(mock)
+    assert choose(URL, list_models(URL), None, None).num_ctx == 20480
+
+
+def test_margin_still_applies_below_the_trained_context(mock):
+    fake = FakeOllama({"m": {"size": 4 * GB, "params": 8 * GB, "ctx": 40960}},
+                      free=4 * GB + 10_000 * 22528, kv_per_token=10_000)
+    fake.install(mock)
+    assert choose(URL, list_models(URL), None, None).num_ctx == 21504
+
+
+def test_margin_still_applies_when_only_our_ceiling_stops_the_search(mock):
+    fake = FakeOllama({"m": {"size": 1 * GB, "params": 8 * GB, "ctx": 262144}},
+                      free=20 * GB, kv_per_token=1_000)
+    fake.install(mock)
+    assert choose(URL, list_models(URL), None, None).num_ctx == 131072 - 1024

@@ -43,10 +43,6 @@ Phase 3:
 - Tests: weak assertions on some messages and exit codes; weak negative digest test.
 
 From Phase 2 and auto-model:
-- Cached `num_ctx` is not re-checked against bounds.
-- A failed unload after a probe is swallowed silently.
-- No overall time limit on probing (a hung Ollama could stall about 30 minutes); `rpipe model show` can take about 30 s if Ollama hangs.
-- The 1024-token margin is also applied when a model fits at its full trained context.
 - Tests: duplicate `AlwaysSummary`, and test-to-test imports.
 - No command to edit or remove a single gold fact (`gold add-fact` now adds one; there is still no edit or remove).
 

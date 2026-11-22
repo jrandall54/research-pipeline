@@ -87,7 +87,7 @@ Probing Ollama: this loads and unloads models and can take a few minutes.
   trying q3.8-27b-34k at 16384 tokens
   trying ds2-16b-20k at 16384 tokens
   searching the largest context for ds2-16b-20k
-Using model ds2-16b-20k with a context of 19456 tokens
+Using model ds2-16b-20k with a context of 20480 tokens
 $ uv run rpipe model set qwen3:8b
 model is now qwen3:8b. Check it works with `rpipe model check`.
 $ uv run rpipe model set-context 16384

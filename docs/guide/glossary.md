@@ -176,7 +176,7 @@
 
 **Nearest neighbour** — the stored item whose vector is closest (highest cosine similarity) to a given vector. For the shelf, a paper's nearest neighbour is the single shelf chunk most like it; only that one counts, so a big shelf does not dilute the signal. See `shelf.md`.
 
-**Backend** — the thing that actually runs the language model: today `ollama` (a model on your own machine, `local = True`). Each backend has a `name` and a `local` flag; the name is stored in each summary's provenance and shown in the digest footer. See `llm.md`.
+**Backend** — the thing that actually runs the language model: `ollama` (a model on your own machine, `local = True`), `claude-code` (your Claude Code login, `local = False`) or `none`; choose with `rpipe model set-backend`. Each backend has a `name` and a `local` flag; the name is stored in each summary's provenance and shown in the digest footer. See `llm.md`.
 
 **Usage limit** — the cap a subscription plan puts on how much you can use a model in a period. When a backend reports it, the summarize stage stops without counting a failure, and the remaining papers wait for the next run. See `summaries.md`.
 
@@ -187,3 +187,6 @@
 **Plug-in** — an installed Python package that adds a paper source or a model backend to the pipeline without changing its code. List them with `rpipe plugins`. See `plugins.md`.
 
 **Entry point** — a line in a package's `pyproject.toml` that registers a name in a named group (for example `research_pipeline.sources`), so another program can find and load it after the package is installed. See `plugins.md`.
+
+**Abstracts-only mode** — running with the `none` backend: no summary model is used, so the digest shows each paper's abstract instead of a summary. The health line says `summaries off (abstracts-only mode)`. See `backends.md`.
+

@@ -1,8 +1,10 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from research_pipeline import registry
+from research_pipeline.llm import LlmError
 from research_pipeline.models import Config
 
 
@@ -32,7 +34,23 @@ def test_plugins_merges_entry_points_and_reports_broken(monkeypatch):
 def test_builtin_sources_present(monkeypatch):
     monkeypatch.setattr(registry, "_entry_points", lambda group: [])
     assert list(registry.plugins(registry.SOURCE_GROUP)) == ["arxiv", "hf_daily"]
-    assert registry.plugins(registry.BACKEND_GROUP) == {}
+    assert list(registry.plugins(registry.BACKEND_GROUP)) == ["ollama", "claude-code", "none"]
+
+
+def test_build_backend_unknown_plugin_raises_with_setup_hint(monkeypatch):
+    monkeypatch.setattr(registry, "_entry_points", lambda group: [])
+    config = Config(vault_path="/tmp/x", llm_backend="gone")
+    with pytest.raises(LlmError, match="backend gone: not installed; run `rpipe model setup`"):
+        registry.build_backend(config, Path("/tmp/x"), lambda s: None)
+
+
+def test_build_backend_broken_plugin_and_none(monkeypatch):
+    monkeypatch.setattr(
+        registry, "_entry_points", lambda group: [fake_ep("flaky", raise_import)] if group == registry.BACKEND_GROUP else []
+    )
+    with pytest.raises(LlmError, match="backend flaky: .*rpipe model setup"):
+        registry.build_backend(Config(vault_path="/tmp/x", llm_backend="flaky"), Path("/tmp/x"), print)
+    assert registry.build_backend(Config(vault_path="/tmp/x", llm_backend="none"), Path("/tmp/x"), print) is None
 
 
 def test_build_sources_skips_unknown_and_broken_with_messages(tmp_path, monkeypatch):

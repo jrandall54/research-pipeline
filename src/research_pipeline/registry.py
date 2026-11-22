@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from importlib.metadata import entry_points
 from typing import Any
 
+from pathlib import Path
+
+from research_pipeline import ollama_fit
+from research_pipeline.backends.claude_code import ClaudeCodeClient, find_claude
+from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.models import Config
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source
@@ -30,10 +35,34 @@ def make_hf_daily(config: Config) -> HfDailySource:
     return HfDailySource()
 
 
+SETUP_HINT = "run `rpipe model setup`"
+
+
+def make_ollama(config: Config, vault: Path, log: Callable[[str], None]) -> LLM:
+    """Ollama, with `auto` settings resolved to a concrete model and context (cached in the vault)."""
+    fit = ollama_fit.resolve(config.llm_url, vault, config.llm_model, config.llm_num_ctx, log=log)
+    return OllamaClient(config.llm_url, fit.model, fit.num_ctx)
+
+
+def make_claude_code(config: Config, vault: Path, log: Callable[[str], None]) -> LLM:
+    path = find_claude(config.llm_cli_path)
+    if path is None:
+        raise LlmError(
+            "Claude Code not found (looked at the recorded path, PATH and ~/.local/bin); "
+            f"{SETUP_HINT}"
+        )
+    return ClaudeCodeClient(config.llm_model, path)
+
+
+def make_none(config: Config, vault: Path, log: Callable[[str], None]) -> None:
+    """No summary model: the run writes abstracts-only digests."""
+    return None
+
+
 # Hard-coded, not entry points: a stale editable install can lose its entry-point metadata.
 _BUILTINS: dict[str, dict[str, Callable[..., Any]]] = {
     SOURCE_GROUP: {"arxiv": make_arxiv, "hf_daily": make_hf_daily},
-    BACKEND_GROUP: {},
+    BACKEND_GROUP: {"ollama": make_ollama, "claude-code": make_claude_code, "none": make_none},
 }
 
 
@@ -74,3 +103,19 @@ def build_sources(config: Config) -> tuple[list[Source], list[str]]:
             except Exception as exc:
                 errors.append(f"source {name}: {type(exc).__name__}: {exc}; {hint}")
     return sources, errors
+
+
+def build_backend(config: Config, vault: Path, log: Callable[[str], None]) -> LLM | None:
+    """The configured summary backend, or None for `none`. LlmError (naming the fix) if it cannot start."""
+    name = config.llm_backend
+    plugin = plugins(BACKEND_GROUP).get(name)
+    if plugin is None:
+        raise LlmError(f"backend {name}: not installed; {SETUP_HINT}")
+    if plugin.factory is None:
+        raise LlmError(f"backend {name}: {plugin.error}; {SETUP_HINT}")
+    try:
+        return plugin.factory(config, vault, log)
+    except LlmError:
+        raise
+    except Exception as exc:
+        raise LlmError(f"backend {name}: {type(exc).__name__}: {exc}; {SETUP_HINT}") from exc

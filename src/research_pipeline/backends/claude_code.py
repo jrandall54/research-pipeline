@@ -66,13 +66,22 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-def logged_in(cli_path: str, runner: Runner = subprocess_runner) -> bool:
+def _auth_problem(cli_path: str, runner: Runner) -> str | None:
+    """Why `claude auth status` did not succeed (naming the fix), or None if it did."""
     with tempfile.TemporaryDirectory() as tmp:
         try:
             done = runner([cli_path, "auth", "status"], "", STATUS_TIMEOUT, Path(tmp), _child_env())
-        except (subprocess.TimeoutExpired, OSError):
-            return False
-    return done.returncode == 0
+        except subprocess.TimeoutExpired:
+            return f"Claude Code did not answer `claude auth status` within {STATUS_TIMEOUT:g}s; try again"
+        except OSError:  # missing or moved binary (the nightly unit may lack ~/.local/bin on PATH)
+            return f"Claude Code was not found at {cli_path}: {SETUP_HINT}"
+    if done.returncode != 0:
+        return f"Claude Code is not logged in: {LOGIN_HINT}"
+    return None
+
+
+def logged_in(cli_path: str, runner: Runner = subprocess_runner) -> bool:
+    return _auth_problem(cli_path, runner) is None
 
 
 def _parse_envelope(stdout: str) -> dict | None:
@@ -176,8 +185,9 @@ class ClaudeCodeClient:
         raise LlmError(f"model returned invalid output twice: {error}")
 
     def check(self) -> str:
-        if not logged_in(self.cli_path, self.runner):
-            raise LlmError(f"Claude Code is not logged in: {LOGIN_HINT}")
+        problem = _auth_problem(self.cli_path, self.runner)
+        if problem:
+            raise LlmError(problem)
         self.generate("Answer with ok true.", "Say ok.", _Ping)
         return f"Claude Code is logged in at {self.cli_path} and model {self.model_name} answered."
 

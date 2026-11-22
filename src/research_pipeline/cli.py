@@ -24,7 +24,8 @@ from research_pipeline.digest import render_summary, write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
 from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, has_gold, load_gold, remove_fact, remove_gold
-from research_pipeline.llm import LLM, LlmError, OllamaClient
+from research_pipeline.backends.claude_code import find_claude, logged_in, LOGIN_HINT
+from research_pipeline.llm import LLM, NO_MODEL, LlmError, OllamaClient
 from research_pipeline.review import later_queue, queue_progress, review_queue
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.run_lock import RunLocked, run_lock
@@ -74,7 +75,7 @@ class Pipeline:
     sources: list[Source]
     make_embedder: Callable[[], Embedder]  # called only by run and triage (may raise RuntimeError)
     seed_fetcher: Callable[[list[str]], list[PaperMeta]]
-    make_llm: Callable[[], LLM]  # called only by run and summarize (may raise LlmError)
+    make_llm: Callable[[], LLM | None]  # called only by run and summarize (may raise LlmError); None = no model
     fulltext_fetcher: Callable[[str], list[Section]]
     startup_errors: list[str] = field(default_factory=list)  # sources/plug-ins that failed to start
 
@@ -105,11 +106,10 @@ def build_pipeline(config: Config) -> Pipeline:
 
 def build_llm(
     config: Config, vault: Path, log: Callable[[str], None] = lambda s: None
-) -> OllamaClient:
-    """The real local model client, with `auto` settings resolved to a concrete model and
-    context (cached in the vault). Raises LlmError if none can be chosen; tests replace it."""
-    fit = ollama_fit.resolve(config.llm_url, vault, config.llm_model, config.llm_num_ctx, log=log)
-    return OllamaClient(config.llm_url, fit.model, fit.num_ctx)
+) -> LLM | None:
+    """The configured summary backend (None when it is `none`). Raises LlmError if it cannot
+    start; tests replace it."""
+    return registry.build_backend(config, vault, log)
 
 
 @app.callback()
@@ -249,6 +249,8 @@ def health_line(
         extras += f" · truncated {counts['truncated']}"
     if counts.get("summary_failed"):
         extras += f" · summary failures {counts['summary_failed']}"
+    if counts.get("summaries_off"):
+        extras += " · summaries off (abstracts-only mode)"
     return (
         f"Run {day.isoformat()}: collected {counts.get('inserted', 0)} new, "
         f"{counts.get('updated', 0)} updated · kept {counts.get('triaged', 0)} · "
@@ -258,13 +260,22 @@ def health_line(
     )
 
 
-def _ready_llm(pipeline: Pipeline) -> LLM:
-    """The model client, checked: raises LlmError (with a fix hint) if it cannot be used."""
+def _ready_llm(pipeline: Pipeline) -> LLM | None:
+    """The model client, checked: raises LlmError (with a fix hint) if it cannot be used.
+    None means the backend is `none` (nothing to check)."""
     llm = pipeline.make_llm()
+    if llm is None:
+        return None
     check = getattr(llm, "check", None)
     if check is not None:
         check()
     return llm
+
+
+def _require_model(config: Config) -> None:
+    """Exit 1 with NO_MODEL when the backend is `none` (commands that need a model)."""
+    if config.llm_backend == "none":
+        raise _fail(NO_MODEL)
 
 
 def _report(counts: dict[str, int], errors: list[str]) -> None:
@@ -318,11 +329,14 @@ def _run_locked(ctx: _Context) -> None:
                 except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
                     errors.append(f"summaries skipped, model unavailable: {exc}")
                 else:
-                    sum_counts, sum_errors = run_summarize(
-                        ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
-                    )
-                    counts |= sum_counts
-                    errors += sum_errors
+                    if llm is None:
+                        counts["summaries_off"] = 1  # chosen, not a failure: abstracts-only digest
+                    else:
+                        sum_counts, sum_errors = run_summarize(
+                            ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx
+                        )
+                        counts |= sum_counts
+                        errors += sum_errors
             except KeyboardInterrupt:
                 errors.append(f"{stage}: interrupted")
                 raise  # the user wants out: no digest, keep the conventional interrupt exit
@@ -419,6 +433,7 @@ def triage(vault: VaultOption = None) -> None:
 def summarize(vault: VaultOption = None) -> None:
     """Summarize and critique kept papers (and today's digest papers lacking a summary) with the local model."""
     ctx = _open(vault)
+    _require_model(ctx.config)
     pipeline = build_pipeline(ctx.config)
     if not papers_to_summarize(ctx.conn, date.today()) and not papers_given_up_on(ctx.conn, date.today()):
         typer.echo("Nothing to summarize: no triaged papers, and today's digest has none missing a summary. Run `rpipe run` or `rpipe triage` first.")
@@ -427,6 +442,8 @@ def summarize(vault: VaultOption = None) -> None:
         llm = _ready_llm(pipeline)
     except Exception as exc:  # noqa: BLE001
         raise _fail(f"model unavailable: {exc}") from exc
+    if llm is None:
+        raise _fail(NO_MODEL)
     counts, errors = run_summarize(ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx)
     typer.echo("Summarized:")
     _report(counts, errors)
@@ -649,7 +666,7 @@ def profile_add_seed(
 LLM_DOWN = "Local model unavailable; add topics by hand with `rpipe profile add-topic`"
 
 
-def _onboarding_llm(config: Config) -> LLM:
+def _onboarding_llm(config: Config) -> LLM | None:
     """The checked local model for onboarding (same resolution as `run`); tests replace it."""
     return _ready_llm(build_pipeline(config))
 
@@ -661,7 +678,15 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
     a too-short description, before any model call."""
     description = onboarding.check_description(description)
     try:
-        proposal = onboarding.propose(_onboarding_llm(config), description)
+        llm = _onboarding_llm(config)
+        if llm is None:
+            typer.echo(NO_MODEL)
+            return False
+        if getattr(llm, "local", True) is False:
+            typer.echo(
+                f"Your description will be sent to {llm.name} (model {llm.model_name}) to suggest topics."
+            )
+        proposal = onboarding.propose(llm, description)
     except (LlmError, OSError) as exc:
         typer.echo(f"{LLM_DOWN} ({exc})")
         return False
@@ -727,6 +752,7 @@ def profile_suggest(
 ) -> None:
     """Let the local model propose topics and seed papers from a description; you approve each."""
     ctx = _open(vault)
+    _require_model(ctx.config)
     if description is None:
         description = typer.prompt("Describe your research in a few sentences")
     try:
@@ -1069,6 +1095,7 @@ def _latest_eval(vault: Path) -> date:
 def eval_run(vault: VaultOption = None) -> None:
     """Summarize every gold-set paper with the local model and write a report to grade."""
     ctx = _open(vault)
+    _require_model(ctx.config)
     with _clean_errors():
         papers = load_gold(ctx.vault)
     if not papers:
@@ -1080,6 +1107,8 @@ def eval_run(vault: VaultOption = None) -> None:
         llm = _ready_llm(pipeline)
     except Exception as exc:  # noqa: BLE001
         raise _fail(f"model unavailable: {exc}") from exc
+    if llm is None:
+        raise _fail(NO_MODEL)
 
     def abstract_for(paper_id: str) -> str:
         found = pipeline.seed_fetcher([paper_id])
@@ -1141,16 +1170,32 @@ def eval_report_cmd(vault: VaultOption = None) -> None:
         typer.echo(eval_report(ctx.vault, day))
 
 
-model_app = typer.Typer(help="Show, change and check the local summary model.", no_args_is_help=True)
+model_app = typer.Typer(help="Show, change and check the summary model and its backend.", no_args_is_help=True)
 app.add_typer(model_app, name="model")
+
+
+def _ollama_only(cfg: Config, command: str) -> None:
+    if cfg.llm_backend != "ollama":
+        raise _fail(
+            f"`rpipe model {command}` only applies to the ollama backend "
+            f"(current: {cfg.llm_backend}). Nothing was changed."
+        )
 
 
 @model_app.command("show")
 def model_show(vault: VaultOption = None) -> None:
-    """Show which local model and server are configured."""
+    """Show the backend and which model (and server) are configured."""
     ctx = _open(vault)
     cfg = ctx.config
+    typer.echo(f"backend: {cfg.llm_backend}")
+    if cfg.llm_backend == "none":
+        typer.echo("No summary model: digests list abstracts only. Choose one with `rpipe model setup`.")
+        return
     typer.echo(f"model: {cfg.llm_model}")
+    if cfg.llm_backend != "ollama":
+        if cfg.llm_backend == "claude-code":
+            typer.echo(f"claude: {cfg.llm_cli_path or 'found on PATH when used'}")
+        return
     typer.echo(f"server: {cfg.llm_url}")
     typer.echo(f"context window (num_ctx): {cfg.llm_num_ctx}")
     if cfg.llm_model == "auto" or cfg.llm_num_ctx == "auto":
@@ -1171,11 +1216,43 @@ def model_set(
     name: Annotated[str, typer.Argument(help="Ollama model name, e.g. qwen3:14b, or auto to choose the best installed.")],
     vault: VaultOption = None,
 ) -> None:
-    """Choose which Ollama model writes summaries (install it first: ollama pull NAME)."""
+    """Choose which model writes summaries (ollama: install it first with ollama pull NAME; claude-code: sonnet, haiku, opus)."""
     ctx = _open(vault)
     with _clean_errors():
         profile_edit.set_llm_model(ctx.vault, name)
     typer.echo(f"model is now {name.strip()}. Check it works with `rpipe model check`.")
+
+
+@model_app.command("set-backend")
+def model_set_backend(
+    name: Annotated[str, typer.Argument(help="Backend: ollama, claude-code, none, or an installed plug-in.")],
+    vault: VaultOption = None,
+    force: Annotated[bool, typer.Option("--force", help="Switch without checking the backend is ready.")] = False,
+) -> None:
+    """Choose where summaries come from. Checks the backend first unless --force; the model resets to auto."""
+    ctx = _open(vault)
+    cfg = ctx.config
+    name = name.strip()
+    known = set(registry.plugins(registry.BACKEND_GROUP))
+    cli_path: str | None = None
+    if name == "claude-code":
+        cli_path = find_claude(cfg.llm_cli_path)
+        if not force:
+            if cli_path is None:
+                raise _fail(
+                    "Claude Code not found (looked at the recorded path, PATH and ~/.local/bin). "
+                    "Install it, then try again (or use --force to switch anyway)."
+                )
+            if not logged_in(cli_path):
+                raise _fail(f"Claude Code is not logged in: {LOGIN_HINT} (or use --force to switch anyway).")
+    elif name == "ollama" and not force:
+        try:
+            OllamaClient(cfg.llm_url, "", 8192).ping()
+        except LlmError as exc:
+            raise _fail(f"{exc} (or use --force to switch anyway).") from exc
+    with _clean_errors():
+        profile_edit.set_llm_backend(ctx.vault, name, known, cli_path)
+    typer.echo(f"backend is now {name}; model reset to auto. Check it with `rpipe model check`.")
 
 
 @model_app.command("set-url")
@@ -1185,6 +1262,7 @@ def model_set_url(
 ) -> None:
     """Point the pipeline at a different Ollama server (must start with http:// or https://)."""
     ctx = _open(vault)
+    _ollama_only(ctx.config, "set-url")
     with _clean_errors():
         profile_edit.set_llm_url(ctx.vault, url)
     typer.echo(f"server is now {url.strip()}. Check it works with `rpipe model check`.")
@@ -1197,6 +1275,7 @@ def model_set_context(
 ) -> None:
     """Set how much text (in tokens) the model can read at once; larger needs more memory."""
     ctx = _open(vault)
+    _ollama_only(ctx.config, "set-context")
     with _clean_errors():
         profile_edit.set_llm_num_ctx(ctx.vault, n)
     typer.echo("context window is now auto." if n.strip().lower() == "auto"
@@ -1208,6 +1287,7 @@ def model_fit(vault: VaultOption = None) -> None:
     """Probe Ollama now: choose the best installed model and the largest context that fits in GPU memory."""
     ctx = _open(vault)
     cfg = ctx.config
+    _ollama_only(cfg, "fit")
     try:
         if cfg.llm_model != "auto" and cfg.llm_num_ctx != "auto":
             typer.echo(f"pinned: {cfg.llm_model} at {cfg.llm_num_ctx} tokens (nothing to probe)")
@@ -1224,10 +1304,12 @@ def model_fit(vault: VaultOption = None) -> None:
 
 @model_app.command("check")
 def model_check(vault: VaultOption = None) -> None:
-    """Check that Ollama is running and the model is installed. With `auto` settings this may probe the GPU (slow the first time)."""
+    """Check that the backend works (ollama: running, model installed; claude-code: logged in). With ollama `auto` settings this may probe the GPU (slow the first time)."""
     ctx = _open(vault)
+    _require_model(ctx.config)
     try:
-        typer.echo(build_llm(ctx.config, ctx.vault, log=_progress).check())
+        llm = build_llm(ctx.config, ctx.vault, log=_progress)
+        typer.echo(llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured.")
     except (LlmError, OSError, ValueError) as exc:
         raise _fail(str(exc)) from exc
 
@@ -1318,6 +1400,9 @@ def _wizard_seeds(vault: Path, config: Config) -> None:
 
 def _wizard_describe(vault: Path, config: Config) -> None:
     """Optional: propose topics and seeds from a description. Any failure falls through."""
+    if config.llm_backend == "none":
+        typer.echo(NO_MODEL)
+        return
     description = _ask("Describe your research in a few sentences (Enter to skip)")
     if not description:
         return

@@ -16,6 +16,8 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
+from research_pipeline.backends.claude_code import resolve_model
+from research_pipeline.llm import NO_MODEL
 from research_pipeline.models import ALL_CATEGORIES, CATEGORY_RE, Config, Profile
 from research_pipeline.vault import ConfigError, load_config, load_profile
 
@@ -271,12 +273,33 @@ def set_categories(vault: Path, cats: list[str]) -> None:
     _edit(path, Config, change)
 
 
+def set_llm_backend(vault: Path, name: str, known: set[str], cli_path: str | None = None) -> None:
+    """Choose the summary backend; the model goes back to `auto` (names differ per backend)."""
+    name = name.strip()
+    if name not in known:
+        raise ValueError(f"unknown backend {name!r}; known backends: {', '.join(sorted(known))}")
+
+    def change(data) -> bool:
+        data["llm_backend"] = name
+        data["llm_model"] = "auto"
+        if cli_path is not None:
+            data["llm_cli_path"] = cli_path
+        return True
+
+    _edit(_config_path(vault), Config, change)
+
+
 def set_llm_model(vault: Path, name: str) -> None:
     name = name.strip()
+    backend = load_config(_config_path(vault)).llm_backend
+    if backend == "none":
+        raise ValueError(NO_MODEL)
     if not name:
         raise ValueError("model name must not be empty (for example qwen3:14b, or auto)")
     if name.lower() == "auto":
         name = "auto"
+    elif backend == "claude-code":
+        resolve_model(name)  # ValueError naming the allowed choices; the user's text is stored
 
     def change(data) -> bool:
         data["llm_model"] = name

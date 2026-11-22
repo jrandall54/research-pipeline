@@ -10,6 +10,42 @@ The pipeline needs a language model to write summaries. A *backend* is the thing
 
 Every backend has two labels the rest of the code checks: `name` (e.g. `claude-code`) and `local` (true only if prompts never leave your machine). Text that must stay private, such as your own writing in `my_work/`, is only ever given to a backend whose `local` is true (`require_local` in `llm.py` enforces it).
 
+## Choosing a backend
+
+The backend is stored in `config.yaml` as `llm_backend` (default `ollama`; a vault without the key behaves exactly as before). Change it with a command, never by editing a file:
+
+```
+rpipe model set-backend ollama        # a model on this computer
+rpipe model set-backend claude-code   # your Claude Code login
+rpipe model set-backend none          # no model: abstracts-only digests
+```
+
+Without `--force` the command first checks the backend is ready: `ollama` must answer at the configured server address; `claude-code` must be found (`find_claude`) and logged in. If not, it refuses and says how to fix it, and the config is left untouched. `--force` switches anyway (for example while Ollama is stopped). Switching resets `llm_model` to `auto`, because model names differ per backend, but keeps the Ollama settings (`llm_url`, `llm_num_ctx`) so switching back is painless. For `claude-code` the command also records where it found `claude` (`llm_cli_path`); the nightly timer often has no `~/.local/bin` on its PATH, so the run tries that recorded path first, then PATH, then `~/.local/bin/claude`.
+
+Worked example: you run `rpipe model set-backend claude-code` while logged out. It prints "Claude Code is not logged in: run `claude` once and log in, then try again", exits 1, and `rpipe model show` still says `backend: ollama`.
+
+### Which `rpipe model` commands apply to which backend
+
+| Command | ollama | claude-code | none |
+|---|---|---|---|
+| `set-backend NAME [--force]` | yes | yes | yes |
+| `show` | yes (first line `backend: ollama`) | yes (model and `claude` path) | yes (just says so) |
+| `set NAME` | any Ollama model, or `auto` | `sonnet`, `haiku`, `opus`, a full `claude-...` name, or `auto` | refused |
+| `check` | server up and model installed | logged in, one tiny test call | refused |
+| `fit`, `set-url`, `set-context` | yes | refused: "only applies to the ollama backend (current: claude-code). Nothing was changed." | refused (same wording) |
+
+### The `none` backend (abstracts-only mode)
+
+With `none` there is no summary model at all. `rpipe run` still collects, ranks and writes the digest; each paper shows its abstract instead of a summary, and the health line ends with `summaries off (abstracts-only mode)`. That is a choice, not a failure, so the errors field stays `none`. Commands that cannot work without a model (`rpipe summarize`, `rpipe eval run`, `rpipe profile suggest`, `rpipe model check`) print "No summary model is set up (abstracts-only mode). Run `rpipe model setup` to choose one." and exit 1; the guided `rpipe init` description step prints the same line and moves on.
+
+### Privacy notice
+
+Before `rpipe profile suggest` (or the init description step) sends your research description to a backend whose `local` is false, it prints "Your description will be sent to claude-code (model sonnet) to suggest topics." Your own writing in `my_work/` is never sent to such a backend at all.
+
+### If the backend cannot start during a night
+
+A backend that is missing, was uninstalled, or whose `claude` binary has moved does not stop the run. The health line records `summaries skipped, model unavailable: Claude Code not found (looked at the recorded path, PATH and ~/.local/bin); run `rpipe model setup``, and the digest is still written. The same goes for an unknown or broken plug-in backend (`backend NAME: not installed; run `rpipe model setup``). `ClaudeCodeClient.check()` likewise names `rpipe model setup` when the binary is missing or moved, and says "not logged in" only when the login is the problem.
+
 ## Claude Code backend
 
 ### How a call works
@@ -70,8 +106,8 @@ Using `claude -p` on a Pro/Max plan is within Anthropic's consumer terms when yo
 
 ## How to run / check it
 
-`ClaudeCodeClient(...).check()` confirms login (`claude auth status`, exit 0) and does one tiny call. The `rpipe model` commands that use it arrive in later tasks. Tests: `uv run pytest tests/test_claude_code.py -q` (offline).
+`ClaudeCodeClient(...).check()` confirms login (`claude auth status`, exit 0) and does one tiny call. Check it from the command line with `rpipe model check`. Tests: `uv run pytest tests/test_claude_code.py tests/test_cli_model.py tests/test_registry.py -q` (offline).
 
 ## Where the code is
 
-`src/research_pipeline/backends/claude_code.py` (`ClaudeCodeClient`, `find_claude`, `logged_in`, `resolve_model`); shared errors and `require_local` in `src/research_pipeline/llm.py`.
+`src/research_pipeline/backends/claude_code.py` (`ClaudeCodeClient`, `find_claude`, `logged_in`, `resolve_model`); shared errors, `NO_MODEL` and `require_local` in `src/research_pipeline/llm.py`; backend names and `build_backend` in `src/research_pipeline/registry.py`; the `rpipe model` commands in `src/research_pipeline/cli.py` and their config edits (`set_llm_backend`, backend-aware `set_llm_model`) in `src/research_pipeline/profile_edit.py`.

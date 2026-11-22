@@ -119,6 +119,10 @@ class OllamaClient:
                 error = e if isinstance(e, (ValidationError, ValueError)) else ValueError(str(e))
         raise LlmError(f"model returned invalid output twice: {error}")
 
+    def ping(self) -> None:
+        """Raise LlmError (with a fix) unless the server answers; says nothing about models."""
+        self._request("GET", "/api/tags", timeout=CHECK_TIMEOUT)
+
     def check(self) -> str:
         """Status line if the server is up and the model installed; LlmError with a fix otherwise."""
         resp = self._request("GET", "/api/tags", timeout=CHECK_TIMEOUT)

@@ -61,6 +61,8 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 | `review [--later]` | read each unreviewed digest paper in the terminal and vote up/down, skip or quit; `--later` goes through skipped papers (needs a terminal; see [review.md](review.md)) | `votes`, `skips` |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
+**Abstracts-only mode.** If the backend is `none` (`rpipe model set-backend none`), the summarize stage is skipped on purpose: the run records `summaries_off=1`, the health line ends with `summaries off (abstracts-only mode)` and the errors field stays `none`. See `backends.md`.
+
 **The summarize stage.** `rpipe run` checks that Ollama is up and the model installed before this stage. If not, it skips the stage, records the cause in the health line and `runs.errors`, and still writes the digest (abstracts only), so a stopped Ollama never costs you the night's digest. A single paper that fails (model error, network error fetching its text) keeps its status, gets its `error` and `retry_count` set, and the rest carry on.
 
 **Which papers the stage works on.** Papers that are `triaged` or `fetched`, plus papers already listed in *today's* digest that have no summary yet (they stay `in_digest`; the summary is just saved). A paper that has failed 3 times (`retry_count` 3) is skipped and the errors say `gave up after 3 failed tries (last error: ...)`. Papers from an *earlier* day's digest are never touched: if Ollama was down that night, those papers stay abstract-only (accepted limitation).

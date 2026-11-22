@@ -185,3 +185,13 @@ def test_check_requires_login_then_one_tiny_call():
         == "Claude Code is logged in at /opt/claude and model sonnet answered."
     )
     assert len(run.calls) == 2
+
+
+def test_check_with_missing_or_moved_binary_names_model_setup():
+    with pytest.raises(LlmError, match="not found at /opt/claude.*rpipe model setup"):
+        client(FakeRunner(FileNotFoundError())).check()
+
+
+def test_check_when_logged_out_still_says_log_in():
+    with pytest.raises(LlmError, match="not logged in"):
+        client(FakeRunner(ok("", 1))).check()

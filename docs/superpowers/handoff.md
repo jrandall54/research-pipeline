@@ -4,7 +4,7 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 
 ## State
 - **`main` holds Phases 1-5, the review loop, the shelf, summarize-backlog, and the pipeline/app split design and plan.** `main` is pushed; CI runs on GitHub.
-- **Phase 6 Parts A (progress feedback) and C (setting commands, category check, `rpipe show`, `my_work` boundary) are built on branch `phase-6-hardening`, not merged; the merge is the owner's call.** `uv run pytest -q`: 987 passing; `ruff check .` clean. Part B (long papers) is not started; Part D is a proposal only.
+- **Phase 6 Parts A (progress feedback) and C (setting commands, category check, `rpipe show`, `my_work` boundary) are built and merged to `main` (2026-11-22).** `uv run pytest -q`: 994 passing; `ruff check .` clean. Part B (long papers) is not started; Part D is decided and recorded in the master plan.
 - **Direction (owner, 2026-11-22):** a **pipeline** (gets material, unattended) plus an **app** (read, vote, notes, study, later research and thesis) over **one database**, split by function in code. Design `specs/2026-11-22-backend-frontend-split-design.md`, plan `plans/2026-11-22-pipeline-app-split.md` (not started). `library_api` returns data objects, not terminal text; the app's look is undecided.
 - **Owner context:** philosophy BA finishing CS prerequisites, applying for a master's starting fall 2027. "Research" today means articles, repos and project ideas.
 
@@ -16,13 +16,13 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 | 3 | Code complete (votes/saves, Datasette, timer, run log, versioning, onboarding). "A week unattended" not yet observed. |
 | 4 | Shelf built. Overlap alerts, archive connections, feasibility tag, weekly synthesis not built; `links` table unused. |
 | 5 | Built and merged; Claude Code smoke test passed. AI club pilot not started. |
-| 6 | Parts A and C built on `phase-6-hardening` (not merged). Part B waits on the owner's model verdict; Part D awaits confirmation. |
+| 6 | Parts A and C built and merged. Part B waits on the owner's model verdict; Part D decided (master plan). |
 | 7 | Planned; plan must be refreshed (see Next, item 4). |
 
 ## Next
 1. **Owner: merge decision** for `phase-6-hardening`.
 2. **Part B (long papers) waits on the owner's verdict** on `~/research-vault/model-comparison-2026-11-22.md`: the same 3 long papers summarised by `q3.8-27b-34k` (fits 33,792 tokens; truncated 2 of 3; 54-83 s/paper; 0 unverified citations) and `q3f-14b-143k` (fits 130,048 tokens; whole papers; 28-56 s/paper; 7 unverified citations). 14B wins: long context becomes the default path, tighten its citation retry. 27B wins: section-priority trimming. Then write Part B's own plan. Comparison vault copies: the session scratchpad (may be cleared; re-runnable).
-3. **Awaiting owner approval:** (a) Part D proposal (overlap alerts, archive connections and weekly synthesis to app Phase 9; feasibility tag to Ongoing), which is NOT yet recorded in the master plan; (b) a line in `CLAUDE.md` for the progress convention (progress goes to stderr through the shared reporter, every waiting step shows it).
+3. **Done 2026-11-22 (owner approved):** Part D recorded in the master plan (overlap alerts, archive connections and weekly synthesis to app Phase 9; feasibility tag to Ongoing; `links` table stays for Phase 9); `CLAUDE.md` gained the progress convention line.
 4. **Refresh `plans/2026-11-22-pipeline-app-split.md` (Phase 7), then execute it.** What changed: `progress.py` is classified *shared*; `run_summarize`'s `on_progress` is gone (stages take a keyword-only `reporter`); per-paper summarize lines now go to stderr.
 
 ## Phase 6 check (real run, 2026-11-22, copy of the owner vault, ollama backend)
@@ -67,7 +67,7 @@ Real Ollama summary of 2611.25005 was fast and "decent" but **truncated**. Order
 - **Owner setup:** the repo's own dev env needs `uv sync --extra embed` (or `uv run --extra embed`) for real runs from the checkout. Reinstall the tool with extras (`uv tool install --editable '.[embed,serve]' --force`), `rpipe schedule status`, `loginctl enable-linger $USER`, add seed papers (`rpipe profile suggest "..."` or `rpipe profile add-seed`), start voting, fill the gold set (`rpipe gold add`, `rpipe eval run|grade|report`), run `rpipe summarize --backlog` for the 12 unsummarized 2026-11-21 papers then `rpipe digest --date 2026-11-21`.
 - **Switching `embedding_model`** drops the feedback boost of earlier votes/saves until switched back (documented, not fixed).
 - Check `SHELF_REASON_FLOOR` against real bge-small scores.
-- Deferred minors from Phase 6 reviews: triage stage shows a bar with a total but no steps; fit/check failure printed twice; `show ID --recent` may print a paper twice, no ambiguous-title test; `test_categories` imports fixtures from `test_e2e`; `shelf.md` says the boundary test "catches every import form" (soften: attribute access and dynamic imports are not caught); stale comment in `progress_render.py` naming a deleted helper; LiveRenderer total fixed at start. Older: no config-to-digest e2e test for plug-in sources; `ollama_fit` deadline-vs-does-not-fit decided by clock comparison.
+- Deferred minors from Phase 6 reviews: fit/check failure printed twice; `show ID --recent` may print a paper twice, no ambiguous-title test; `test_categories` imports fixtures from `test_e2e`; LiveRenderer total fixed at start; `rpipe show --recent` needs a number (the design said default 1); model probe lines in `run`/`summarize`/`eval run` still print outside a progress stage (no heartbeat). Older: no config-to-digest e2e test for plug-in sources; `ollama_fit` deadline-vs-does-not-fit decided by clock comparison.
 
 ## Separate projects (not scheduled)
 - Optimised CPU pipeline (own brainstorm first). Antigravity (`agy`) backend investigation. Codex adapter (needs a real-install check; cannot switch tools off). Copilot / Cursor / Kiro adapters (`specs/2026-11-21-cli-backends-research.md`). Schedulers other than systemd (macOS launchd, Windows).

@@ -23,7 +23,7 @@ from research_pipeline.db import SchemaTooNewError, UnknownPaperError, current_v
 from research_pipeline.digest import write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
-from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, has_gold, load_gold, remove_gold
+from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, has_gold, load_gold, remove_fact, remove_gold
 from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.run_lock import RunLocked, run_lock
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
@@ -845,8 +845,8 @@ def gold_list(vault: VaultOption = None) -> None:
     typer.echo(f"Gold set: {len(papers)}/{GOLD_TARGET} papers")
     for p in papers:
         typer.echo(f"\n{p.paper_id}  {p.title}")
-        for fact in p.key_facts:
-            typer.echo(f"  - {fact}")
+        for n, fact in enumerate(p.key_facts, 1):
+            typer.echo(f"  {n}. {fact}")
 
 
 @gold_app.command("remove")
@@ -876,6 +876,69 @@ def gold_add_fact(
         if not add_fact(ctx.vault, paper_id, fact):
             raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
     typer.echo(f"Added a fact to {paper_id}.")
+
+
+def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str) -> tuple[str, int]:
+    """Resolve (paper id, fact number), prompting for whatever was omitted. Validates before any write."""
+    papers = load_gold(vault)
+    if paper_id is None:
+        paper_id = typer.prompt("Paper id")
+    matches = [p for p in papers if has_gold([p], paper_id)]
+    if not matches:
+        raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
+    paper = matches[0]
+    if number is None:
+        typer.echo(f"{paper.paper_id}  {paper.title}")
+        for n, fact in enumerate(paper.key_facts, 1):
+            typer.echo(f"  {n}. {fact}")
+        number = typer.prompt(f"Number of the fact to {verb}", type=int)
+    if not 1 <= number <= len(paper.key_facts):
+        raise _fail(f"{paper.paper_id} has {len(paper.key_facts)} fact(s); there is no fact {number}. See: rpipe gold list")
+    return paper.paper_id, number
+
+
+@gold_app.command("edit-fact")
+def gold_edit_fact(
+    paper_id: Annotated[str | None, typer.Argument(help="The arXiv id of a paper in the gold set.")] = None,
+    number: Annotated[int | None, typer.Argument(help="Which fact, as numbered by `rpipe gold list`.")] = None,
+    text: Annotated[str | None, typer.Argument(help="The replacement fact.")] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Replace one key fact of a gold paper (prompts for anything you leave out)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        paper_id, number = _pick_fact(ctx.vault, paper_id, number, "edit")
+        if text is None:
+            text = typer.prompt("New text for the fact")
+        if not text.strip():
+            raise _fail("The fact is empty.")
+        try:
+            edit_fact(ctx.vault, paper_id, number, text)
+        except ValueError as exc:
+            raise _fail(str(exc)) from exc
+    typer.echo(f"Updated fact {number} of {paper_id}.")
+
+
+@gold_app.command("remove-fact")
+def gold_remove_fact(
+    paper_id: Annotated[str | None, typer.Argument(help="The arXiv id of a paper in the gold set.")] = None,
+    number: Annotated[int | None, typer.Argument(help="Which fact, as numbered by `rpipe gold list`.")] = None,
+    vault: VaultOption = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Do not ask for confirmation.")] = False,
+) -> None:
+    """Remove one key fact from a gold paper (asks first unless --yes)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        paper_id, number = _pick_fact(ctx.vault, paper_id, number, "remove")
+        fact = next(p for p in load_gold(ctx.vault) if has_gold([p], paper_id)).key_facts[number - 1]
+        if not yes and not typer.confirm(f'Remove fact {number} of {paper_id} ("{fact}")?', default=False):
+            typer.echo("Cancelled. Nothing was changed.")
+            return
+        try:
+            remove_fact(ctx.vault, paper_id, number)
+        except ValueError as exc:
+            raise _fail(str(exc)) from exc
+    typer.echo(f"Removed fact {number} of {paper_id}.")
 
 
 eval_app = typer.Typer(help="Check summary accuracy against your gold set: run, grade, report.", no_args_is_help=True)

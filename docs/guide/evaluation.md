@@ -10,6 +10,7 @@ The gold set is a short list of papers you know well, each with a list of **key 
 2. It then asks for key facts, one per line. A blank line finishes. Nothing is saved until you finish: Ctrl-C or end of input at that point leaves the file untouched.
 3. At least one fact is required (the command warns and saves nothing otherwise); three or more make a better test.
 4. `rpipe gold list` shows `n/10` and every paper with its facts. `rpipe gold add-fact ID "fact"` adds one more fact later, and `rpipe gold remove ID` removes a paper.
+5. Facts are numbered in `rpipe gold list` (`1.`, `2.`, ...). `rpipe gold edit-fact ID 2 "new text"` replaces fact 2, and `rpipe gold remove-fact ID 2` deletes it after a yes/no confirmation (`--yes` skips the question). Leave out the id, the number or the text and the command asks for it, showing the paper's numbered facts first. A number out of range, an empty replacement or an unknown paper is refused with nothing changed. The last remaining fact cannot be removed (a gold paper needs at least one); use `rpipe gold remove ID` to drop the whole paper.
 
 Ids are compared without version suffixes, so `2307.15043v2` and `2307.15043` are the same paper.
 
@@ -25,6 +26,8 @@ Fact 3 (blank line to finish):
 Saved with 2 fact(s); 3 or more make a better test (rpipe gold add-fact).
 Added 2307.15043: Universal and Transferable Adversarial Attacks ...
 ```
+
+Fact numbers, not fact text, identify a fact: the numbers are what `list` shows, and typing a whole sentence to match it would be error-prone. The trade-off is that numbers shift after a removal, so the commands re-read the file each time and the guided prompt always shows the current numbering. Both new commands write the file atomically like `add-fact`, so a refused edit never leaves a half-written gold set.
 
 ### Why a gold set at all
 
@@ -65,13 +68,15 @@ One idea per fact, so a summary can be marked as having it or missing it.
 uv run rpipe gold add 2307.15043
 uv run rpipe gold list
 uv run rpipe gold add-fact 2307.15043 "..."
+uv run rpipe gold edit-fact 2307.15043 2 "..."
+uv run rpipe gold remove-fact 2307.15043 2
 uv run rpipe gold remove 2307.15043
 uv run pytest tests/test_gold.py -q
 ```
 
 ## Where the code is
 
-`src/research_pipeline/gold.py` (`GoldPaper`, `load_gold`, `add_gold`, `remove_gold`, `add_fact`, `GOLD_TARGET`), the `gold_app` section of `src/research_pipeline/cli.py`, and `tests/test_gold.py`. The eval code is listed at the end of the second half below.
+`src/research_pipeline/gold.py` (`GoldPaper`, `load_gold`, `add_gold`, `remove_gold`, `add_fact`, `edit_fact`, `remove_fact`, `GOLD_TARGET`), the `gold_app` section of `src/research_pipeline/cli.py`, and `tests/test_gold.py`. The eval code is listed at the end of the second half below.
 
 ---
 

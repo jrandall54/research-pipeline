@@ -4,7 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from research_pipeline import cli
-from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, load_gold, remove_gold
+from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, load_gold, remove_fact, remove_gold
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import ConfigError, init_vault
 from test_cli_profile import StubArxiv, paper
@@ -134,3 +134,89 @@ def test_cli_corrupt_file_clean_error(vault):
     (vault / "gold" / "gold.json").write_text("nope")
     res = grun(vault, "list")
     assert res.exit_code == 1 and "gold.json" in res.output
+
+
+def three(vault):
+    add_gold(vault, GoldPaper(paper_id="2307.15043", title="T", key_facts=["one", "two", "three"]))
+
+
+def facts(vault):
+    return load_gold(vault)[0].key_facts
+
+
+def test_edit_fact_core(vault):
+    three(vault)
+    assert edit_fact(vault, "2307.15043v2", 2, "  new  ") == "two"
+    assert facts(vault) == ["one", "new", "three"]
+    assert edit_fact(vault, "1111.1111", 1, "x") is None
+    for bad in (0, 4):
+        with pytest.raises(ValueError):
+            edit_fact(vault, "2307.15043", bad, "x")
+    with pytest.raises(ValueError):
+        edit_fact(vault, "2307.15043", 1, "  ")
+    assert facts(vault) == ["one", "new", "three"]
+
+
+def test_remove_fact_core(vault):
+    three(vault)
+    assert remove_fact(vault, "2307.15043", 1) == "one"
+    assert facts(vault) == ["two", "three"]
+    assert remove_fact(vault, "1111.1111", 1) is None
+    with pytest.raises(ValueError):
+        remove_fact(vault, "2307.15043", 3)
+    remove_fact(vault, "2307.15043", 1)
+    with pytest.raises(ValueError, match="only fact"):
+        remove_fact(vault, "2307.15043", 1)
+    assert facts(vault) == ["three"]
+
+
+def test_cli_list_numbers_facts(vault):
+    three(vault)
+    assert "2. two" in grun(vault, "list").output
+
+
+def test_cli_edit_fact_args(vault):
+    three(vault)
+    res = grun(vault, "edit-fact", "2307.15043", "2", "better")
+    assert res.exit_code == 0 and "Updated fact 2" in res.output
+    assert facts(vault) == ["one", "better", "three"]
+
+
+def test_cli_edit_fact_guided(vault):
+    three(vault)
+    res = runner.invoke(cli.app, ["gold", "edit-fact", "--vault", str(vault)], input="2307.15043\n3\nfixed\n")
+    assert res.exit_code == 0
+    assert "3. three" in res.output
+    assert facts(vault) == ["one", "two", "fixed"]
+
+
+def test_cli_edit_fact_errors(vault):
+    three(vault)
+    assert grun(vault, "edit-fact", "1111.1111", "1", "x").exit_code == 1
+    bad = grun(vault, "edit-fact", "2307.15043", "9", "x")
+    assert bad.exit_code == 1 and "no fact 9" in bad.output
+    assert grun(vault, "edit-fact", "2307.15043", "1", "  ").exit_code == 1
+    assert facts(vault) == ["one", "two", "three"]
+
+
+def test_cli_remove_fact_confirm(vault):
+    three(vault)
+    res = runner.invoke(cli.app, ["gold", "remove-fact", "2307.15043", "1", "--vault", str(vault)], input="n\n")
+    assert res.exit_code == 0 and "Cancelled" in res.output
+    assert facts(vault) == ["one", "two", "three"]
+    res = runner.invoke(cli.app, ["gold", "remove-fact", "2307.15043", "1", "--vault", str(vault)], input="y\n")
+    assert res.exit_code == 0 and "Removed fact 1" in res.output
+    assert facts(vault) == ["two", "three"]
+
+
+def test_cli_remove_fact_yes_guided_and_errors(vault):
+    three(vault)
+    assert grun(vault, "remove-fact", "2307.15043", "5", "--yes").exit_code == 1
+    assert grun(vault, "remove-fact", "1111.1111", "1", "--yes").exit_code == 1
+    res = runner.invoke(cli.app, ["gold", "remove-fact", "--yes", "--vault", str(vault)], input="2307.15043\n2\n")
+    assert res.exit_code == 0
+    assert facts(vault) == ["one", "three"]
+    grun(vault, "remove-fact", "2307.15043", "1", "--yes")
+    last = grun(vault, "remove-fact", "2307.15043", "1", "--yes")
+    assert last.exit_code == 1 and "only fact" in last.output
+    assert facts(vault) == ["three"]

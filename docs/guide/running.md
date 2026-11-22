@@ -106,7 +106,7 @@ $ uv run rpipe save 2307.15043
 $ uv run rpipe feedback          # lists current votes and saved papers with titles
 ```
 
-Gold-set commands (`rpipe gold add`, `rpipe gold list`, `rpipe gold remove`, `rpipe gold add-fact`) build the answer key of papers and key facts that `rpipe eval` checks summaries against; see `evaluation.md`.
+Gold-set commands (`rpipe gold add`, `rpipe gold list`, `rpipe gold remove`, `rpipe gold add-fact`, `rpipe gold edit-fact`, `rpipe gold remove-fact`) build the answer key of papers and key facts that `rpipe eval` checks summaries against; see `evaluation.md`.
 
 ```
 $ uv run rpipe gold add 2307.15043          # paste a link, id or title; then type key facts, one per line

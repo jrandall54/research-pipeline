@@ -99,3 +99,47 @@ def add_fact(vault: Path, paper_id: str, fact: str) -> bool:
             _save(vault, papers)
             return True
     return False
+
+
+def _fact_target(papers: list[GoldPaper], paper_id: str, number: int) -> tuple[GoldPaper | None, int]:
+    """Find the paper and the 0-based fact index for a 1-based fact number (as `rpipe gold list` shows)."""
+    for p in papers:
+        if _key(p.paper_id) == _key(paper_id):
+            if not 1 <= number <= len(p.key_facts):
+                raise ValueError(f"{p.paper_id} has {len(p.key_facts)} fact(s); there is no fact {number}.")
+            return p, number - 1
+    return None, 0
+
+
+def edit_fact(vault: Path, paper_id: str, number: int, text: str) -> str | None:
+    """Replace fact `number` (1-based) of a paper; returns the old text, None if the paper is not there.
+
+    Raises ValueError for a number out of range or empty text. Nothing is written on error.
+    """
+    if not text.strip():
+        raise ValueError("The fact is empty.")
+    papers = load_gold(vault)
+    p, i = _fact_target(papers, paper_id, number)
+    if p is None:
+        return None
+    old = p.key_facts[i]
+    p.key_facts[i] = text.strip()
+    _save(vault, papers)
+    return old
+
+
+def remove_fact(vault: Path, paper_id: str, number: int) -> str | None:
+    """Delete fact `number` (1-based); returns the removed text, None if the paper is not there.
+
+    Raises ValueError for a number out of range, or if it is the paper's only fact
+    (a gold paper needs at least one; use `rpipe gold remove` to drop the paper).
+    """
+    papers = load_gold(vault)
+    p, i = _fact_target(papers, paper_id, number)
+    if p is None:
+        return None
+    if len(p.key_facts) == 1:
+        raise ValueError(f"That is the only fact for {p.paper_id}; a gold paper needs at least one. Remove the paper instead: rpipe gold remove {p.paper_id}")
+    old = p.key_facts.pop(i)
+    _save(vault, papers)
+    return old

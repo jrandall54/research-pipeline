@@ -45,7 +45,6 @@ Phase 3:
 
 From Phase 2 and auto-model:
 - Tests: duplicate `AlwaysSummary`, and test-to-test imports.
-- No command to edit or remove a single gold fact (`gold add-fact` now adds one; there is still no edit or remove).
 
 Dropped as resolved in Phase 3: no way to add a gold fact (`rpipe gold add-fact` exists).
 

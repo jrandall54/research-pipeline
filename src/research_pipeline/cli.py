@@ -19,12 +19,13 @@ from typing import Annotated
 import typer
 
 from research_pipeline.collect import run_collect
-from research_pipeline.db import SchemaTooNewError, UnknownPaperError, current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
-from research_pipeline.digest import write_digest
+from research_pipeline.db import SchemaTooNewError, clear_skip, get_summary, record_skip, UnknownPaperError, current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
+from research_pipeline.digest import render_summary, write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
 from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, has_gold, load_gold, remove_fact, remove_gold
 from research_pipeline.llm import LLM, LlmError, OllamaClient
+from research_pipeline.review import later_queue, queue_progress, review_queue
 from research_pipeline.run_lock import RunLocked, run_lock
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
@@ -1317,6 +1318,7 @@ def feedback(vault: VaultOption = None) -> None:
         titles = {r["id"]: r["title"] for r in ctx.conn.execute("SELECT id, title FROM papers")}
         votes = current_votes(ctx.conn)
         saves = list_saved(ctx.conn)
+        waiting = len(later_queue(ctx.conn))
     finally:
         ctx.conn.close()
     typer.echo("Votes")
@@ -1329,6 +1331,78 @@ def feedback(vault: VaultOption = None) -> None:
         typer.echo("  No saved papers yet. Try `rpipe save ID`.")
     for r in saves:
         typer.echo(f"  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")
+    typer.echo("Review later")
+    if waiting:
+        typer.echo(f"  {waiting} {'paper' if waiting == 1 else 'papers'} waiting. Run `rpipe review --later`.")
+    else:
+        typer.echo("  Nothing waiting.")
+
+
+_REVIEW_KEYS = {"u": "up", "d": "down", "s": "skip", "q": "quit"}
+
+
+def _show_paper(conn: sqlite3.Connection, row: sqlite3.Row, header: str) -> None:
+    typer.echo(f"\n{header}\n")
+    typer.echo(row["title"])
+    typer.echo(f"id: {row['id']}")
+    reasons = json.loads(row["triage_reasons"]) if row["triage_reasons"] else []
+    if reasons:
+        typer.echo("why: " + "; ".join(reasons))
+    typer.echo("")
+    ps = get_summary(conn, row["id"])
+    if ps is not None:
+        typer.echo("\n".join(render_summary(ps)).rstrip())
+    else:
+        typer.echo((row["abstract"] or "").strip() or "No abstract available.")
+    typer.echo(f"\n{row['url']}")
+
+
+@app.command("review")
+def review(
+    later: Annotated[bool, typer.Option("--later", help="Go through the papers you skipped earlier.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Read each unreviewed digest paper in the terminal and vote up, down, skip or quit."""
+    if not _is_tty():
+        raise _fail("rpipe review needs a terminal. Use `rpipe vote ID up|down` instead.")
+    ctx = _open(vault)
+    try:
+        queue = later_queue(ctx.conn) if later else review_queue(ctx.conn)
+        if not queue:
+            typer.echo("Nothing waiting in review later." if later else "Nothing to review.")
+            return
+        voted = skipped = 0
+        aborted = False
+        try:
+            for i, row in enumerate(queue, start=1):
+                if later:
+                    header = f"Review later · {i} of {len(queue)}"
+                else:
+                    handled, total = queue_progress(ctx.conn, row["digest_date"])
+                    header = f"Digest {row['digest_date']} · paper {handled + 1} of {total}"
+                _show_paper(ctx.conn, row, f"{header} · {voted} voted, {skipped} skipped")
+                while True:
+                    answer = typer.prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
+                    if answer in _REVIEW_KEYS:
+                        break
+                    typer.echo("Please answer u, d, s or q.")
+                if answer == "q":
+                    break
+                if answer == "s":
+                    record_skip(ctx.conn, row["id"])
+                    skipped += 1
+                else:
+                    record_vote(ctx.conn, row["id"], 1 if answer == "u" else -1)
+                    clear_skip(ctx.conn, row["id"])
+                    voted += 1
+        except (typer.Abort, KeyboardInterrupt, EOFError):
+            aborted = True
+        left = len(later_queue(ctx.conn) if later else review_queue(ctx.conn))
+        typer.echo(f"Voted {voted}, skipped {skipped} this session. {left} left in the queue.")
+        if aborted:
+            raise typer.Abort()
+    finally:
+        ctx.conn.close()
 
 
 schedule_app = typer.Typer(help="Run the pipeline every night with a systemd user timer.", no_args_is_help=True)

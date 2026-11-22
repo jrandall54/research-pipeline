@@ -86,7 +86,7 @@ Every item shows `id: <id>` right under its title. If you have saved the paper i
 
 At the very end of the file, when there is at least one item, a single footer line reminds you of the commands, using the first item's id as the example: `rpipe vote <id> up|down · rpipe save <id>`. It appears once rather than on every item so the digest stays readable; with no items there is nothing to vote on, so no hint is written.
 
-You record feedback with `rpipe vote ID up|down|clear`, `rpipe save ID`, `rpipe unsave ID` and list it with `rpipe feedback` (see `running.md`). `ID` can also be part of a title; if several papers match you pick from a numbered list, and if none match nothing is written. **Why validate against the vault:** the database does not enforce that a vote points at a real paper, so a typo would silently store a vote for nothing; the CLI checks first. Votes are append-only (the latest one counts), so changing your mind keeps the history for later use by ranking.
+To go through a digest's papers one by one in the terminal, use `rpipe review` ([review.md](review.md)). You can also record feedback with `rpipe vote ID up|down|clear`, `rpipe save ID`, `rpipe unsave ID` and list it with `rpipe feedback` (see `running.md`). `ID` can also be part of a title; if several papers match you pick from a numbered list, and if none match nothing is written. **Why validate against the vault:** the database does not enforce that a vote points at a real paper, so a typo would silently store a vote for nothing; the CLI checks first. Votes are append-only (the latest one counts), so changing your mind keeps the history for later use by ranking.
 
 ### The summary block
 
@@ -175,6 +175,7 @@ Tests: `uv run pytest -q tests/test_digest.py tests/test_db.py` (offline; they u
 
 - `src/research_pipeline/digest.py`: `write_digest` and the markdown rendering (including the summary block).
 - `src/research_pipeline/db.py`: `mark_in_digest`, `record_vote`, `current_votes`, `set_saved`, `is_saved`, `list_saved`.
+- `src/research_pipeline/digest.py`: `render_summary` is public because `rpipe review` shows the same summary text.
 - `src/research_pipeline/cli.py`: the `vote`, `save`, `unsave` and `feedback` commands (`_resolve_paper` turns an id or title fragment into a paper id).
 - `tests/test_digest.py`, `tests/test_db.py`, `tests/test_cli_feedback.py`.
 

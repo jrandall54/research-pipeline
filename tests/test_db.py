@@ -283,3 +283,68 @@ def test_db_does_not_import_summarize():
     code = "import sys, research_pipeline.db; print('research_pipeline.summarize' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+def test_open_db_upgrades_v1_to_v2(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "v1.db"
+    conn = open_db(path)
+    conn.execute("DROP TABLE skips")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+    raw = sqlite3.connect(path)
+    assert "skips" not in {r[0] for r in raw.execute("SELECT name FROM sqlite_master")}
+    raw.close()
+    conn = open_db(path)
+    assert "skips" in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master")}
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+def test_open_db_still_refuses_version_3(tmp_path):
+    import pytest
+
+    from research_pipeline.db import SchemaTooNewError
+
+    path = tmp_path / "v3.db"
+    conn = open_db(path)
+    conn.execute("PRAGMA user_version = 3")
+    conn.commit()
+    conn.close()
+    with pytest.raises(SchemaTooNewError):
+        open_db(path)
+
+
+def test_record_skip_unknown_paper_raises(tmp_path):
+    import pytest
+
+    from research_pipeline.db import UnknownPaperError, record_skip
+
+    conn = open_db(tmp_path / "p.db")
+    with pytest.raises(UnknownPaperError):
+        record_skip(conn, "nope")
+    assert conn.execute("SELECT COUNT(*) FROM skips").fetchone()[0] == 0
+
+
+def test_record_skip_twice_refreshes_timestamp(tmp_path):
+    from research_pipeline.db import record_skip
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    record_skip(conn, "2401.00001", now="2026-01-01T00:00:00+00:00")
+    record_skip(conn, "2401.00001", now="2026-02-01T00:00:00+00:00")
+    rows = conn.execute("SELECT * FROM skips").fetchall()
+    assert len(rows) == 1 and rows[0]["skipped_at"] == "2026-02-01T00:00:00+00:00"
+
+
+def test_clear_skip_is_idempotent(tmp_path):
+    from research_pipeline.db import clear_skip, record_skip
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    clear_skip(conn, "2401.00001")  # nothing there: harmless
+    record_skip(conn, "2401.00001")
+    clear_skip(conn, "2401.00001")
+    clear_skip(conn, "2401.00001")
+    assert conn.execute("SELECT COUNT(*) FROM skips").fetchone()[0] == 0

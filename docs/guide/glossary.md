@@ -163,3 +163,9 @@
 **DNS rebinding.** A trick where a web page makes your browser treat a private address (such as a Tailscale IP) as if it belonged to the page's own site, so the page can read a server that has no login. Servers defend by checking the `Host` header; Datasette does not (see `browsing.md`).
 
 **flock (file lock)** — an operating-system lock on an open file. `rpipe run` takes one on `.run.lock` in the vault so two runs cannot overlap; the system releases it automatically when the process ends, however it ends.
+
+**Skip** — in `rpipe review`, choosing "not now" for a paper instead of voting. It is stored in the `skips` table, is not a vote, and does not change your profile. See `data-model.md`.
+
+**Review queue** — the digest papers you have not yet voted on or skipped, oldest digest first and highest triage score first within a day. A paper whose vote was cleared is back in it. See `data-model.md`.
+
+**Review later** — the list of skipped papers still without a vote, oldest skip first. Skipping a paper again sends it to the back of this list. See `data-model.md`.

@@ -38,7 +38,7 @@ def _claim(c: Claim, unverified: list[str], label: str = "") -> str:
     return f"- {label}{flag}{_one_line(c.text)} [§ {cited}]"
 
 
-def _render_summary(ps: PaperSummary) -> list[str]:
+def render_summary(ps: PaperSummary) -> list[str]:
     s, c, bad = ps.summary, ps.critique, ps.unverified
     lines = [f"**Summary:** {_one_line(s.one_line)}", ""]
     lines += [
@@ -103,7 +103,7 @@ def _render(
     lines += [f"- {r}" for r in json.loads(p["triage_reasons"] or "[]")]
     lines += ["", p["abstract"].strip() or "_No abstract available._", ""]
     if ps is not None:
-        lines += _render_summary(ps) + _provenance_line(prov)
+        lines += render_summary(ps) + _provenance_line(prov)
     links = [f"[abs]({_link_url(p['url'])})"]
     if _ARXIV_ID.match(p["id"]):
         links.append(f"[PDF](https://arxiv.org/pdf/{p['id']})")

@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from research_pipeline.db import (
-    UnknownPaperError, current_votes, is_saved, list_saved, open_db, record_vote, set_saved,
+    SCHEMA_VERSION, UnknownPaperError, current_votes, is_saved, list_saved, open_db, record_vote, set_saved,
     upsert_paper,
 )
 from research_pipeline.models import PaperMeta
@@ -61,7 +61,7 @@ def test_old_vault_upgrades(tmp_path):
     conn = open_db(path)
     names = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master")}
     assert "saves" in names
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_vote_on_unknown_paper_is_refused_and_writes_nothing(tmp_path):

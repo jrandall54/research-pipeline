@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS saves (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS skips (
+    paper_id   TEXT PRIMARY KEY REFERENCES papers(id),
+    skipped_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS embeddings (
     item_id         TEXT NOT NULL,
     embedding_model TEXT NOT NULL,
@@ -96,7 +101,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class SchemaTooNewError(RuntimeError):
@@ -111,6 +116,8 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
     """Bring an older database up to SCHEMA_VERSION (one ``if`` step per version)."""
     if from_version < 1:
         pass  # v0 -> v1: the `saves` table is added by CREATE TABLE IF NOT EXISTS
+    if from_version < 2:
+        pass  # v1 -> v2: the `skips` table is added by CREATE TABLE IF NOT EXISTS
 
 
 def open_db(path: Path) -> sqlite3.Connection:
@@ -152,6 +159,23 @@ def record_vote(
         "INSERT INTO votes (paper_id, vote, created_at) VALUES (?, ?, ?)",
         (paper_id, vote, now or _now()),
     )
+    conn.commit()
+
+
+def record_skip(conn: sqlite3.Connection, paper_id: str, now: str | None = None) -> None:
+    """Mark a paper "review later" (refreshing the time if already skipped). Commits."""
+    _require_paper(conn, paper_id)
+    conn.execute(
+        "INSERT INTO skips (paper_id, skipped_at) VALUES (?, ?)"
+        " ON CONFLICT(paper_id) DO UPDATE SET skipped_at = excluded.skipped_at",
+        (paper_id, now or _now()),
+    )
+    conn.commit()
+
+
+def clear_skip(conn: sqlite3.Connection, paper_id: str) -> None:
+    """Remove a paper from the review-later list (harmless if it is not there). Commits."""
+    conn.execute("DELETE FROM skips WHERE paper_id = ?", (paper_id,))
     conn.commit()
 
 

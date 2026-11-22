@@ -23,7 +23,7 @@ One command, `rpipe run`, executes the whole flow and records it. Each stage in 
 3. **Summarize** ([fulltext.md](fulltext.md), [summaries.md](summaries.md), [llm.md](llm.md)). For each kept paper, downloads the arXiv HTML version and strips hidden text (a defence against prompt injection), then asks the local model for a summary and a critique. Each claim must cite paper sections; code checks the citations against the real section titles. The paper moves `triaged` to `fetched` to `summarized`. No HTML version means an abstract-only summary; Ollama being down means this stage is skipped and the cause is shown in the health line. One paper failing never stops the others.
 4. **Digest** ([digest.md](digest.md)). Writes the kept papers, best first, with their summaries, as a markdown file with a one-line health summary on top, then marks them `in_digest`.
 5. **The run record** ([running.md](running.md)). `run` also writes a row to the `runs` table with start and end times, counts per stage and any errors (list them with `rpipe runs`).
-6. **The daily habit** ([scheduling.md](scheduling.md), [browsing.md](browsing.md)). A systemd timer (`rpipe schedule install`) runs `rpipe run` each night; you read the digest, or browse the vault from your phone with `rpipe serve`, and vote or save papers. Those votes feed back into the next triage.
+6. **The daily habit** ([scheduling.md](scheduling.md), [browsing.md](browsing.md)). A systemd timer (`rpipe schedule install`) runs `rpipe run` each night; you read the digest, or browse the vault from your phone with `rpipe serve`, or step through unvoted papers in the terminal with `rpipe review` ([review.md](review.md)), and vote or save papers. Those votes feed back into the next triage.
 
 Underneath all of this are the typed objects and the SQLite tables ([data-model.md](data-model.md)) and the vault folder with its two settings files ([vault-and-config.md](vault-and-config.md)).
 
@@ -48,10 +48,11 @@ New to the project? Read in this order:
 11. [evaluation.md](evaluation.md): the gold set, the `rpipe gold` commands and the `rpipe eval` accuracy check
 12. [scheduling.md](scheduling.md): `rpipe schedule` and the nightly systemd timer
 13. [browsing.md](browsing.md): `rpipe serve`, browsing and voting from your phone over Tailscale
-14. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+14. [review.md](review.md): `rpipe review`, reading and voting on the digest in the terminal, and the review-later list
+15. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`, `schedule.py`, `serve.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`, `schedule.py`, `serve.py`, `review.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.

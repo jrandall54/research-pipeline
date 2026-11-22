@@ -58,6 +58,7 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 | `summarize` | summarise and critique every paper still waiting (`triaged`, `fetched`, or in today's digest without a summary) with the local model (fetching arXiv HTML full text first; abstract only if there is none) | full texts, summaries, statuses `fetched` then `summarized` |
 | `runs [--limit N]` | list recent runs, newest first | nothing |
 | `serve [--host H] [--port 8001]` | browse the vault and vote/save from a phone with Datasette over Tailscale (needs the `serve` extra: `uv sync --extra embed --extra serve`, or `uv tool install --editable '.[embed,serve]' --force`; see [browsing.md](browsing.md)) | `votes`, `saves` (only when you press a button) |
+| `review [--later]` | read each unreviewed digest paper in the terminal and vote up/down, skip or quit; `--later` goes through skipped papers (needs a terminal; see [review.md](review.md)) | `votes`, `skips` |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
 **The summarize stage.** `rpipe run` checks that Ollama is up and the model installed before this stage. If not, it skips the stage, records the cause in the health line and `runs.errors`, and still writes the digest (abstracts only), so a stopped Ollama never costs you the night's digest. A single paper that fails (model error, network error fetching its text) keeps its status, gets its `error` and `retry_count` set, and the rest carry on.
@@ -103,7 +104,8 @@ Feedback commands (`rpipe vote ID up|down|clear`, `rpipe save ID`, `rpipe unsave
 ```
 $ uv run rpipe vote 2307.15043 up
 $ uv run rpipe save 2307.15043
-$ uv run rpipe feedback          # lists current votes and saved papers with titles
+$ uv run rpipe feedback          # lists current votes and saved papers with titles, and the review-later count
+$ uv run rpipe review            # step through unvoted digest papers: u, d, s or q (see review.md)
 ```
 
 Gold-set commands (`rpipe gold add`, `rpipe gold list`, `rpipe gold remove`, `rpipe gold add-fact`, `rpipe gold edit-fact`, `rpipe gold remove-fact`) build the answer key of papers and key facts that `rpipe eval` checks summaries against; see `evaluation.md`.

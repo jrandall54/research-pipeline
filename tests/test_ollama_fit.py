@@ -203,7 +203,7 @@ def test_choose_skips_embedding_only_models(mock):
     })
     fake.install(mock)
     fit = choose(URL, list_models(URL), None, None)
-    assert fit == Fit(model="gen", num_ctx=16384)  # fits at its full trained context: no margin
+    assert fit == Fit(model="gen", num_ctx=15360)  # 16384 less the safety margin
     assert all(p["model"] != "emb" for p in fake.generate_calls)
 
 
@@ -591,19 +591,19 @@ def test_a_request_timeout_after_the_deadline_is_a_probe_timeout_not_no_fit(
     fake.install(mock)
 
     def hang(request):
-        clock.now += 400
+        clock.now += 1000
         raise httpx.ReadTimeout("hung")
 
     mock.post(f"{URL}/api/generate").mock(side_effect=hang)
     with pytest.raises(ProbeTimeout):
-        resolve(URL, tmp_path, "auto", "auto")  # default deadline is 300 s
+        resolve(URL, tmp_path, "auto", "auto")  # default deadline is 900 s
     assert not (tmp_path / "cache" / "llm_fit.json").exists()
 
 
-def test_default_deadlines_are_five_minutes_and_ten_seconds():
+def test_default_deadlines_are_fifteen_minutes_and_ten_seconds():
     from research_pipeline import ollama_fit
 
-    assert ollama_fit.FIT_DEADLINE == 300 and ollama_fit.SHOW_DEADLINE == 10
+    assert ollama_fit.FIT_DEADLINE == 900 and ollama_fit.SHOW_DEADLINE == 10
 
 
 def test_cached_fit_gives_up_when_ollama_hangs(mock, tmp_path, monkeypatch):
@@ -623,11 +623,11 @@ def test_cached_fit_gives_up_when_ollama_hangs(mock, tmp_path, monkeypatch):
     assert "10 seconds" in str(exc.value)
 
 
-def test_margin_is_skipped_when_the_model_fits_at_its_full_trained_context(mock):
+def test_margin_is_kept_even_when_the_model_fits_at_its_full_trained_context(mock):
     fake = FakeOllama({"m": {"size": 4 * GB, "params": 8 * GB, "ctx": 20480}},
                       free=20 * GB, kv_per_token=10_000)
     fake.install(mock)
-    assert choose(URL, list_models(URL), None, None).num_ctx == 20480
+    assert choose(URL, list_models(URL), None, None).num_ctx == 19456  # memory headroom stays
 
 
 def test_margin_still_applies_below_the_trained_context(mock):

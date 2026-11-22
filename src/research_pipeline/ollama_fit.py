@@ -23,7 +23,7 @@ UNLOAD_TIMEOUT = 30.0
 CACHE_NAME = "llm_fit.json"
 SAFETY_MARGIN = 1024  # one step taken off the measured maximum: the nightly run has less free memory
 MIN_CONTEXT = 8192
-FIT_DEADLINE = 300.0  # seconds one probing session (`rpipe model fit`, `run`, `check`) may take in all
+FIT_DEADLINE = 900.0  # seconds one probing session (`rpipe model fit`, `run`, `check`) may take in all
 SHOW_DEADLINE = 10.0  # seconds `rpipe model show` waits for Ollama before giving up
 _clock = time.monotonic  # replaced in tests
 
@@ -234,12 +234,6 @@ def _ceiling(m: ModelInfo) -> int:
     return min(m.max_context or CONTEXT_CEILING, CONTEXT_CEILING)
 
 
-def _at_trained_limit(m: ModelInfo, best: int, step: int = 1024) -> bool:
-    """True when `best` is the largest step-multiple the model was trained for."""
-    return (m.max_context is not None and m.max_context <= CONTEXT_CEILING
-            and best >= (m.max_context // step) * step)
-
-
 def choose(
     url: str,
     models: list[ModelInfo],
@@ -293,8 +287,6 @@ def choose(
         best = max_context(url, m.name, ceiling, floor=needed, preloaded=pre, floor_fits=True,
                           session=session)
         if best is not None and best >= needed:
-            if _at_trained_limit(m, best):
-                return Fit(model=m.name, num_ctx=best)  # nothing larger can be used: no margin
             # One step of headroom: the nightly run may have a little less memory free.
             return Fit(model=m.name, num_ctx=max(best - SAFETY_MARGIN, MIN_CONTEXT))
         tried.append(f"{m.name} (no context of {needed} tokens or more fits)")

@@ -434,8 +434,8 @@ def test_e2e_default_vault_auto_picks_model_and_sends_resolved_values(vault, mon
         assert route.call_count > 0
         bodies = [json.loads(c.request.content) for c in route.calls]
         assert {b["model"] for b in bodies} == {"mid"}
-        # mid fits until 8 GB + 100_000 * n <= 20 GB, i.e. n = 120000 -> 117 * 1024 = 119808, so it fits at its full trained context of 40960: no margin -> 40960
-        assert {b["options"]["num_ctx"] for b in bodies} == {40960}
+        # mid fits until 8 GB + 100_000 * n <= 20 GB, i.e. n = 120000 -> 117 * 1024 = 119808, ceiling 40960, less one step of margin -> 39936
+        assert {b["options"]["num_ctx"] for b in bodies} == {39936}
         assert "summarized 2" in next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
         probes_after_first = len(fake.probes())
         assert probes_after_first > 0
@@ -477,7 +477,7 @@ def test_model_fit_prints_choice_and_writes_cache_and_show_reports_it(vault):
         fake.install(m)
         res = run_cli("model", "fit", "--vault", str(vault))
         assert res.exit_code == 0, res.output
-        assert "Using model mid with a context of 40960 tokens" in res.output
+        assert "Using model mid with a context of 39936 tokens" in res.output
         assert "big" in res.output  # what was tried
         n = len(fake.probes())
         run_cli("model", "fit", "--vault", str(vault))
@@ -489,7 +489,7 @@ def test_model_fit_prints_choice_and_writes_cache_and_show_reports_it(vault):
         fake.models["mid"]["digest"] = "new"  # the installed models changed: the cache is stale
         stale = run_cli("model", "show", "--vault", str(vault)).output
     assert "not probed yet" in stale and "last choice: mid" not in stale
-    assert "mid" in after and "40960" in after and "not probed yet" not in after
+    assert "mid" in after and "39936" in after and "not probed yet" not in after
 
 
 def test_model_fit_with_no_models_exits_1_with_pull_hint(vault):

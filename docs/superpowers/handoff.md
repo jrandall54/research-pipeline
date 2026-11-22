@@ -24,6 +24,7 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 
 ## Rulings worth remembering
 Phase 3:
+- The 1024-token margin is kept even at the full trained context: it guards memory fluctuation, not just overflow (llm.md).
 - Executed without a separate plan-review pause, on a branch in place (no worktree); merge is the owner's call.
 - Digest: id shown per item, the vote hint once in the footer (`digest.md`).
 - Implicit profile uses the NEAREST liked/disliked paper (max of weight x cosine), not an average, which dilutes with history (`triage.md`). Weights 0.20 liked, 0.15 disliked; a reason shows only at raw cosine >= 0.70.

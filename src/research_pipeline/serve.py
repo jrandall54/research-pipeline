@@ -76,7 +76,9 @@ def system_runner(argv: list[str]) -> subprocess.CompletedProcess:
 
 def check_host(host: str) -> str:
     """Allowlist: localhost, loopback IPs and Tailscale IPs only. Anything else is refused."""
-    h = host.strip()
+    h = host.strip().lower()
+    if "%" in h:  # IPv6 scope ids (fe80::1%eth0) are not supported
+        raise ServeError(f"Refusing to listen on {host!r}: scope ids ('%') are not supported. Allowed: {_ALLOWED}.")
     if h.startswith("[") and h.endswith("]"):
         h = h[1:-1]
     if h == "localhost":

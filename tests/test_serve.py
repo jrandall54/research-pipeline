@@ -1,4 +1,5 @@
 import json
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -23,8 +24,13 @@ def _fake(stdout="", returncode=0, raises=None):
 
 
 BAD = ["", " ", "0", "0.0.0.0", "0.0.0", "::", "::0", "[::]", "[::0]", "0:0:0:0:0:0:0:0",
-       "::ffff:0.0.0.0", "192.168.1.5", "8.8.8.8", "example.com"]
+       "::ffff:0.0.0.0", "192.168.1.5", "8.8.8.8", "example.com", "localhost.",
+       "::ffff:127.0.0.1", "::ffff:100.64.0.5", "127.1", "fe80::1%eth0", "::1%lo"]
 GOOD = ["localhost", "127.0.0.1", "::1", "100.64.0.5", "100.127.255.254", "fd7a:115c:a1e0::1"]
+
+
+def test_localhost_case_insensitive():
+    assert serve.resolve_host("LOCALHOST", _fake(raises=AssertionError)) == "localhost"
 
 
 @pytest.mark.parametrize("good", GOOD)
@@ -115,11 +121,6 @@ def test_command_argv(tmp_path):
     argv = serve.command(Path("/v/vault.sqlite"), "100.64.0.5", 8001, Path("/t/m.json"))
     assert argv == [sys.executable, "-m", "datasette", "serve", "/v/vault.sqlite",
                     "--host", "100.64.0.5", "--port", "8001", "--metadata", "/t/m.json"]
-    assert argv[:2] == ["datasette", "serve"] or argv[1:3] == ["-m", "datasette"]
-    assert "/v/vault.sqlite" in argv and "/t/m.json" in argv
-    assert argv[argv.index("--host") + 1] == "100.64.0.5"
-    assert argv[argv.index("--port") + 1] == "8001"
-    assert argv[argv.index("--metadata") + 1] == "/t/m.json"
     assert "-i" not in argv and "--immutable" not in argv
 
 
@@ -161,3 +162,26 @@ def test_metadata_is_json_and_write_flags():
         "vote_up", "vote_down", "vote_clear", "save", "unsave"}
     assert all("write" not in q for n, q in queries.items() if n in ("todays_digest", "saved"))
     assert all("on_success_message" in queries[n] for n in ("save", "unsave", "vote_up"))
+
+
+def test_cli_sigterm_cleans_up_and_restores_handler(tmp_path, monkeypatch):
+    init_vault(tmp_path / "v")
+    monkeypatch.setattr(serve, "datasette_available", lambda: True)
+    before = signal.getsignal(signal.SIGTERM)
+    seen = {}
+
+    def fake_run(argv):
+        seen["path"] = Path(argv[argv.index("--metadata") + 1])
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler) and handler is not before  # our handler is installed
+        handler(signal.SIGTERM, None)  # what a real SIGTERM would do; never kills pytest
+        return 0
+
+    monkeypatch.setattr(serve, "run_datasette", fake_run)
+    try:
+        r = runner.invoke(cli.app, ["serve", "--host", "127.0.0.1", "--vault", str(tmp_path / "v")])
+        assert r.exit_code == 143
+        assert not seen["path"].exists()
+        assert signal.getsignal(signal.SIGTERM) == before
+    finally:
+        signal.signal(signal.SIGTERM, before)

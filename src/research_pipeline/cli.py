@@ -1199,15 +1199,19 @@ def serve_cmd(
         raise _fail(str(exc)) from exc
     if not serve_mod.datasette_available():
         raise _fail("Datasette is not installed. Install it with: uv sync --extra serve")
-    fd, name = tempfile.mkstemp(prefix="rpipe-datasette-", suffix=".json")
-    meta = Path(name)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # so the finally below still runs
+    old_handler = signal.getsignal(signal.SIGTERM)
+    meta: Path | None = None
     try:
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # so the finally below still runs
+        fd, name = tempfile.mkstemp(prefix="rpipe-datasette-", suffix=".json")
+        meta = Path(name)
         with os.fdopen(fd, "w") as f:
             json.dump(serve_mod.build_metadata(), f)
         typer.echo(f"Serving {ctx.vault / 'vault.sqlite'} at http://{bind}:{port}/ (no login: reachable by anyone who can reach this address)")
         code = serve_mod.run_datasette(serve_mod.command(ctx.vault / "vault.sqlite", bind, port, meta))
     finally:
-        meta.unlink(missing_ok=True)
+        if meta is not None:
+            meta.unlink(missing_ok=True)
+        signal.signal(signal.SIGTERM, old_handler)
     if code:
         raise typer.Exit(code=code)

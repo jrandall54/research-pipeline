@@ -38,7 +38,7 @@ It creates the vault (default `~/research-vault`, or `--vault PATH`, or the `RES
 
 ### Set up your profile
 
-The `rpipe init` wizard covers steps 1 and 2 below the first time. You never need to open `profile.yaml`; use the commands any time later (details and sample output in `profile.md`):
+The `rpipe init` wizard covers steps 1 and 2 below the first time, and it can start from a description: answer its first question with a few sentences about your research and the local model proposes topics and seed papers for you to approve (the same thing is available later as `rpipe profile suggest "..."`; it needs Ollama, and without it you just continue by hand). You never need to open `profile.yaml`; use the commands any time later (details and sample output in `profile.md`):
 
 1. Add 10-20 papers you like as seeds. Paste an arXiv link, an id, or a title and confirm: `rpipe profile add-seed https://arxiv.org/abs/2307.15043` (`vault-and-config.md` has advice on choosing them).
 2. Make the topics specific phrases ("prompt injection attacks and defenses for LLM agents" beats "security"): `rpipe profile add-topic "..."`, and drop the examples with `rpipe profile remove-topic 1`.

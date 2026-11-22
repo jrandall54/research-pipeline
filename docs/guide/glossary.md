@@ -149,3 +149,7 @@
 **Tailscale** — a private network between your own devices; each gets a stable address (the `100.x.y.z` one `tailscale ip -4` prints), reachable only by devices on your tailnet. `rpipe serve` listens only on that address. See `browsing.md`.
 
 **Canned query** — a named SQL statement stored in Datasette's metadata and shown as a page or button; with `write: true` it can change data (our vote and save buttons). See `browsing.md`.
+
+**Onboarding (guided suggestions)** — asking the local model to propose topics and seed-paper titles from a short description of your research, so a new user does not start from a blank profile. Every proposal needs your approval, and a proposed paper title is kept only if it resolves to a real paper on arXiv. See `profile.md`.
+
+**Hallucinated title** — a paper title a language model makes up that sounds real but does not exist. Onboarding drops any proposed title that arXiv search cannot match. See `profile.md`.

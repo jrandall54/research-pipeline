@@ -102,6 +102,7 @@ Every command takes `--vault PATH` (same resolution as `init`). Messages are pla
 
 | Command | What it does |
 | --- | --- |
+| `rpipe profile suggest [DESCRIPTION] [--yes]` | Describe your research in a few sentences; the local model proposes topics and seed papers and you approve each (see "Guided suggestions"). |
 | `rpipe profile show` | Print everything: numbered topics, numbered seeds with titles, authors, keywords, top N, categories. |
 | `rpipe profile add-topic TEXT` / `remove-topic TEXT_OR_NUMBER` | Change topics. |
 | `rpipe profile add-author NAME` / `remove-author ...` | Change followed authors. |
@@ -155,9 +156,26 @@ How `add-seed` decides, in order:
 
 Other messages: adding something already there prints "already in your profile" (exit 0); removing something absent prints "not in your profile. Nothing was changed." (exit 0); an out-of-range number, `set-top-n 0`, a bad category, empty text, or an invalid `profile.yaml` print the error and exit 1. A missing vault says to run `rpipe init`.
 
+### Guided suggestions: `rpipe profile suggest`
+
+**What it does.** You write a few sentences about your research ("I work on security of LLM agents, mostly prompt injection and sandboxing"). The local model (see `llm.md`) proposes 3 to 8 topic phrases and up to 10 titles of well-known papers. You approve each one; nothing is added without a yes (or `--yes`).
+
+**How it works.**
+
+1. `propose` sends one request to the model. The description sits inside `<description>...</description>` and the system prompt (`ONBOARDING_SYSTEM`) says it is data, not instructions; any `<description>` tag typed inside it is defused so it cannot close the block (same idea as the `<paper>` block in `summaries.md`). A description under 20 characters is refused before any model call.
+2. Topics are compared with your existing ones ignoring case and spacing, so a topic you already have is not offered again. Each remaining one is shown and asked as `Add topic '...'? [Y/n]`. If your topics were still the three template examples, the first topic you accept replaces the examples, exactly like the `init` wizard.
+3. Paper titles go through `resolve_seeds`: each is searched on arXiv and kept only if a result shares at least 60% of the proposed title's words. A title with no such result is dropped. Language models invent plausible-looking titles, and arXiv search is fuzzy (the top hit for an invented title is often an unrelated paper), so the check is "does a real paper with this title exist", not "did the search return something". The survivors are shown (`Found 3 of 5 proposed papers on arXiv`) and each asked `Add seed ...? [Y/n]`; an accepted one is saved by the same `_add_seed` helper as `rpipe profile add-seed`.
+4. `--yes` accepts every proposal without asking. Without a description argument the command asks for one.
+
+Worked example: you type the sentence above; the model proposes "prompt injection attacks on LLM agents", "agent sandboxing" and the title "Universal and Transferable Adversarial Attacks on Aligned Language Models". You answer `y`, `n`, `y`. Two topics are added, the paper resolves to arXiv 2307.15043 and, after another `y`, becomes a seed.
+
+If the model is unreachable, not installed, or returns unusable output, the command prints `Local model unavailable; add topics by hand with `rpipe profile add-topic`` (plus the reason), changes nothing and exits 0: onboarding is a convenience, never a requirement. If arXiv cannot be reached the accepted topics are kept and no seeds are added.
+
+**Why this way.** Rejected: letting the model write straight into `profile.yaml` (a wrong or invented entry would silently skew every ranking; a human approves each one). Rejected: trusting returned titles (invented ones would reach the seed list). The prompt is separate from the summary prompts and is not covered by `PROMPT_VERSION`, which only stamps stored summaries.
+
 ### The guided `rpipe init`
 
-In a terminal, `rpipe init` uses the same edit functions as the commands above to ask for topics, categories and seeds one at a time (see `vault-and-config.md` for a sample session). Its seed step is literally `rpipe profile add-seed`: both call one helper, `_add_seed`, so the look-up, confirm and pick flow, and the error messages, are identical. The cache is written before the profile entry, so if saving fails (for example a full disk) you get one line such as `Could not save the seed: ... Nothing was changed.` and no profile entry without its text; the wizard then skips that seed and continues.
+In a terminal, `rpipe init` first offers `Describe your research in a few sentences (Enter to skip)`: a non-empty answer runs the same flow as `rpipe profile suggest`, and if the model is unavailable it says so and carries on with the manual steps. Then it uses the same edit functions as the commands above to ask for topics, categories and seeds one at a time (see `vault-and-config.md` for a sample session). Its seed step is literally `rpipe profile add-seed`: both call one helper, `_add_seed`, so the look-up, confirm and pick flow, and the error messages, are identical. The cache is written before the profile entry, so if saving fails (for example a full disk) you get one line such as `Could not save the seed: ... Nothing was changed.` and no profile entry without its text; the wizard then skips that seed and continues.
 
 ## Why it's built this way
 
@@ -184,4 +202,4 @@ Fresh vaults now start with `seeds: []` (the old placeholder ids are gone); `rpi
 
 ## Where the code is
 
-`src/research_pipeline/cli.py` (the `profile` sub-app, `make_arxiv`), `src/research_pipeline/profile_edit.py` (editing functions and normalisation), `src/research_pipeline/seed_input.py` (input parsing, candidate lookup), `src/research_pipeline/seeds.py` (`cache_seed`), `src/research_pipeline/sources/arxiv.py` (`search_title`), `src/research_pipeline/defaults/profile.yaml` (template), `src/research_pipeline/vault.py` (`load_profile`, `load_config`, `ConfigError`), `src/research_pipeline/models.py` (`Profile`, `Config`). Tests: `tests/test_profile_edit.py`, `tests/test_seed_input.py`, `tests/test_cli_profile.py`, `tests/test_init_wizard.py` (offline; the title fixture is a real arXiv response trimmed to the fields we use, plus one hand-written entry).
+`src/research_pipeline/onboarding.py` (`propose`, `resolve_seeds`), `src/research_pipeline/prompts.py` (`ONBOARDING_SYSTEM`), `src/research_pipeline/cli.py` (the `profile` sub-app, `make_arxiv`, `_suggest_flow`), `src/research_pipeline/profile_edit.py` (editing functions and normalisation), `src/research_pipeline/seed_input.py` (input parsing, candidate lookup), `src/research_pipeline/seeds.py` (`cache_seed`), `src/research_pipeline/sources/arxiv.py` (`search_title`), `src/research_pipeline/defaults/profile.yaml` (template), `src/research_pipeline/vault.py` (`load_profile`, `load_config`, `ConfigError`), `src/research_pipeline/models.py` (`Profile`, `Config`). Tests: `tests/test_profile_edit.py`, `tests/test_seed_input.py`, `tests/test_cli_profile.py`, `tests/test_onboarding.py` and `tests/test_init_wizard.py` (offline, fake model; the title fixture is a real arXiv response trimmed to the fields we use, plus one hand-written entry).

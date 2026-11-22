@@ -86,6 +86,10 @@ One broken model never blocks the rest: if Ollama cannot describe one installed 
 - `src/research_pipeline/cli.py`: `_release_gpu_memory` (called by `run` before the model is resolved) and `_progress` (stderr progress lines).
 - `tests/test_ollama_fit.py`: a small fake Ollama with a deterministic memory boundary (no real Ollama needed); `tests/test_e2e.py` ("auto model and context") runs `rpipe run` and `rpipe model fit` against it.
 
+## Second user: onboarding
+
+Besides summaries, the model has one more job: `rpipe profile suggest` (and the first question of `rpipe init`) asks it to propose topics and seed-paper titles from a description of your research. It goes through the same `build_llm` resolution and `check()` as `run` and `summarize`, including `auto` model choice. If Ollama is down or the model is missing, onboarding prints `Local model unavailable; add topics by hand with `rpipe profile add-topic`` and changes nothing. Its prompt, `ONBOARDING_SYSTEM`, is separate from the summary prompts and not versioned by `PROMPT_VERSION`. Details: `profile.md`.
+
 ## How to run / check it
 
 Install Ollama (https://ollama.com), then:
@@ -108,4 +112,5 @@ rpipe model set-context 16384   # pin the context in tokens, at least 8192, or `
 - `src/research_pipeline/models.py`: `Config.llm_model`, `llm_url`, `llm_num_ctx`.
 - `src/research_pipeline/profile_edit.py`: `set_llm_model`, `set_llm_num_ctx`.
 - `src/research_pipeline/cli.py`: the `model` commands, `build_llm`.
+- `src/research_pipeline/onboarding.py`: `propose` (the onboarding model call).
 - `tests/test_llm.py`, and `FakeLLM` in `tests/conftest.py`.

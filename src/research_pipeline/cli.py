@@ -26,7 +26,7 @@ from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, h
 from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline import ollama_fit, profile_edit, schedule, serve as serve_mod
+from research_pipeline import ollama_fit, onboarding, profile_edit, schedule, serve as serve_mod
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.sources.arxiv import ArxivSource
@@ -569,6 +569,89 @@ def profile_add_seed(
         _close(arxiv)
 
 
+LLM_DOWN = "Local model unavailable; add topics by hand with `rpipe profile add-topic`"
+
+
+def _onboarding_llm(config: Config) -> LLM:
+    """The checked local model for onboarding (same resolution as `run`); tests replace it."""
+    return _ready_llm(build_pipeline(config))
+
+
+def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> bool:
+    """Propose topics and seeds from `description`, adding each one the user approves.
+
+    Returns False (changing nothing) if the local model is unavailable."""
+    try:
+        proposal = onboarding.propose(_onboarding_llm(config), description)
+    except (LlmError, OSError) as exc:
+        typer.echo(f"{LLM_DOWN} ({exc})")
+        return False
+    current = load_profile(vault / "profile.yaml").topics
+    was_template = [profile_edit.normalise_text(t).casefold() for t in current] == [t.casefold() for t in DEFAULT_TOPICS]
+    existing = {profile_edit.normalise_text(t).casefold() for t in current}
+    topics = []
+    for t in proposal.topics:
+        key = profile_edit.normalise_text(t).casefold()
+        if key and key not in existing:
+            existing.add(key)
+            topics.append(profile_edit.normalise_text(t))
+    typer.echo("Proposed topics:\n" + _numbered(topics))
+    added: set[str] = set()
+    for t in topics:
+        if yes or typer.confirm(f"Add topic '{t}'?", default=True):
+            try:
+                profile_edit.add_topic(vault, t)
+                added.add(t.casefold())
+                typer.echo(f"Added topic: {t}")
+            except (ValueError, ConfigError, OSError) as exc:
+                typer.echo(f"Skipped: {exc}")
+    if was_template and added:  # your own topics replace the template examples, as in the wizard
+        for example in DEFAULT_TOPICS:
+            if example.casefold() not in added:
+                try:
+                    profile_edit.remove_topic(vault, example)
+                except (ValueError, ConfigError, OSError) as exc:
+                    typer.echo(f"Skipped removing example topic: {exc}")
+    if not proposal.seed_queries:
+        return True
+    arxiv = make_arxiv(config)
+    try:
+        try:
+            resolved = onboarding.resolve_seeds(proposal.seed_queries, arxiv)
+        except SourceError as exc:
+            typer.echo(f"Could not reach arXiv: {exc}. No seeds were added.")
+            return True
+        found = [m for _, m in resolved if m is not None]
+        typer.echo(f"Found {len(found)} of {len(resolved)} proposed papers on arXiv (the rest were dropped).")
+        for meta in found:
+            if yes or typer.confirm(f"Add seed {_describe(meta)}?", default=True):
+                try:
+                    typer.echo(_add_seed(vault, arxiv, meta.id, yes=True))
+                except _SeedProblem as exc:
+                    typer.echo(f"Skipped: {exc}")
+    finally:
+        _close(arxiv)
+    return True
+
+
+@profile_app.command("suggest")
+def profile_suggest(
+    description: Annotated[
+        str | None, typer.Argument(help="A few sentences about your research (asked for if omitted).")
+    ] = None,
+    vault: VaultOption = None,
+    yes: Annotated[bool, typer.Option("--yes", help="Accept every proposed topic and paper without asking.")] = False,
+) -> None:
+    """Let the local model propose topics and seed papers from a description; you approve each."""
+    ctx = _open(vault)
+    if description is None:
+        description = typer.prompt("Describe your research in a few sentences")
+    try:
+        _suggest_flow(ctx.vault, ctx.config, description, yes)
+    except (ValueError, ConfigError) as exc:
+        raise _fail(str(exc)) from exc
+
+
 @profile_app.command("set-top-n")
 def profile_set_top_n(
     n: Annotated[int, typer.Argument(help="Papers kept per digest (at least 1).")], vault: VaultOption = None
@@ -986,10 +1069,22 @@ def _wizard_seeds(vault: Path, config: Config) -> None:
         typer.echo("Tip: 10-20 seeds work best; add more later with rpipe profile add-seed")
 
 
+def _wizard_describe(vault: Path, config: Config) -> None:
+    """Optional: propose topics and seeds from a description. Any failure falls through."""
+    description = _ask("Describe your research in a few sentences (Enter to skip)")
+    if not description:
+        return
+    try:
+        _suggest_flow(vault, config.model_copy(update={"vault_path": vault}), description, False)
+    except ValueError as exc:
+        typer.echo(f"Skipped: {exc}")
+
+
 def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
     """Interactive setup. Every answer is saved as soon as it is confirmed."""
     try:
         config = load_config(vault / "config.yaml")
+        _wizard_describe(vault, config)
         _wizard_topics(vault, fresh_profile)
         _wizard_categories(vault, config, fresh_config)
         _wizard_seeds(vault, load_config(vault / "config.yaml"))

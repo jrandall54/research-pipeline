@@ -119,7 +119,7 @@ def _pull_progress(handle: StageHandle, tag: str) -> Callable[[str], None]:
             handle.note(line)
         elif not last or last[0] != match.group(1):
             last[:] = [match.group(1)]
-            handle.step(tag, detail=f"{match.group(1)}%")
+            handle.step(tag, current=int(match.group(1)), detail=f"{match.group(1)}%")
 
     return emit
 
@@ -1628,7 +1628,7 @@ def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> No
     if rec.pull is not None and rec.backend == "ollama" and info.ollama_installed:
         if typer.confirm(f"Pull {rec.pull.tag} now ({rec.pull.download_gb:g} GB download)?", default=True):
             try:
-                with _reporter() as reporter, stage(reporter, "model pull", label=rec.pull.tag) as handle:
+                with _reporter() as reporter, stage(reporter, "model pull", total=100, label=rec.pull.tag) as handle:
                     pull_model(config.llm_url, rec.pull.tag, _pull_progress(handle, rec.pull.tag))
             except LlmError as exc:
                 typer.echo(f"Pull failed: {exc}")

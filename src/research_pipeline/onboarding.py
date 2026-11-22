@@ -85,7 +85,7 @@ def resolve_seeds(
 ) -> list[tuple[str, PaperMeta | None]]:
     """Look each proposed title up on arXiv. No close match gives None. SourceError propagates."""
     out: list[tuple[str, PaperMeta | None]] = []
-    with stage(reporter, "seeds", total=len(queries), label="looking up proposed papers on arXiv") as handle:
+    with stage(reporter, "seeds", label="looking up proposed papers on arXiv") as handle:
         for n, q in enumerate(queries, 1):
             handle.note(f"[{n}/{len(queries)}] {q}")
             try:

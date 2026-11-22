@@ -70,7 +70,7 @@ model fit…
 model fit done (1m48s)
 ```
 
-(`rpipe run`, `summarize` and `eval run` print the same probe lines as plain indented lines before their own stage starts.) A model download (`rpipe model setup`) shows `model pull…`, then a step with the percent each time it changes (`m:1 43%`), then `model pull done (...)`: a live bar on a terminal. After that the cached answer is used and no probe happens.
+(`rpipe run`, `summarize` and `eval run` print the same probe lines as plain indented lines before their own stage starts.) A model download (`rpipe model setup`) is a stage with a total of 100 (percent): on a terminal a bar moves with each whole percent; in a log or pipe you get `model pull…`, a line about every 10% (`  m:1 43%`), the final `100%` and `model pull done (...)`. On a terminal every probe note is also kept as a permanent line, so the history of `trying ...` / `skipping ...` lines stays on screen as it did before. After that the cached answer is used and no probe happens.
 
 Two things can make a probe see less memory than the nightly run will have, and the pipeline guards against both:
 
@@ -97,7 +97,7 @@ One broken model never blocks the rest: if Ollama cannot describe one installed 
 ### Where the code is
 
 - `src/research_pipeline/ollama_fit.py`: `list_models`, `loaded_models`, `fits`, `max_context`, `choose`, `resolve`, `cached_fit`, and `ProbeSession` (the deadline and the once-only unload warning).
-- `src/research_pipeline/cli.py`: `_release_gpu_memory` (called by `run` before the model is resolved) `_progress` (stderr probe lines outside a stage) and `_pull_progress` (turns download percentages into progress steps).
+- `src/research_pipeline/cli.py`: `_release_gpu_memory` (called by `run` before the model is resolved), `_progress` (stderr probe lines outside a stage) and `_pull_progress` (turns download percentages into progress steps).
 - `tests/test_ollama_fit.py`: a small fake Ollama with a deterministic memory boundary (no real Ollama needed); `tests/test_e2e.py` ("auto model and context") runs `rpipe run` and `rpipe model fit` against it.
 
 ## Second user: onboarding

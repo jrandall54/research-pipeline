@@ -135,3 +135,43 @@ def test_heartbeat_names_latest_step_label():
     now[0] = 40.0
     r.tick()
     assert "still waiting: 2611.25005 (40s)" in buf.getvalue()
+
+
+def test_live_renderer_keeps_notes_as_permanent_lines():
+    buf = Tty()
+    r = LiveRenderer(buf)
+    r.emit(ProgressEvent("model fit", "start"))
+    r.emit(ProgressEvent("model fit", "note", label="trying m at 8192 tokens"))
+    r.close()
+    assert "  trying m at 8192 tokens" in buf.getvalue()
+
+
+def _pull_through(renderer, percents):
+    from research_pipeline import cli
+    from research_pipeline.progress import stage
+
+    with stage(renderer, "model pull", total=100, label="m:1") as h:
+        cb = cli._pull_progress(h, "m:1")
+        for p in percents:
+            cb(f"downloading {p}%")
+            yield
+
+
+def test_pull_percent_moves_the_live_bar():
+    r = LiveRenderer(Tty())
+    seen = []
+    for _ in _pull_through(r, [10, 43]):
+        seen.append(r._progress.tasks[0].completed)
+    r.close()
+    assert seen == [10, 43]
+
+
+def test_pull_percent_reaches_plain_output_about_every_ten_percent():
+    buf = io.StringIO()
+    r = LineRenderer(buf, start_thread=False)
+    for _ in _pull_through(r, [1, 2, 9, 10, 11, 43, 99, 100]):
+        pass
+    r.close()
+    lines = buf.getvalue().splitlines()
+    assert "  m:1 1%" in lines and "  m:1 43%" in lines and "  m:1 100%" in lines
+    assert "  m:1 2%" not in lines and "  m:1 11%" not in lines

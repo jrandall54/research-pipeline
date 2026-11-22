@@ -51,6 +51,8 @@ def format_line(event: ProgressEvent) -> str | None:
             else:
                 tail = f"failed: {event.detail}"
             return f"[{event.current}/{event.total}] {event.label} {tail}"
+        if event.stage == "model pull":  # total is 100 (percent): show "tag 43%", not "[43/100]"
+            return f"  {event.label} {event.detail}"
         prefix = f"[{event.current}/{event.total}] " if event.total else ""
         line = f"  {prefix}{event.label}"
         if event.outcome:
@@ -80,6 +82,7 @@ class LineRenderer:
         self._clock = clock
         self._lock = threading.Lock()
         self._waiting_label: str | None = None
+        self._pull_bucket = -1
         self._waiting_since = 0.0
         self._last_output = clock()
         self._stop = threading.Event()
@@ -96,6 +99,12 @@ class LineRenderer:
     def emit(self, event: ProgressEvent) -> None:
         with self._lock:
             line = format_line(event)
+            if event.stage == "model pull" and event.kind == "step":
+                # A download reports every percent; the journal gets about every 10% and the end.
+                bucket = (event.current or 0) // 10
+                if bucket == self._pull_bucket and event.current != 100:
+                    line = None
+                self._pull_bucket = bucket
             if line is not None:
                 self._write(line)
             now = self._clock()
@@ -176,8 +185,14 @@ class LiveRenderer:
                 self._print(line)
         else:
             task = self._tasks.get(event.stage)
-            if event.kind == "note" and task is not None:
-                self._progress.update(task, description=f"{event.stage}: {event.label}")
+            if event.kind == "note":
+                # A note is a permanent line above the live display (as in a log), and the
+                # spinner text follows it so the current activity is also visible in place.
+                line = format_line(event)
+                if line:
+                    self._print(line)
+                if task is not None:
+                    self._progress.update(task, description=f"{event.stage}: {event.label}")
             elif event.kind == "step":
                 if task is not None and event.current is not None:
                     count = f"{event.current}/{event.total}" if event.total else str(event.current)

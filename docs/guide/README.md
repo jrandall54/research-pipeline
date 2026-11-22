@@ -52,10 +52,11 @@ New to the project? Read in this order:
 14. [review.md](review.md): `rpipe review`, reading and voting on the digest in the terminal, and the review-later list
 15. [shelf.md](shelf.md): `rpipe shelf`, your notes in `my_work/`: how they are chunked, embedded, added and removed
 16. [plugins.md](plugins.md): plug-ins, entry points, `rpipe plugins` and `rpipe sources`
-17. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+17. [setup.md](setup.md): the setup walkthrough: how your machine is checked and a backend recommended
+18. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`, `schedule.py`, `serve.py`, `review.py`, `shelf.py`, `registry.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`, `schedule.py`, `serve.py`, `review.py`, `shelf.py`, `registry.py`, `machine.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.

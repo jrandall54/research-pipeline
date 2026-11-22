@@ -190,3 +190,7 @@
 
 **Abstracts-only mode** — running with the `none` backend: no summary model is used, so the digest shows each paper's abstract instead of a summary. The health line says `summaries off (abstracts-only mode)`. See `backends.md`.
 
+
+**VRAM** — the memory on a graphics card (GPU). A model must fit in it to run fast; `rpipe model setup` compares it with 6 GB and with the model table. See `setup.md`.
+
+**Unified memory** — Apple Silicon's single memory pool shared by CPU and GPU. rpipe counts 66% of it as GPU memory. See `setup.md`.

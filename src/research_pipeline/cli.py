@@ -11,7 +11,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
@@ -30,12 +30,11 @@ from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.run_lock import RunLocked, run_lock
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline import ollama_fit, onboarding, profile_edit, schedule, serve as serve_mod
+from research_pipeline import ollama_fit, onboarding, profile_edit, registry, schedule, serve as serve_mod
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
-from research_pipeline.sources.hf_daily import HfDailySource
 from research_pipeline.summarize import run_summarize
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
@@ -77,17 +76,20 @@ class Pipeline:
     seed_fetcher: Callable[[list[str]], list[PaperMeta]]
     make_llm: Callable[[], LLM]  # called only by run and summarize (may raise LlmError)
     fulltext_fetcher: Callable[[str], list[Section]]
+    startup_errors: list[str] = field(default_factory=list)  # sources/plug-ins that failed to start
 
 
 def build_pipeline(config: Config) -> Pipeline:
-    """Real sources, the real embedding model, and arXiv lookup for seed papers."""
-    arxiv = ArxivSource(config.arxiv_categories, max_results=config.arxiv_max_results)
+    """The enabled sources, the real embedding model, and arXiv lookup for seed papers
+    (always arXiv, whichever sources are enabled)."""
+    sources, startup_errors = registry.build_sources(config)
     return Pipeline(
-        sources=[arxiv, HfDailySource()],
+        sources=sources,
         make_embedder=lambda: SentenceTransformerEmbedder(config.embedding_model),
-        seed_fetcher=arxiv.fetch_by_ids,
+        seed_fetcher=lambda ids: make_arxiv(config).fetch_by_ids(ids),
         make_llm=lambda: build_llm(config, config.vault_path, log=_progress),
         fulltext_fetcher=fetch_fulltext,
+        startup_errors=startup_errors,
     )
 
 
@@ -290,7 +292,9 @@ def _run_locked(ctx: _Context) -> None:
             try:
                 embedder = _load_embedder(pipeline, ctx.config.embedding_model)
                 stage = "collect"
-                counts, errors = run_collect(ctx.conn, pipeline.sources, run_id)
+                errors += pipeline.startup_errors
+                counts, errors2 = run_collect(ctx.conn, pipeline.sources, run_id)
+                errors += errors2
                 stage = "triage"
                 seeds = _seed_texts(ctx, profile, pipeline, errors)
                 counts |= run_triage(ctx.conn, embedder, profile, seeds, ctx.vault / "my_work")
@@ -1645,3 +1649,56 @@ def serve_cmd(
         signal.signal(signal.SIGTERM, old_handler)
     if code:
         raise typer.Exit(code=code)
+
+
+sources_app = typer.Typer(help="List, turn on and turn off paper sources.", no_args_is_help=True)
+app.add_typer(sources_app, name="sources")
+
+
+@app.command()
+def plugins() -> None:
+    """List installed plug-ins (paper sources and model backends) and whether each loads."""
+    for group in (registry.SOURCE_GROUP, registry.BACKEND_GROUP):
+        typer.echo(f"{group}:")
+        found = registry.plugins(group)
+        if not found:
+            typer.echo("  (none)")
+        for key, p in found.items():
+            typer.echo(f"  {key}  {p.origin}  {p.error or 'ok'}")
+
+
+@sources_app.command("list")
+def sources_list(vault: VaultOption = None) -> None:
+    """Show every available source, whether it is on, where it comes from and any load error."""
+    ctx = _open(vault)
+    for key, p in registry.plugins(registry.SOURCE_GROUP).items():
+        state = "on" if key in ctx.config.sources else "off"
+        typer.echo(f"{key}  {state}  {p.origin}  {p.error or 'ok'}")
+    for name in ctx.config.sources:
+        if name not in registry.plugins(registry.SOURCE_GROUP):
+            typer.echo(f"{name}  on  not installed")
+
+
+@sources_app.command("enable")
+def sources_enable(
+    name: Annotated[str, typer.Argument(help="Source name from `rpipe sources list`.")],
+    vault: VaultOption = None,
+) -> None:
+    """Turn a source on (it is collected from on the next run)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        known = {k for k, p in registry.plugins(registry.SOURCE_GROUP).items() if p.factory}
+        changed = profile_edit.enable_source(ctx.vault, name, known)
+    typer.echo(f"source {name.strip()} is now on." if changed else f"source {name.strip()} was already on.")
+
+
+@sources_app.command("disable")
+def sources_disable(
+    name: Annotated[str, typer.Argument(help="Source name from `rpipe sources list`.")],
+    vault: VaultOption = None,
+) -> None:
+    """Turn a source off (at least one must stay on)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        changed = profile_edit.disable_source(ctx.vault, name)
+    typer.echo(f"source {name.strip()} is now off." if changed else f"source {name.strip()} was already off.")

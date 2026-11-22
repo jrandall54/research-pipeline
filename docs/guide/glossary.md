@@ -183,3 +183,7 @@
 **Headless mode** — running an interactive tool without its screen: `claude -p` takes the prompt, prints one answer and exits, so a timer can use it. See `backends.md`.
 
 **Subscription CLI** — a command-line AI tool (such as Claude Code) that uses your paid plan login instead of a pay-per-call API key. See `backends.md`.
+
+**Plug-in** — an installed Python package that adds a paper source or a model backend to the pipeline without changing its code. List them with `rpipe plugins`. See `plugins.md`.
+
+**Entry point** — a line in a package's `pyproject.toml` that registers a name in a named group (for example `research_pipeline.sources`), so another program can find and load it after the package is installed. See `plugins.md`.

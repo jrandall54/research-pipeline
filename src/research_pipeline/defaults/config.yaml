@@ -30,3 +30,14 @@ llm_url: http://localhost:11434
 # Context window in tokens: how much text the model can read at once (at least 8192, or auto).
 # Pin it with `rpipe model set-context N`; go back with `rpipe model set-context auto`.
 llm_num_ctx: auto
+
+# Which backend writes summaries: ollama (a model on this computer, the default) or
+# claude-code (your Claude subscription). Choose with `rpipe model setup`.
+llm_backend: ollama
+# Full path of the subscription CLI (for example claude). Recorded by `rpipe model setup`;
+# leave empty for Ollama.
+llm_cli_path: null
+
+# Paper sources to collect from, in this order. List what exists with `rpipe sources list`;
+# turn one on or off with `rpipe sources enable NAME` / `rpipe sources disable NAME`.
+sources: [arxiv, hf_daily]

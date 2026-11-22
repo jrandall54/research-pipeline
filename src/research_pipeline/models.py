@@ -52,6 +52,9 @@ class Profile(BaseModel):
     feedback_halflife_days: float = Field(default=60.0, ge=1, le=3650)
 
 
+NAME_PATTERN = r"^[a-z0-9][a-z0-9_-]*$"
+
+
 class Config(BaseModel):
     """Pipeline settings (config.yaml in the vault)."""
 
@@ -68,6 +71,24 @@ class Config(BaseModel):
     llm_model: str = Field(default="auto", min_length=1)
     llm_url: str = "http://localhost:11434"
     llm_num_ctx: Annotated[int, Field(ge=8192)] | Literal["auto"] = "auto"
+    # Which backend writes summaries ("ollama", "claude-code" or an installed plug-in).
+    llm_backend: str = Field(default="ollama", pattern=NAME_PATTERN)
+    # Full path of a subscription CLI such as `claude`, recorded by `rpipe model setup`.
+    llm_cli_path: str | None = None
+    # Enabled paper sources, in collection order (see `rpipe sources list`).
+    sources: list[str] = Field(default_factory=lambda: ["arxiv", "hf_daily"])
+
+    @field_validator("sources")
+    @classmethod
+    def _check_sources(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("enable at least one source")
+        if len(set(v)) != len(v):
+            raise ValueError("sources must not repeat")
+        bad = [n for n in v if not re.match(NAME_PATTERN, n)]
+        if bad:
+            raise ValueError(f"invalid source names {bad}")
+        return v
 
     @field_validator("arxiv_categories")
     @classmethod

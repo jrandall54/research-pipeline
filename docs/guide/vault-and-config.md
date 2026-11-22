@@ -39,6 +39,9 @@ The pipeline currently writes `vault.sqlite` (which also holds full texts and su
 | `llm_model` | `auto` | Ollama model that writes summaries; `auto` picks the largest installed model that fits fully in GPU memory. Pin with `rpipe model set NAME`, go back with `rpipe model set auto`. See `llm.md`. |
 | `llm_url` | `http://localhost:11434` | Where the Ollama server listens. Change with `rpipe model set-url URL`. |
 | `llm_num_ctx` | `auto` | Context window in tokens: how much text the model reads at once. `auto` finds the largest that fits; a pinned number must be at least 8192 (smaller leaves no room for the paper). Change with `rpipe model set-context N` or `auto`. See `llm.md`. Vaults created before `auto` existed keep their explicit values (`qwen3:14b`, `32768`) unchanged. |
+| `llm_backend` | `ollama` | Which backend writes summaries: `ollama`, `claude-code` or an installed plug-in (letters, digits, `_`, `-`). Old vaults without the key use Ollama. See `backends.md`. |
+| `llm_cli_path` | empty | Full path of the subscription CLI (such as `claude`), so the nightly timer finds it. |
+| `sources` | `arxiv, hf_daily` | Paper sources collected from, in order; at least one, no repeats. Change with `rpipe sources list`, `enable NAME`, `disable NAME`. See `sources.md`, `plugins.md`. |
 
 When either is `auto`, the choice is remembered in `cache/llm_fit.json` (the chosen model and context, keyed by the Ollama address and every installed model's name and digest). It is safe to delete; the next run probes again. `rpipe model fit` rewrites it.
 

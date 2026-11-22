@@ -315,3 +315,35 @@ def set_llm_num_ctx(vault: Path, n: int | str) -> None:
         return True
 
     _edit(_config_path(vault), Config, change)
+
+
+def enable_source(vault: Path, name: str, known: set[str]) -> bool:
+    """Turn a source on (appended to the end of the order). False if it was already on."""
+    name = name.strip()
+    if name not in known:
+        raise ValueError(f"unknown source {name!r}; known sources: {', '.join(sorted(known))}")
+
+    def change(data) -> bool:
+        sources = _list(data, "sources") if "sources" in data else ["arxiv", "hf_daily"]
+        if name in sources:
+            return False
+        data["sources"] = [*sources, name]
+        return True
+
+    return _edit(_config_path(vault), Config, change)
+
+
+def disable_source(vault: Path, name: str) -> bool:
+    """Turn a source off. False if it was already off; the last enabled one cannot be removed."""
+    name = name.strip()
+
+    def change(data) -> bool:
+        sources = list(data["sources"]) if "sources" in data else ["arxiv", "hf_daily"]
+        if name not in sources:
+            return False
+        if len(sources) == 1:
+            raise ValueError("at least one source must stay enabled")
+        data["sources"] = [s for s in sources if s != name]
+        return True
+
+    return _edit(_config_path(vault), Config, change)

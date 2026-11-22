@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from research_pipeline.models import PaperMeta, Profile, Status
+from research_pipeline.models import Config, PaperMeta, Profile, Status
 
 
 def test_paper_meta_defaults():
@@ -68,3 +68,19 @@ def test_config_rejects_malformed_categories(bad):
 
     with pytest.raises(ValidationError):
         Config(vault_path="/v", arxiv_categories=[bad])
+
+
+def test_config_without_new_keys_loads_with_defaults(tmp_path):  # old vault
+    cfg = Config(vault_path=tmp_path)
+    assert (cfg.llm_backend, cfg.llm_cli_path, cfg.sources) == ("ollama", None, ["arxiv", "hf_daily"])
+
+
+@pytest.mark.parametrize("bad", [[], ["arxiv", "arxiv"], ["Bad Name"]])
+def test_sources_must_be_nonempty_unique_and_named_sanely(bad):
+    with pytest.raises(ValidationError):
+        Config(vault_path="/v", sources=bad)
+
+
+def test_llm_backend_name_pattern():
+    with pytest.raises(ValidationError):
+        Config(vault_path="/v", llm_backend="Not Ok")

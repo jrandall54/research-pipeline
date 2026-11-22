@@ -253,3 +253,23 @@ def test_add_author_and_keyword_strip_control_and_bidi(vault):
     p = prof(vault)
     assert "Evil Name" in p.followed_authors
     assert "jailbreak attack" in p.keywords
+
+
+def test_enable_and_disable_source(vault):
+    assert pe.disable_source(vault, "hf_daily") is True
+    assert load_config(vault / "config.yaml").sources == ["arxiv"]
+    assert pe.disable_source(vault, "hf_daily") is False
+    assert pe.enable_source(vault, "hf_daily", {"arxiv", "hf_daily"}) is True
+    assert load_config(vault / "config.yaml").sources == ["arxiv", "hf_daily"]
+    assert pe.enable_source(vault, "hf_daily", {"arxiv", "hf_daily"}) is False
+
+
+def test_disable_last_source_refused(vault):
+    pe.disable_source(vault, "hf_daily")
+    with pytest.raises(ValueError, match="at least one source must stay enabled"):
+        pe.disable_source(vault, "arxiv")
+
+
+def test_enable_unknown_source_lists_known(vault):
+    with pytest.raises(ValueError, match="arxiv, hf_daily"):
+        pe.enable_source(vault, "nope", {"arxiv", "hf_daily"})

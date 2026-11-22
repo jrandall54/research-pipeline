@@ -185,6 +185,18 @@ Tests are offline: HTTP is mocked with `respx` and `tests/fixtures/hf_daily.json
 - `src/research_pipeline/sources/hf_daily.py`: `HfDailySource`, `parse_hf_daily`
 - `tests/test_hf_daily.py`, `tests/fixtures/hf_daily.json`
 
+## Choosing sources
+
+`config.yaml` has a `sources` list (default `arxiv`, `hf_daily`) naming the sources collected from, in that order. Manage it with commands, not by editing the file:
+
+```
+rpipe sources list              # every available source: on/off, where it comes from, any load error
+rpipe sources enable NAME
+rpipe sources disable NAME      # refused for the last enabled source
+```
+
+Extra sources come from installed plug-ins (see `plugins.md`). A source named in `sources` that is no longer installed or fails to start is skipped and reported in the health line; the run and digest carry on. Looking up seed papers (`rpipe profile add-seed`, the seed text used in triage) always uses arXiv, whichever sources are enabled, because seeds are arXiv ids. Code: `registry.build_sources`, `build_pipeline` in `cli.py`.
+
 ## How collection combines sources
 
 ### What it does
@@ -193,7 +205,7 @@ The collect stage (`run_collect`) takes the list of sources, asks each one for i
 
 ### How it works
 
-1. **Order.** Sources run one after another, in the order they are given. The nightly run passes arXiv first, then Hugging Face Daily Papers. Order matters for one reason: the first source to see a paper creates its row (title, abstract, version, `source`), and later sources only merge into it.
+1. **Order.** Sources run one after another, in the order they are given. The nightly run passes the enabled sources in `sources` order (by default arXiv, then Hugging Face Daily Papers). Order matters for one reason: the first source to see a paper creates its row (title, abstract, version, `source`), and later sources only merge into it.
 2. **One source at a time.** For each source: call `fetch()`, upsert every returned paper with `upsert_paper` (see `data-model.md`), then commit. `upsert_paper` does not commit itself, so a source's papers are one transaction: they are saved together when the source finishes, and if the program dies during a later source, the earlier sources' papers are already saved. After a successful source the stage also reads its optional `last_warning` (arXiv sets one when it hits the cap) and adds it to the errors.
 3. **Isolation.** Each source is wrapped in its own `try`. If `fetch()` raises (normally `SourceError`, but any exception is caught), the stage records `"<source name>: <message>"`, adds 1 to `source_errors`, rolls back the transaction so that source leaves no rows at all (tested with a source that stores one paper and then fails), and carries on with the next one.
 4. **Result.** `(counts, errors)`. The stage does not close the `runs` row; the caller combines these with the counts from triage and digest and calls `finish_run` once.

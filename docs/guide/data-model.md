@@ -41,6 +41,8 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 | `embedding_model` | Model used to turn text into vectors. Default `BAAI/bge-small-en-v1.5`. |
 | `rss_feeds` | Extra RSS feed URLs; default none. |
 | `llm_model`, `llm_url`, `llm_num_ctx` | The local model for summaries (`llm.md`). `llm_model` and `llm_num_ctx` default to `auto`; a pinned `llm_num_ctx` (for example 32768) must be at least 8192. Change them with `rpipe model set`, `rpipe model set-url` and `rpipe model set-context`. |
+| `llm_backend`, `llm_cli_path` | Which backend writes summaries (default `ollama`; see `backends.md`) and the full path of a subscription CLI. Missing keys in an older vault mean Ollama. |
+| `sources` | Enabled paper sources in collection order, default `[arxiv, hf_daily]`; non-empty, no repeats. Change with `rpipe sources enable NAME` / `disable NAME` (see `sources.md`, `plugins.md`). |
 
 `Profile` and `Config` reject unknown keys (`extra="forbid"`).
 

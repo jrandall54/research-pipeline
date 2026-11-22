@@ -713,3 +713,31 @@ def test_run_after_llm_timeout_still_writes_digest_and_records_error(vault, monk
         sqlite3.connect(vault / "vault.sqlite").execute("SELECT errors FROM runs").fetchone()[0]
     )
     assert any(e.startswith("summarize: stopped calling the model after the first timeout") for e in errors)
+
+
+def test_build_pipeline_reports_missing_source(vault, monkeypatch):
+    from research_pipeline import registry
+    from research_pipeline.vault import load_config
+
+    monkeypatch.setattr(registry, "_entry_points", lambda group: [])
+    cfg = load_config(vault / "config.yaml").model_copy(update={"sources": ["hf_daily", "gone"]})
+    pipe = cli.build_pipeline(cfg)
+    assert [s.name for s in pipe.sources] == ["hf_daily"]
+    assert pipe.startup_errors == ["source gone: not installed; see `rpipe sources list`"]
+
+
+def test_run_with_uninstalled_plugin_source_still_writes_digest(vault, monkeypatch):
+    install(monkeypatch)
+    real = cli.build_pipeline
+    msg = "source gone: not installed; see `rpipe sources list`"
+
+    def with_errors(config):
+        pipe = real(config)
+        pipe.startup_errors.append(msg)
+        return pipe
+
+    monkeypatch.setattr(cli, "build_pipeline", with_errors)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    digests = list((vault / "digests").glob("*.md"))
+    assert digests and "source gone" in digests[0].read_text()

@@ -40,7 +40,6 @@ From before:
 
 ## Parked (not fixed, no owner decision needed yet)
 Phase 3:
-- `profile_edit`/onboarding: C1 and bidi control characters are not stripped from topics; `seed_queries` are not cleaned (never shown raw).
 - Tests: weak assertions on some messages and exit codes; weak negative digest test.
 
 From Phase 2 and auto-model:

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from research_pipeline.llm import LLM
 from research_pipeline.models import PaperMeta
+from research_pipeline.profile_edit import normalise_text
 from research_pipeline.prompts import ONBOARDING_SYSTEM
 from research_pipeline.seed_input import find_seed_candidates
 from research_pipeline.sources.arxiv import ArxivSource
@@ -25,9 +26,6 @@ STOPWORDS = frozenset(
     "a an and are as at be by for from in into is it its of on or that the this to with without "
     "via using toward towards over under about".split()
 )
-_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
-
-
 class ProposedProfile(BaseModel):
     topics: list[str] = Field(default_factory=list)
     seed_queries: list[str] = Field(default_factory=list)
@@ -39,9 +37,9 @@ def _words(text: str) -> set[str]:
 
 
 def clean_topic(text: str) -> str:
-    """A proposed topic made safe to show: control characters (incl. ESC) removed, spaces
+    """A proposed topic made safe to show: control and bidi-control characters (incl. ESC) removed, spaces
     collapsed, capped at 120 characters."""
-    return " ".join(_CONTROL.sub(" ", text).split())[:MAX_TOPIC_CHARS].strip()
+    return normalise_text(text)[:MAX_TOPIC_CHARS].strip()
 
 
 def check_description(description: str) -> str:
@@ -65,7 +63,7 @@ def propose(llm: LLM, description: str) -> ProposedProfile:
     result = llm.generate(ONBOARDING_SYSTEM, user, ProposedProfile)
     return ProposedProfile(
         topics=[c for c in map(clean_topic, result.topics) if c][:8],
-        seed_queries=[q for q in result.seed_queries if q.strip()][:10],
+        seed_queries=[q for q in map(normalise_text, result.seed_queries) if q][:10],
     )
 
 

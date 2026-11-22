@@ -212,3 +212,13 @@ def test_topic_equal_to_template_example_still_offered(tmp_path, monkeypatch):
     result = suggest(path, DESC, "--yes")
     assert result.exit_code == 0, result.output
     assert load_profile(path / "profile.yaml").topics == [ex, "brand new"]
+
+
+def test_c1_bidi_stripped_non_latin_kept_and_seed_queries_cleaned():
+    llm = FakeLLM([ProposedProfile(
+        topics=["bi‮di\x9b topic", "أمن الذكاء الاصطناعي", "大模型安全"],
+        seed_queries=["  attention \x1b[31mis\x85 all   you‮ need  ", "\x1b\x07"],
+    )])
+    result = propose(llm, DESC)
+    assert result.topics == ["bidi topic", "أمن الذكاء الاصطناعي", "大模型安全"]
+    assert result.seed_queries == ["attention [31mis all you need"]

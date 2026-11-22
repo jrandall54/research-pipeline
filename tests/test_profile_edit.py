@@ -227,3 +227,15 @@ def test_set_llm_model_auto_is_stored_lowercase(vault):
         pe.set_llm_model(vault, "qwen3:14b")
         pe.set_llm_model(vault, spelling)
         assert load_config(vault / "config.yaml").llm_model == "auto"
+
+
+def test_normalise_text_strips_c1_and_bidi_controls_but_keeps_scripts():
+    assert pe.normalise_text("a\x85b\x9bc") == "a b c"
+    assert pe.normalise_text("x‮evil‬ ⁦y⁩ ‎‏؜z") == "xevil y z"
+    for text in ("أمن الذكاء الاصطناعي", "אבטחת מידע", "大模型安全", "Ünïcode café"):
+        assert pe.normalise_text(text) == text
+
+
+def test_add_topic_strips_bidi_override(vault):
+    assert pe.add_topic(vault, "safe‮topic") is True
+    assert "safetopic" in prof(vault).topics

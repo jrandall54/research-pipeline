@@ -66,11 +66,12 @@ def test_argv_pins_every_safety_flag():
 
 def test_prompt_goes_on_stdin_in_empty_temp_dir_without_api_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
     run = FakeRunner(ok(GOOD))
     ClaudeCodeClient("haiku", "/opt/claude", runner=run).generate("S", "U" * 200_000, Out)
     argv, stdin, timeout, cwd, env = run.calls[0]
     assert stdin == "U" * 200_000 and "U" * 1000 not in " ".join(argv)
-    assert "ANTHROPIC_API_KEY" not in env
+    assert "ANTHROPIC_API_KEY" not in env and "ANTHROPIC_AUTH_TOKEN" not in env
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-test"
     assert run.cwd_was_empty and not cwd.exists()
     assert timeout == CALL_TIMEOUT

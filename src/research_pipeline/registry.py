@@ -80,7 +80,7 @@ def plugins(group: str) -> dict[str, Plugin]:
             continue
         try:
             found[ep.name] = Plugin(ep.name, ep.load(), dist)
-        except Exception as exc:  # a broken plug-in must never stop the pipeline
+        except (Exception, SystemExit) as exc:  # a broken plug-in must never stop the pipeline
             found[ep.name] = Plugin(ep.name, None, dist, f"{type(exc).__name__}: {exc}")
     return found
 

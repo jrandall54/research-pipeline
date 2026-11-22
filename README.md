@@ -9,7 +9,7 @@ Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and one of three ways to get s
 | Tier | You need | What you get |
 |------|----------|--------------|
 | Ollama | [Ollama](https://ollama.com) running locally, plus a model (a GPU helps) | Cited summaries and critiques, fully local and private |
-| Claude Code | The `claude` CLI, logged in | Cited summaries written by Claude, no GPU needed |
+| Claude Code | The `claude` CLI, logged in | Cited summaries written by Claude, no GPU needed. Paper text is sent to Anthropic, and runs use your plan's usage quota |
 | None | Nothing extra | Ranked digest with abstracts only |
 
 `rpipe model setup` checks your computer, recommends a tier and tests it. `rpipe init` runs it as its first step.

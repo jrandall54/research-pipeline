@@ -60,9 +60,10 @@ def find_claude(recorded: str | None) -> str | None:
 
 
 def _child_env() -> dict[str, str]:
-    """The user's environment minus the API key, so the child cannot silently bill the API."""
+    """The user's environment minus API credentials, so the child cannot silently bill the API."""
     env = dict(os.environ)
-    env.pop("ANTHROPIC_API_KEY", None)
+    for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        env.pop(key, None)
     return env
 
 

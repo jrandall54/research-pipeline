@@ -84,7 +84,7 @@ def test_detect_machine_nothing_installed(tmp_path):
 def test_recommend_gpu_with_ollama_no_models_offers_pull():
     rec = recommend(info(gpu=Gpu("x", 8.0, "nvidia"), ollama_installed=True), TABLE)
     assert rec.backend == "ollama" and rec.pull.tag == "small:8b" and not rec.install_ollama
-    assert rec.alternatives == ["none"]
+    assert rec.alternatives == ["claude-code", "none"]
 
 
 def test_recommend_picks_largest_fitting():
@@ -98,6 +98,14 @@ def test_recommend_gpu_with_models_pulls_nothing_and_offers_claude():
     assert rec.pull is None and rec.alternatives == ["claude-code", "none"]
 
 
+def test_embedding_only_models_do_not_suppress_the_pull():
+    gpu = Gpu("x", 16.0, "nvidia")
+    only_embed = recommend(info(gpu=gpu, ollama_installed=True, ollama_models=["nomic-embed-text:latest"]), TABLE)
+    assert only_embed.pull is not None
+    mixed = recommend(info(gpu=gpu, ollama_installed=True, ollama_models=["nomic-embed-text", "qwen3:14b"]), TABLE)
+    assert mixed.pull is None
+
+
 def test_recommend_gpu_without_ollama_says_install():
     rec = recommend(info(gpu=Gpu("x", 8.0, "nvidia")), TABLE)
     assert rec.backend == "ollama" and rec.install_ollama
@@ -105,12 +113,12 @@ def test_recommend_gpu_without_ollama_says_install():
 
 def test_recommend_small_gpu_with_claude_picks_claude():
     rec = recommend(info(gpu=Gpu("x", 4.0, "nvidia"), claude_logged_in=True), TABLE)
-    assert rec.backend == "claude-code" and rec.alternatives == ["none"]
+    assert rec.backend == "claude-code" and rec.alternatives == ["ollama", "none"]
 
 
 def test_recommend_claude_lists_ollama_if_installed():
     rec = recommend(info(claude_logged_in=True, ollama_installed=True), TABLE)
-    assert rec.alternatives == ["none", "ollama"]
+    assert rec.alternatives == ["ollama", "none"]
 
 
 def test_recommend_nothing_gives_none_with_unlock_reasons():
@@ -118,6 +126,7 @@ def test_recommend_nothing_gives_none_with_unlock_reasons():
     text = " ".join(rec.reasons)
     assert rec.backend == "none" and rec.pull is None
     assert "6 GB" in text and "Claude Code" in text and "CPU" in text
+    assert rec.alternatives == ["ollama", "claude-code"]
 
 
 def test_model_table_loads_sorted_and_nonempty():

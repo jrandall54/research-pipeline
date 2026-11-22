@@ -17,8 +17,8 @@
 
 `recommend` applies these rules in order:
 
-1. A GPU with at least 6 GB (`MIN_GPU_VRAM_GB`) means `ollama`. It says to install Ollama if it is missing, and if no model is pulled yet it proposes the largest table model that fits the GPU. Alternatives: `claude-code` (only if you are logged in) and `none`.
-2. Otherwise, if you are logged in to Claude Code, it recommends `claude-code`, with `none` (and `ollama` if installed) as alternatives.
+1. A GPU with at least 6 GB (`MIN_GPU_VRAM_GB`) means `ollama`. It says to install Ollama if it is missing, and if no text-writing model is pulled yet (embedding-only models, with "embed" in the name, do not count) it proposes the largest table model that fits the GPU. The other two backends stay on the menu.
+2. Otherwise, if you are logged in to Claude Code, it recommends `claude-code`, with the other two on the menu.
 3. Otherwise it recommends `none` (abstracts only) and says what would unlock more: a GPU with 6 GB or more plus Ollama, or a Claude Code login. A CPU-friendly pipeline is planned.
 
 The model table (`defaults/ollama_models.yaml`, sizes from ollama.com, checked 2026-11-21):
@@ -33,8 +33,8 @@ Install hints shown when Ollama is missing (`OLLAMA_INSTALL`): Linux `curl -fsSL
 
 ## The walkthrough, step by step
 
-1. **What was found.** One line each: operating system and memory, the GPU (name and memory, or "no GPU found"), Ollama (installed, running, models pulled), Claude Code (found, logged in).
-2. **The recommendation and its reasons**, then a numbered menu: the recommended backend first (the default, just press Enter), then the alternatives.
+1. **What was found.** One line each: operating system and memory (shown as "GB" but counted in GiB, 1024 x 1024 x 1024 bytes, so it can read slightly lower than the box says), the GPU (name and memory, or "no GPU found"), Ollama (installed, running, models pulled), Claude Code (found, logged in).
+2. **The recommendation and its reasons**, then a numbered menu that always lists all three built-ins: the recommended one first, marked `[recommended]` (the default, just press Enter), then the other two in the order Ollama, Claude Code, abstracts only. You can pick one the machine is not ready for yet; the "not installed" and "not logged in" re-check loops below then run, so you can fix it and carry on.
 3. **If you pick `ollama`.** Ollama missing: the install command for your OS is printed and you are asked "Installed it? Check again"; yes re-detects, no moves on (the final check will then say what is missing). If the recommendation proposed a model: "Pull qwen3:14b now (9.3 GB download)?" (default yes), with progress lines while it downloads. Then the backend is saved.
 4. **If you pick `claude-code`.** Not logged in: "Run `claude` once in a terminal and log in, then come back", with the same re-check loop. Then it explains the trade: paper text goes to Anthropic, about 30 calls a night come out of your plan's usage quota, your shelf (`my_work/`) never leaves the machine, and `haiku` uses less quota than `sonnet`. You pick `sonnet` (default), `haiku` or `opus`. The backend is saved with the path of the `claude` program, so the nightly timer finds it even though it has no `~/.local/bin` on its PATH.
 5. **If you pick `none`.** Saved; digests show abstracts only.
@@ -52,7 +52,8 @@ What I found on this computer:
 Recommended: ollama
   - RTX 5070 Ti has 16.0 GB of GPU memory, enough to run a model locally
   1. a model on this computer (Ollama)  [recommended]
-  2. no summaries (abstracts only)
+  2. Claude Code (your login)
+  3. no summaries (abstracts only)
 Choice [1]:
 Pull qwen3:14b now (9.3 GB download)? [Y/n]:
   pulling manifest ... downloading 42% ... success
@@ -63,16 +64,22 @@ Ready: Ollama is running at http://localhost:11434 and model qwen3:14b is instal
 $ rpipe model setup                              # no GPU, logged in to Claude Code
 Recommended: claude-code
   - no GPU with at least 6 GB was found, but you are logged in to Claude Code
+  1. Claude Code (your login)  [recommended]
+  2. a model on this computer (Ollama)
+  3. no summaries (abstracts only)
 Choice [1]:
 With Claude Code, the text of each paper is sent to Anthropic ... about 30 calls ...
 Model (sonnet, haiku or opus) [sonnet]: haiku
-Ready: Claude Code is logged in.
+Ready: Claude Code is logged in at /home/you/.local/bin/claude and model haiku answered.
 ```
 
 ```
 $ rpipe model setup                              # no GPU, no login
 Recommended: none
   1. no summaries (abstracts only)  [recommended]
+  2. a model on this computer (Ollama)
+  3. Claude Code (your login)
+Choice [1]:
 Ready: abstracts-only mode needs nothing else.
 ```
 
@@ -91,7 +98,7 @@ Without a terminal the command refuses ("rpipe model setup is interactive; use `
 
 ## How to run / check it
 
-`rpipe model setup` (any time; it is safe to re-run), or let `rpipe init` run it. Tests: `uv run pytest -q tests/test_machine.py tests/test_setup_wizard.py` (offline: machine detection, the model pull and the `claude` program are all faked).
+`rpipe model setup` (any time; it is safe to re-run), or let `rpipe init` run it. When a config already exists the first question is "Keep current backend (X)? [Y/n]": Enter keeps the backend and any model you pinned with `rpipe model set`, skips the menu and only re-runs the final check; `n` walks the menu (choosing a different backend resets the model to `auto`, because names differ per backend; choosing the same one again keeps it). Tests: `uv run pytest -q tests/test_machine.py tests/test_setup_wizard.py` (offline: machine detection, the model pull and the `claude` program are all faked).
 
 ## Where the code is
 

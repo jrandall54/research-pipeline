@@ -26,7 +26,7 @@ from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval
 from research_pipeline.fulltext import fetch_fulltext
 from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, has_gold, load_gold, remove_fact, remove_gold
 from research_pipeline.backends.claude_code import find_claude, logged_in, resolve_model, LOGIN_HINT
-from research_pipeline.llm import LLM, NO_MODEL, LlmError, OllamaClient, pull_model
+from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
 from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
 from research_pipeline.review import later_queue, queue_progress, review_queue
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
@@ -313,10 +313,10 @@ def _run_locked(ctx: _Context) -> None:
     with _sigterm_as_interrupt():
         try:  # finish_run runs exactly once however this block ends (crash, Ctrl-C, SIGTERM, success)
             stage = "embed"
+            errors += pipeline.startup_errors  # before anything can crash, so they are never dropped
             try:
                 embedder = _load_embedder(pipeline, ctx.config.embedding_model)
                 stage = "collect"
-                errors += pipeline.startup_errors
                 counts, errors2 = run_collect(ctx.conn, pipeline.sources, run_id)
                 errors += errors2
                 stage = "triage"
@@ -329,6 +329,9 @@ def _run_locked(ctx: _Context) -> None:
                 stage = "summarize"
                 try:
                     llm = _ready_llm(pipeline)
+                except LlmLimitReached:
+                    errors.append("summarize: summaries stopped: usage limit reached;"
+                                  " remaining papers wait for the next run")
                 except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
                     errors.append(f"summaries skipped, model unavailable: {exc}")
                 else:
@@ -415,7 +418,7 @@ def collect(vault: VaultOption = None) -> None:
     pipeline = build_pipeline(ctx.config)
     counts, errors = run_collect(ctx.conn, pipeline.sources)
     typer.echo("Collected:")
-    _report(counts, errors)
+    _report(counts, [*pipeline.startup_errors, *errors])
 
 
 @app.command()
@@ -434,7 +437,7 @@ def triage(vault: VaultOption = None) -> None:
 
 @app.command()
 def summarize(vault: VaultOption = None) -> None:
-    """Summarize and critique kept papers (and today's digest papers lacking a summary) with the local model."""
+    """Summarize and critique kept papers (and today's digest papers lacking a summary) with the configured summary model."""
     ctx = _open(vault)
     _require_model(ctx.config)
     pipeline = build_pipeline(ctx.config)
@@ -670,14 +673,14 @@ LLM_DOWN = "Summary model unavailable; add topics by hand with `rpipe profile ad
 
 
 def _onboarding_llm(config: Config) -> LLM | None:
-    """The checked local model for onboarding (same resolution as `run`); tests replace it."""
+    """The checked summary model for onboarding (same resolution as `run`); tests replace it."""
     return _ready_llm(build_pipeline(config))
 
 
 def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> bool:
     """Propose topics and seeds from `description`, adding each one the user approves.
 
-    Returns False (changing nothing) if the local model is unavailable. Raises ValueError for
+    Returns False (changing nothing) if the summary model is unavailable. Raises ValueError for
     a too-short description, before any model call."""
     description = onboarding.check_description(description)
     try:
@@ -685,7 +688,7 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
         if llm is None:
             typer.echo(NO_MODEL)
             return False
-        if getattr(llm, "local", True) is False:
+        if getattr(llm, "local", True) is not True:
             typer.echo(
                 f"Your description will be sent to {llm.name} (model {llm.model_name}) to suggest topics."
             )
@@ -753,7 +756,7 @@ def profile_suggest(
     vault: VaultOption = None,
     yes: Annotated[bool, typer.Option("--yes", help="Accept every proposed topic and paper without asking.")] = False,
 ) -> None:
-    """Let the local model propose topics and seed papers from a description; you approve each."""
+    """Let the configured model propose topics and seed papers from a description; you approve each."""
     ctx = _open(vault)
     _require_model(ctx.config)
     if description is None:
@@ -1216,7 +1219,7 @@ def model_show(vault: VaultOption = None) -> None:
 
 @model_app.command("set")
 def model_set(
-    name: Annotated[str, typer.Argument(help="Ollama model name, e.g. qwen3:14b, or auto to choose the best installed.")],
+    name: Annotated[str, typer.Argument(help="Model name (ollama: e.g. qwen3:14b; claude-code: sonnet, haiku, opus), or auto.")],
     vault: VaultOption = None,
 ) -> None:
     """Choose which model writes summaries (ollama: install it first with ollama pull NAME; claude-code: sonnet, haiku, opus)."""
@@ -1236,7 +1239,7 @@ def model_set_backend(
     ctx = _open(vault)
     cfg = ctx.config
     name = name.strip()
-    known = set(registry.plugins(registry.BACKEND_GROUP))
+    known = {n for n, p in registry.plugins(registry.BACKEND_GROUP).items() if p.factory}
     cli_path: str | None = None
     if name == "claude-code":
         cli_path = find_claude(cfg.llm_cli_path)
@@ -1463,11 +1466,15 @@ def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:
     profile_edit.set_llm_model(vault, model)
 
 
-def _wizard_backend(vault: Path) -> bool:
+def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
     """Look at this computer, recommend a summary backend, save the user's choice and check it.
 
+    With `offer_keep` (the vault already has a config) the user is first asked whether to keep
+    the current backend; yes skips straight to the check, so a pinned model survives a re-run.
     Returns True when the final check passed (`none` counts as ready)."""
     config = load_config(vault / "config.yaml")
+    if offer_keep and typer.confirm(f"Keep current backend ({config.llm_backend})?", default=True):
+        return _check_backend(vault)
     info = detect_machine(config)
     _describe_machine(info)
     rec = recommend(info, load_model_table())
@@ -1476,7 +1483,7 @@ def _wizard_backend(vault: Path) -> bool:
         typer.echo(f"  - {reason}")
     options = [rec.backend, *rec.alternatives]
     labels = {"ollama": "a model on this computer (Ollama)", "claude-code": "Claude Code (your login)",
-              "none": "no summaries (abstracts only)"}
+              "none": "no summaries (abstracts only)"}  # all three are always offered
     typer.echo("\nChoose how summaries are written:")
     for i, name in enumerate(options, 1):
         typer.echo(f"  {i}. {labels.get(name, name)}" + ("  [recommended]" if i == 1 else ""))
@@ -1498,6 +1505,11 @@ def _wizard_backend(vault: Path) -> bool:
                        "Change this any time with `rpipe model setup`.")
     except (ValueError, ConfigError, OSError) as exc:
         raise _fail(str(exc)) from exc
+    return _check_backend(vault)
+
+
+def _check_backend(vault: Path) -> bool:
+    """Test the saved backend and say whether it is ready."""
     config = load_config(vault / "config.yaml")
     if config.llm_backend == "none":
         typer.echo("Ready: abstracts-only mode needs nothing else.")
@@ -1519,12 +1531,13 @@ def model_setup(vault: VaultOption = None) -> None:
         raise _fail("rpipe model setup is interactive; use `rpipe model set-backend NAME` in scripts")
     ctx = _open(vault)
     try:
-        ready = _wizard_backend(ctx.vault)
+        ready = _wizard_backend(ctx.vault, offer_keep=True)
     except (typer.Abort, KeyboardInterrupt, EOFError):
         typer.echo("\nStopped. Nothing further was changed; run rpipe model setup to continue.")
         raise typer.Exit(code=130) from None
     if not ready:
         raise typer.Exit(code=1)
+
 
 def _wizard_describe(vault: Path, config: Config) -> None:
     """Optional: propose topics and seeds from a description. Any failure falls through."""
@@ -1544,7 +1557,7 @@ def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
     """Interactive setup. Every answer is saved as soon as it is confirmed."""
     try:
         # The backend comes first: the describe step below already calls the model.
-        _wizard_backend(vault)
+        _wizard_backend(vault, offer_keep=not fresh_config)
         config = load_config(vault / "config.yaml")
         _wizard_describe(vault, config)
         _wizard_topics(vault, fresh_profile)
@@ -1796,7 +1809,7 @@ def _warn_backend(vault: Path) -> None:
         config = load_config(vault / "config.yaml")
         if config.llm_backend == "none":
             return
-        llm = build_llm(config, vault)
+        llm = build_llm(config, vault, log=_progress)
         if hasattr(llm, "check"):
             llm.check()
     except (LlmError, OSError, ValueError, ConfigError) as exc:

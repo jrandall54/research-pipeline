@@ -72,3 +72,12 @@ def test_build_sources_factory_raising_is_reported(tmp_path, monkeypatch):
     sources, errors = registry.build_sources(cfg)
     assert [s.name for s in sources] == ["hf_daily"]
     assert "source mine: RuntimeError: bad setup" in errors[0]
+
+
+def test_plugin_that_calls_sys_exit_on_import_is_reported_not_fatal(monkeypatch):
+    def exits():
+        raise SystemExit(2)
+
+    monkeypatch.setattr(registry, "_entry_points", lambda group: [fake_ep("quitter", exits)])
+    p = registry.plugins(registry.SOURCE_GROUP)
+    assert p["quitter"].factory is None and "SystemExit" in p["quitter"].error

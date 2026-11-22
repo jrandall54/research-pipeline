@@ -191,21 +191,34 @@ def load_model_table() -> list[ModelChoice]:
     return sorted(rows, key=lambda m: m.min_vram_gb)
 
 
+BUILTIN_BACKENDS: tuple[Literal["ollama", "claude-code", "none"], ...] = ("ollama", "claude-code", "none")
+
+
+def _generation_models(names: list[str]) -> list[str]:
+    """Pulled models that can write text: embedding-only models (an "embed" in the name) do not count."""
+    return [n for n in names if "embed" not in n.lower()]
+
+
+def _others(first: str) -> list[str]:
+    """The other built-in backends, so the menu always offers all three."""
+    return [b for b in BUILTIN_BACKENDS if b != first]
+
+
 def recommend(info: MachineInfo, table: list[ModelChoice]) -> Recommendation:
+    """Pick the best backend for this machine. The menu always lists all three built-ins
+    (`alternatives`); setup re-checks a choice that is not installed or logged in yet."""
     gpu = info.gpu
     if gpu is not None and gpu.vram_gb >= MIN_GPU_VRAM_GB:
         fitting = [m for m in table if m.min_vram_gb <= gpu.vram_gb]
-        pull = fitting[-1] if fitting and not info.ollama_models else None
+        pull = fitting[-1] if fitting and not _generation_models(info.ollama_models) else None
         reasons = [f"{gpu.name} has {gpu.vram_gb:.1f} GB of GPU memory, enough to run a model locally"]
-        alts = (["claude-code"] if info.claude_logged_in else []) + ["none"]
-        return Recommendation("ollama", pull, not info.ollama_installed, alts, reasons)
+        return Recommendation("ollama", pull, not info.ollama_installed, _others("ollama"), reasons)
     if info.claude_logged_in:
         why = ("no GPU with at least 6 GB was found" if gpu is None
                else f"the GPU has only {gpu.vram_gb:.1f} GB (6 GB needed)")
-        alts = ["none"] + (["ollama"] if info.ollama_installed else [])
-        return Recommendation("claude-code", None, False, alts,
+        return Recommendation("claude-code", None, False, _others("claude-code"),
                               [f"{why}, but you are logged in to Claude Code"])
-    return Recommendation("none", None, False, [], [
+    return Recommendation("none", None, False, _others("none"), [
         "no GPU with at least 6 GB of memory and no Claude Code login were found",
         "a GPU with 6 GB or more plus Ollama, or a Claude Code login, would unlock summaries",
         "a CPU-friendly pipeline is planned",

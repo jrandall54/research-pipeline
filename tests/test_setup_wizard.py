@@ -38,7 +38,7 @@ def vault(tmp_path, monkeypatch):
     return path
 
 
-def setup_run(vault, monkeypatch, infos, input, check=None):
+def setup_run(vault, monkeypatch, infos, input, check=None, keep=False):
     """Run `rpipe model setup`; `infos` is the list of machines successive detections return."""
     seq = list(infos)
     monkeypatch.setattr(cli, "detect_machine", lambda config: seq.pop(0) if len(seq) > 1 else seq[0])
@@ -51,7 +51,9 @@ def setup_run(vault, monkeypatch, infos, input, check=None):
         return Ready("Ollama is running") if config.llm_backend != "claude-code" else Ready("Claude Code is logged in")
 
     monkeypatch.setattr(cli, "build_llm", build)
-    result = runner.invoke(cli.app, ["model", "setup", "--vault", str(vault)], input=input)
+    # The first question is "Keep current backend?"; tests answer n unless they test keeping.
+    result = runner.invoke(cli.app, ["model", "setup", "--vault", str(vault)],
+                           input=input if keep else "n\n" + input)
     return result, pulled
 
 
@@ -144,7 +146,7 @@ def test_model_setup_refuses_without_terminal(vault, monkeypatch):
 def test_init_runs_backend_step_before_describe(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(cli, "_is_tty", lambda: True)
-    monkeypatch.setattr(cli, "_wizard_backend", lambda vault: calls.append("backend") or True)
+    monkeypatch.setattr(cli, "_wizard_backend", lambda vault, offer_keep=False: calls.append("backend") or True)
     monkeypatch.setattr(cli, "_wizard_describe", lambda v, c: calls.append("describe"))
     monkeypatch.setattr(cli, "_wizard_topics", lambda v, f: calls.append("topics"))
     monkeypatch.setattr(cli, "_wizard_categories", lambda v, c, f: calls.append("categories"))
@@ -187,3 +189,35 @@ def test_pull_model_streams_progress_and_raises_on_error():
     respx.post(f"{url}/api/pull").mock(side_effect=httpx.ConnectError("refused"))
     with pytest.raises(LlmError, match="cannot reach Ollama"):
         pull_model(url, "x", lambda s: None)
+
+
+def test_menu_always_lists_all_three_even_when_nothing_is_ready(vault, monkeypatch):
+    result, _ = setup_run(vault, monkeypatch, [machine()], "\n")
+    assert "1. no summaries" in result.output and "[recommended]" in result.output
+    assert "a model on this computer (Ollama)" in result.output and "Claude Code (your login)" in result.output
+
+
+def test_choosing_claude_when_not_logged_in_reaches_the_recheck(vault, monkeypatch):
+    out = machine(claude_path="/c/claude")
+    inn = machine(claude_path="/c/claude", claude_logged_in=True)
+    # menu order with recommendation none: none, ollama, claude-code -> 3; then re-check yes; model default
+    result, _ = setup_run(vault, monkeypatch, [out, inn], "3\ny\n\n")
+    assert "log in" in result.output and cfg(vault).llm_backend == "claude-code"
+
+
+def test_keeping_the_backend_keeps_a_pinned_model(vault, monkeypatch):
+    from research_pipeline import profile_edit
+    profile_edit.set_llm_model(vault, "qwen3:14b")
+    result, pulled = setup_run(vault, monkeypatch, [machine(gpu=GPU16)], "\n", keep=True)
+    assert "Keep current backend (ollama)? [Y/n]" in result.output
+    assert cfg(vault).llm_model == "qwen3:14b" and pulled == [] and "Ready:" in result.output
+
+
+def test_rechoosing_the_same_backend_keeps_model_but_switching_resets(vault):
+    from research_pipeline import profile_edit
+    known = {"ollama", "claude-code", "none"}
+    profile_edit.set_llm_model(vault, "qwen3:14b")
+    profile_edit.set_llm_backend(vault, "ollama", known)
+    assert cfg(vault).llm_model == "qwen3:14b"
+    profile_edit.set_llm_backend(vault, "none", known)
+    assert cfg(vault).llm_model == "auto"

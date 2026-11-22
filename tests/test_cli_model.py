@@ -11,7 +11,7 @@ from conftest import FakeEmbedder
 from research_pipeline import cli, profile_edit, registry
 from research_pipeline.backends import claude_code
 from research_pipeline.cli import Pipeline
-from research_pipeline.llm import NO_MODEL, LlmError
+from research_pipeline.llm import NO_MODEL, LlmError, LlmLimitReached
 from research_pipeline.vault import init_vault, load_config
 
 runner = CliRunner()
@@ -200,3 +200,47 @@ def test_init_describe_step_under_none_prints_notice_and_moves_on(vault, capsys,
 def test_health_line_summaries_off():
     line = cli.health_line(date(2026, 1, 1), {"summaries_off": 1}, [])
     assert "summaries off (abstracts-only mode)" in line
+
+
+def test_set_backend_rejects_plugin_that_failed_to_load(vault, monkeypatch):
+    def boom():
+        raise ImportError("gone")
+
+    ep = SimpleNamespace(name="flaky", load=boom, dist=SimpleNamespace(name="d"))
+    monkeypatch.setattr(registry, "_entry_points", lambda group: [ep] if group == registry.BACKEND_GROUP else [])
+    result = run(vault, "model", "set-backend", "flaky")
+    assert result.exit_code != 0 and load_config(vault / "config.yaml").llm_backend == "ollama"
+
+
+def test_nightly_usage_limit_in_check_reads_as_summaries_stopped(vault, monkeypatch):
+    class Limited:
+        name, local, model_name, num_ctx = "x", False, "m", 1000
+
+        def check(self):
+            raise LlmLimitReached("Claude Code usage limit reached")
+
+    monkeypatch.setattr(cli, "build_pipeline", lambda c: Pipeline(
+        [], FakeEmbedder, lambda ids: [], lambda: Limited(), lambda pid: []))
+    assert run(vault, "run").exit_code == 0
+    text = digest_text(vault)
+    assert "summaries stopped: usage limit reached" in text and "model unavailable" not in text
+
+
+def test_startup_errors_survive_an_embedder_crash(vault, monkeypatch):
+    def crash(*a, **k):
+        raise RuntimeError("no gpu")
+
+    pipe = Pipeline([], FakeEmbedder, lambda ids: [], lambda: None, lambda pid: [],
+                    startup_errors=["source gone: not installed; see `rpipe sources list`"])
+    monkeypatch.setattr(cli, "build_pipeline", lambda c: pipe)
+    monkeypatch.setattr(cli, "_load_embedder", crash)
+    run(vault, "run")
+    assert "source gone" in digest_text(vault)
+
+
+def test_collect_reports_startup_errors(vault, monkeypatch):
+    pipe = Pipeline([], FakeEmbedder, lambda ids: [], lambda: None, lambda pid: [],
+                    startup_errors=["source gone: not installed"])
+    monkeypatch.setattr(cli, "build_pipeline", lambda c: pipe)
+    result = run(vault, "collect")
+    assert "source gone: not installed" in result.output

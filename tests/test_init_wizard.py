@@ -21,7 +21,8 @@ def init(tmp_path, input, describe=False):
     so Enter accepts `none`), which also skips the description step; a blank line for it is
     prepended. Tests that need the description step use the `ollama_ready` fixture."""
     if input is not None:
-        input = "\n" + input
+        # An existing config also asks "Keep current backend?"; answer n, then accept the pick.
+        input = ("n\n\n" if (tmp_path / "v" / "config.yaml").exists() else "\n") + input
     return runner.invoke(cli.app, ["init", "--vault", str(tmp_path / "v")], input=input)
 
 

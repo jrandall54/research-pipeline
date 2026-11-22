@@ -274,14 +274,16 @@ def set_categories(vault: Path, cats: list[str]) -> None:
 
 
 def set_llm_backend(vault: Path, name: str, known: set[str], cli_path: str | None = None) -> None:
-    """Choose the summary backend; the model goes back to `auto` (names differ per backend)."""
+    """Choose the summary backend. Switching backends resets the model to `auto` (names differ per
+    backend); re-choosing the current backend keeps a pinned model."""
     name = name.strip()
     if name not in known:
         raise ValueError(f"unknown backend {name!r}; known backends: {', '.join(sorted(known))}")
 
     def change(data) -> bool:
+        if data.get("llm_backend", "ollama") != name:
+            data["llm_model"] = "auto"
         data["llm_backend"] = name
-        data["llm_model"] = "auto"
         if cli_path is not None:
             data["llm_cli_path"] = cli_path
         return True

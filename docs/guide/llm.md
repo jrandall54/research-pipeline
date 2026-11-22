@@ -16,6 +16,10 @@ One call, step by step:
 
 Worked example: asking for `class Answer(BaseModel): text: str` sends `format = {"properties": {"text": {...}}, "required": ["text"], ...}`. The model can only produce JSON of that shape, and `Answer(text="...")` comes back.
 
+Every client is a **backend** with two class attributes: `name` and `local`. This client is "the `ollama` backend" (`name = "ollama"`, `local = True`). `local` is True only when prompts never leave your machine; `require_local(llm, what)` raises `PrivacyError` unless it is, and a backend with no `local` attribute counts as not local (safe by default). Nothing calls `require_local` yet: it is the guard that future code handling shelf text must use (see `shelf.md`).
+
+A **usage limit** (a subscription plan saying "you have used your allowance until later") is reported by a backend as `LlmLimitReached`, a subclass of `LlmError`. The summarize stage treats it differently from a timeout: it stops calling the model, records no failure and burns no retry, so the remaining papers wait for the next run (see `summaries.md`). The Ollama client never raises it.
+
 Failures become `LlmError`: server not running (hint: `ollama serve`), model not installed (HTTP 404, hint: `ollama pull <model>`), timeout (the subclass `LlmTimeout`; after the first one a `rpipe run` stops calling the model for the rest of that run, see `running.md`), other HTTP errors, and invalid output after the retry.
 
 ## Why it's built this way
@@ -109,7 +113,7 @@ rpipe model set-context 16384   # pin the context in tokens, at least 8192, or `
 
 ## Where the code is
 
-- `src/research_pipeline/llm.py`: `LLM` protocol, `OllamaClient`, `LlmError`.
+- `src/research_pipeline/llm.py`: `LLM` protocol (with `name` and `local`), `OllamaClient`, `LlmError`, `LlmTimeout`, `LlmLimitReached`, `PrivacyError`, `require_local`, `NO_MODEL`.
 - `src/research_pipeline/models.py`: `Config.llm_model`, `llm_url`, `llm_num_ctx`.
 - `src/research_pipeline/profile_edit.py`: `set_llm_model`, `set_llm_num_ctx`.
 - `src/research_pipeline/cli.py`: the `model` commands, `build_llm`.

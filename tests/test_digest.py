@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from research_pipeline.db import get_paper, open_db, set_status, upsert_paper
-from research_pipeline.digest import write_digest
+from research_pipeline.digest import _provenance_line, write_digest
 from research_pipeline.models import PaperMeta, Status
 
 DAY = date(2026, 11, 21)
@@ -232,3 +232,12 @@ def test_digest_renders_with_partial_provenance(conn, tmp_path):
                  " WHERE kind = 'summary'", ('{"model": "qwen3:14b"}',))
     text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
     assert "_qwen3:14b_" in text
+
+
+def test_footer_shows_backend_before_model():
+    assert _provenance_line({"backend": "claude-code", "model": "sonnet", "prompt_version": "p3"})[0] \
+        == "_claude-code · sonnet · prompt p3_"
+
+
+def test_footer_without_backend_unchanged():
+    assert _provenance_line({"model": "qwen3:14b"})[0] == "_qwen3:14b_"

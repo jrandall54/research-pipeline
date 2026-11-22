@@ -175,3 +175,7 @@
 **Shelf** — the notes, ideas and writing you keep in `my_work/` so the pipeline can compare new papers with your own work. Add and remove items at any time. See `shelf.md`.
 
 **Nearest neighbour** — the stored item whose vector is closest (highest cosine similarity) to a given vector. For the shelf, a paper's nearest neighbour is the single shelf chunk most like it; only that one counts, so a big shelf does not dilute the signal. See `shelf.md`.
+
+**Backend** — the thing that actually runs the language model: today `ollama` (a model on your own machine, `local = True`). Each backend has a `name` and a `local` flag; the name is stored in each summary's provenance and shown in the digest footer. See `llm.md`.
+
+**Usage limit** — the cap a subscription plan puts on how much you can use a model in a period. When a backend reports it, the summarize stage stops without counting a failure, and the remaining papers wait for the next run. See `summaries.md`.

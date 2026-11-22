@@ -27,7 +27,20 @@ class LlmTimeout(LlmError):
     """The model server did not answer in time (a run stops calling the model after one)."""
 
 
+class LlmLimitReached(LlmError):
+    """A subscription usage limit was hit; a run stops calling the model without counting a failure."""
+
+
+class PrivacyError(LlmError):
+    """Text that must stay on this machine was about to go to a backend that is not local."""
+
+
+NO_MODEL = "No summary model is set up (abstracts-only mode). Run `rpipe model setup` to choose one."
+
+
 class LLM(Protocol):
+    name: str  # backend name, e.g. "ollama"
+    local: bool  # True only if prompts never leave this machine
     model_name: str
     num_ctx: int
 
@@ -36,8 +49,20 @@ class LLM(Protocol):
         ...
 
 
+def require_local(llm: LLM, what: str) -> None:
+    """Raise PrivacyError unless `llm` is local; a missing `local` attribute counts as not local."""
+    if getattr(llm, "local", False) is not True:
+        name = getattr(llm, "name", "unknown")
+        raise PrivacyError(
+            f"{what} never leaves this machine, but the {name} backend is not local; nothing was sent"
+        )
+
+
 class OllamaClient:
     """Talks to Ollama's /api/chat with JSON-schema-constrained output and thinking off."""
+
+    name = "ollama"
+    local = True
 
     def __init__(self, url: str, model: str, num_ctx: int, timeout: float = 600.0) -> None:
         self.url = url.rstrip("/")

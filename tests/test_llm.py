@@ -7,7 +7,7 @@ from pydantic import BaseModel, ValidationError
 from typer.testing import CliRunner
 
 from research_pipeline import cli
-from research_pipeline.llm import LlmError, OllamaClient
+from research_pipeline.llm import LlmError, OllamaClient, PrivacyError, require_local
 from research_pipeline.models import Config
 from research_pipeline.vault import init_vault, load_config
 
@@ -258,3 +258,21 @@ def test_model_show_reports_unknown_choice_when_probing_times_out(vault, monkeyp
     # The configured settings are printed first; the timeout only replaces the last-choice line.
     assert res.output.index("model: auto") < res.output.index("server:") < res.output.index("context window")
     assert "last choice: unknown. Ollama did not answer in time" in res.output
+
+
+def test_ollama_client_is_named_and_local():
+    c = OllamaClient("http://x", "m", 8192)
+    assert (c.name, c.local) == ("ollama", True)
+
+
+def test_require_local_blocks_non_local_and_unknown():
+    class Cloud:
+        name, local = "claude-code", False
+
+    class Unknown:
+        name = "x"
+
+    require_local(OllamaClient("http://x", "m", 8192), "your shelf")  # no raise
+    for llm in (Cloud(), Unknown()):
+        with pytest.raises(PrivacyError, match="your shelf never leaves this machine"):
+            require_local(llm, "your shelf")

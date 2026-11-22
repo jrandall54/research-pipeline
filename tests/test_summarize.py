@@ -1,6 +1,6 @@
 import pytest
 
-from research_pipeline.llm import LlmError
+from research_pipeline.llm import LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section
 from research_pipeline.prompts import build_critique_prompt, build_summary_prompt, fit_to_budget
 from research_pipeline.summarize import (
@@ -387,3 +387,41 @@ def test_run_summarize_keeps_going_after_a_non_timeout_llm_error(conn):
     llm = FlakyLLM()
     run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
     assert llm.calls == 2
+
+
+def test_usage_limit_stops_without_burning_a_retry(conn):
+    add_triaged(conn, "2501.00001")
+    add_triaged(conn, "2501.00002")
+    llm = FakeLLM([LlmLimitReached("You've hit your weekly limit")])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
+    assert len(llm.calls) == 1  # second paper never sent
+    for pid in ("2501.00001", "2501.00002"):
+        p = get_paper(conn, pid)
+        assert p["retry_count"] == 0 and p["error"] is None
+        assert p["status"] == "triaged"
+    assert errors[-1] == (
+        "summarize: summaries stopped: usage limit reached; remaining papers wait for the next run"
+    )
+    assert counts["summary_failed"] == 0
+
+
+def test_timeout_still_records_failure_then_stops(conn):
+    add_triaged(conn, "2501.00001")
+    add_triaged(conn, "2501.00002")
+    llm = FakeLLM([LlmTimeout("slow")])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
+    assert len(llm.calls) == 1
+    assert counts["summary_failed"] == 1
+    retries = sorted(get_paper(conn, p)["retry_count"] for p in ("2501.00001", "2501.00002"))
+    assert retries == [0, 1]
+    assert "stopped calling the model after the first timeout" in errors[-1]
+
+
+def test_provenance_records_backend(conn):
+    from research_pipeline.db import get_provenance
+
+    add_triaged(conn, "2501.00001")
+    llm = FakeLLM([summary(), critique()])
+    llm.name, llm.model_name = "claude-code", "sonnet"
+    run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
+    assert get_provenance(conn, "2501.00001")["backend"] == "claude-code"

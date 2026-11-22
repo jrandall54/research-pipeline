@@ -69,6 +69,8 @@ def _provenance_line(prov: dict | None) -> list[str]:
     if not prov:
         return []
     parts = []
+    if prov.get("backend"):
+        parts.append(str(prov["backend"]))
     if prov.get("model"):
         parts.append(str(prov["model"]))
     if prov.get("prompt_version"):

@@ -397,6 +397,7 @@ def save_summary(
     prompt_version: str | None = None,
     paper_version: int | None = None,
     num_ctx: int | None = None,
+    backend: str | None = None,
 ) -> None:
     """Store (or replace) a paper's summary and critique rows. Does not commit.
 
@@ -412,6 +413,7 @@ def save_summary(
     }
     if prompt_version is not None:
         summary_json["provenance"] = {
+            "backend": backend,
             "model": model,
             "prompt_version": prompt_version,
             "paper_version": paper_version,

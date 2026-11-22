@@ -10,7 +10,7 @@ from datetime import date
 from typing import Literal, TypeVar
 
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
-from research_pipeline.llm import LLM, LlmError, LlmTimeout
+from research_pipeline.llm import LLM, LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section, Status
 from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
 from research_pipeline.sources.base import SourceError
@@ -144,6 +144,7 @@ def run_summarize(
             save_summary(
                 conn, pid, result, llm.model_name,
                 prompt_version=PROMPT_VERSION, paper_version=paper["version"], num_ctx=llm.num_ctx,
+                backend=getattr(llm, "name", None),
             )
             clear_error(conn, pid)
             if listed:
@@ -152,6 +153,15 @@ def run_summarize(
                 set_status(conn, pid, Status.summarized)  # commits the summary rows too
             counts["summarized"] += 1
             counts["truncated"] += int(result.truncated)
+        except LlmLimitReached:
+            # Not the paper's fault: no retry is burned, it stays queued for the next run.
+            if paper["status"] == Status.triaged.value:
+                set_status(conn, pid, Status.triaged)  # undo the early `fetched` mark
+            errors.append(
+                "summarize: summaries stopped: usage limit reached;"
+                " remaining papers wait for the next run"
+            )
+            break
         except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
             counts["summary_failed"] += 1
             message = f"{type(exc).__name__}: {exc}" if not isinstance(exc, (LlmError, SourceError)) else str(exc)

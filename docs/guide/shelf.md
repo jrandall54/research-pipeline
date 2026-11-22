@@ -67,6 +67,17 @@ A one-line note with no heading gives one chunk, `idea\nTry retrieval for malwar
 - **Heading prefix on each chunk.** Without it a paragraph reading "It fails on long inputs." has no subject once separated from its note.
 - **Plain size constants.** 200 and 1500 characters are rules of thumb; there is no setting for them, so there is nothing for a user to hand-edit.
 
+## What never leaves your machine
+
+Your shelf is personal, so no text derived from it may be sent to a backend that is not local (for example a subscription cloud model). Today that holds trivially: shelf text is only embedded by the local embedding model and compared with numbers; no shelf-derived text reaches any language model. The audit of every `.generate(` call site in `src/`:
+
+| Call site | What it sends | Shelf text? |
+| --- | --- | --- |
+| `summarize._generate_checked` | a paper's sections (or abstract) and the fixed instructions | no |
+| `onboarding.propose` | the interests description you typed | no |
+
+Future code that would send shelf text to a model must first call `llm.require_local(llm, "your shelf")`, which raises `PrivacyError` (and sends nothing) unless the backend's `local` attribute is True. Re-run this audit (`grep -rn "generate(" src/`) whenever a new call site is added.
+
 ## The commands
 
 Nobody has to touch files by hand: four `rpipe shelf` commands cover everything.

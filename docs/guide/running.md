@@ -194,7 +194,7 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 
 ### Running it nightly
 
-The pipeline stops at the command; scheduling it (for example with a systemd timer or cron entry running `rpipe run`) is a later phase. Running twice on the same day is safe: no paper is stored twice and the day's digest is rewritten with everything from both runs (`digest.md`, "Same-day re-runs").
+To run it every night automatically, use `rpipe schedule install` (a systemd user timer; see [scheduling.md](scheduling.md)). Running twice on the same day is safe: no paper is stored twice and the day's digest is rewritten with everything from both runs (`digest.md`, "Same-day re-runs").
 
 ## Why it's built this way
 

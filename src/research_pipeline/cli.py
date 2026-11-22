@@ -2,6 +2,7 @@
 
 import gc
 import json
+import shutil
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -22,7 +23,7 @@ from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, h
 from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline import ollama_fit, profile_edit
+from research_pipeline import ollama_fit, profile_edit, schedule
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.sources.arxiv import ArxivSource
@@ -1089,3 +1090,79 @@ def feedback(vault: VaultOption = None) -> None:
         typer.echo("  No saved papers yet. Try `rpipe save ID`.")
     for r in saves:
         typer.echo(f"  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")
+
+
+schedule_app = typer.Typer(help="Run the pipeline every night with a systemd user timer.", no_args_is_help=True)
+app.add_typer(schedule_app, name="schedule")
+
+_LINGER_HINT = (
+    "To run while you are logged out, enable lingering once (this command does not run it for you):\n"
+    "  loginctl enable-linger $USER"
+)
+
+
+def _rpipe_path() -> str:
+    found = shutil.which("rpipe")
+    if found is None:
+        raise _fail("rpipe is not on PATH. Install it first (`uv tool install .` in the repo), then retry.")
+    return found
+
+
+def _schedule_vault(vault: Path | None) -> Path:
+    path = resolve_vault(vault).expanduser().resolve()
+    if not (path / "config.yaml").exists():
+        raise _fail(f"No vault found at {path} (no config.yaml). Run `rpipe init` first.")
+    return path
+
+
+@schedule_app.command("show")
+def schedule_show(
+    time: Annotated[str, typer.Option(help="Time of day, 24-hour HH:MM.")] = "03:00",
+    vault: VaultOption = None,
+) -> None:
+    """Print the unit files that `install` would write, without writing anything."""
+    path = _schedule_vault(vault)
+    try:
+        timer = schedule.render_timer(time)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"# {schedule.SERVICE_NAME}\n{schedule.render_service(path, _rpipe_path())}")
+    typer.echo(f"# {schedule.TIMER_NAME}\n{timer}")
+
+
+@schedule_app.command("install")
+def schedule_install(
+    time: Annotated[str, typer.Option(help="Time of day, 24-hour HH:MM.")] = "03:00",
+    vault: VaultOption = None,
+) -> None:
+    """Write the systemd user units and enable the nightly timer."""
+    path = _schedule_vault(vault)
+    try:
+        schedule.render_timer(time)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    try:
+        written = schedule.install(path, time, schedule.default_unit_dir(), schedule.system_runner, _rpipe_path())
+    except schedule.ScheduleError as exc:
+        raise _fail(str(exc)) from exc
+    for f in written:
+        typer.echo(f"wrote {f}")
+    typer.echo(f"Scheduled: `rpipe run` every day at {time} for vault {path}.")
+    typer.echo(_LINGER_HINT)
+
+
+@schedule_app.command("status")
+def schedule_status() -> None:
+    """Show when the timer last ran and will run next."""
+    if schedule.status(schedule.system_runner) != 0:
+        raise _fail("systemctl could not list the timer (is systemd available?).")
+
+
+@schedule_app.command("remove")
+def schedule_remove() -> None:
+    """Disable the timer and delete the unit files."""
+    try:
+        removed = schedule.remove(schedule.default_unit_dir(), schedule.system_runner)
+    except schedule.ScheduleError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo("\n".join(f"removed {f}" for f in removed) or "nothing was installed")

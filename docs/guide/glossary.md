@@ -133,3 +133,13 @@
 **Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts. Bumped whenever those prompts change, so summaries made with different wording can be told apart. See `summaries.md`.
 
 **Unfinished run** — a `runs` row whose `finished_at` is empty: the process was killed before it could record its end. The next digest's health line says `previous run did not finish`. See `running.md`.
+
+**systemd** — the service manager on most Linux systems: it starts, stops and schedules programs. `rpipe schedule` uses its *user* instance (no root). See `scheduling.md`.
+
+**Unit file** — a small text file telling systemd about one thing to manage (a `.service` says what to run, a `.timer` says when). See `scheduling.md`.
+
+**Timer** — a systemd unit that starts a service on a schedule; with `Persistent=true` it also catches up a run missed while the machine was off. See `scheduling.md`.
+
+**Linger** — `loginctl enable-linger $USER`: keeps your user services running while you are logged out, so the nightly timer fires with nobody logged in. `rpipe schedule install` prints it but never runs it. See `scheduling.md`.
+
+**`Type=oneshot`** — a service that runs to completion and exits; systemd treats it as finished when the process ends. See `scheduling.md`.

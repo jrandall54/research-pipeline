@@ -45,10 +45,11 @@ New to the project? Read in this order:
 9. [fulltext.md](fulltext.md): fetching arXiv HTML full text and stripping hidden text
 10. [summaries.md](summaries.md): cited summaries and critiques, the citation check and the context budget
 11. [evaluation.md](evaluation.md): the gold set, the `rpipe gold` commands and the `rpipe eval` accuracy check
-12. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+12. [scheduling.md](scheduling.md): `rpipe schedule` and the nightly systemd timer
+13. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 
 ## Where the code is
 
-`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.
+`src/research_pipeline/`: `cli.py` (commands), `vault.py`, `profile_edit.py`, `db.py`, `models.py`, `sources/`, `collect.py`, `seeds.py`, `embed.py`, `rank.py`, `triage.py`, `digest.py`, `llm.py`, `ollama_fit.py`, `fulltext.py`, `prompts.py`, `summarize.py`, `gold.py`, `evaluate.py`, `schedule.py`. Tests are in `tests/` and run offline with `uv run pytest -q`.

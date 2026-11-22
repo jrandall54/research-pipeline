@@ -23,6 +23,10 @@ class LlmError(Exception):
     """Any failure talking to, or getting a usable answer from, the local model."""
 
 
+class LlmTimeout(LlmError):
+    """The model server did not answer in time (a run stops calling the model after one)."""
+
+
 class LLM(Protocol):
     model_name: str
     num_ctx: int
@@ -53,7 +57,7 @@ class OllamaClient:
         except httpx.ConnectError as e:
             raise LlmError(f"cannot reach Ollama at {self.url}: {SERVE_HINT}") from e
         except httpx.TimeoutException as e:
-            raise LlmError(f"Ollama at {self.url} timed out after {timeout:g}s") from e
+            raise LlmTimeout(f"Ollama at {self.url} timed out after {timeout:g}s") from e
         except httpx.HTTPError as e:
             raise LlmError(f"Ollama request failed: {e}") from e
         if resp.status_code == 404:

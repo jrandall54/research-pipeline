@@ -25,6 +25,7 @@ from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval
 from research_pipeline.fulltext import fetch_fulltext
 from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, has_gold, load_gold, remove_gold
 from research_pipeline.llm import LLM, LlmError, OllamaClient
+from research_pipeline.run_lock import RunLocked, run_lock
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
 from research_pipeline import ollama_fit, onboarding, profile_edit, schedule, serve as serve_mod
@@ -255,10 +256,22 @@ def _report(counts: dict[str, int], errors: list[str]) -> None:
         typer.echo(f"  error: {e}", err=True)
 
 
+RUN_LOCKED_EXIT = 75  # EX_TEMPFAIL: "try again later"; the next night proceeds normally
+
+
 @app.command()
 def run(vault: VaultOption = None) -> None:
     """Collect, triage, summarize and write today's digest (the nightly command)."""
     ctx = _open(vault)
+    try:
+        with run_lock(ctx.vault):
+            _run_locked(ctx)
+    except RunLocked as exc:
+        typer.echo(f"{exc}; nothing was started. Wait for it to finish (see `rpipe runs`).", err=True)
+        raise typer.Exit(code=RUN_LOCKED_EXIT) from exc
+
+
+def _run_locked(ctx: _Context) -> None:
     profile = _load_profile(ctx)
     pipeline = build_pipeline(ctx.config)
     run_id = start_run(ctx.conn)  # before anything can fail, so every failure leaves a runs row
@@ -310,7 +323,14 @@ def run(vault: VaultOption = None) -> None:
                 crashed = True
                 errors.append(f"digest: {' '.join(str(exc).split()) or type(exc).__name__}")
         finally:
-            finish_run(ctx.conn, run_id, counts, errors)
+            in_flight = sys.exc_info()[0] is not None  # an error is already propagating
+            try:
+                finish_run(ctx.conn, run_id, counts, errors)
+            except Exception as exc:  # noqa: BLE001
+                if not in_flight:
+                    raise  # nothing else went wrong, so this failure is the story
+                # Never let this mask the original error that is already propagating.
+                typer.echo(f"warning: could not record the run: {exc}", err=True)
     if out is not None:
         typer.echo(f"Digest written to {out}")
     _report(counts, errors)

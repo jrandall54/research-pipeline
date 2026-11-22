@@ -46,7 +46,7 @@ WantedBy=timers.target
 
 Quoting: systemd splits `ExecStart` on spaces and expands `%` and `$`, so paths are wrapped in double quotes, `\` and `"` are backslash-escaped, `%` is written `%%` and (in `ExecStart`) `$` as `$$`. A vault path with spaces therefore works. `Environment="NAME=value"` quotes the whole assignment.
 
-**Persistent=true** means: if the machine was off or asleep at 03:00, systemd runs the missed job as soon as it can (once) instead of skipping the night. (There is no lock between runs, so a catch-up run could overlap one you started by hand; avoid starting `rpipe run` manually right when the machine wakes.)
+**Persistent=true** means: if the machine was off or asleep at 03:00, systemd runs the missed job as soon as it can (once) instead of skipping the night. (Runs cannot overlap: `rpipe run` takes a lock on the vault, so if a catch-up run starts while one you launched by hand is still going, the second one exits at once with code 75 and the message `another rpipe run is already using ...`; systemd shows that night's unit as failed in the journal, which is harmless, and the next night runs normally. See `running.md`.)
 
 **Linger.** A user timer normally only runs while you have a login session. `loginctl enable-linger $USER` (run once, by you) tells systemd to keep your user services alive while logged out, so a 03:00 run happens even if nobody is logged in. It changes machine-wide login behaviour, which is why `rpipe` never runs it for you.
 

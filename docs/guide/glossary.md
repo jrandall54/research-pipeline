@@ -159,3 +159,5 @@
 **Hallucinated title** — a paper title a language model makes up that sounds real but does not exist. Onboarding drops any proposed title that arXiv search cannot match. See `profile.md`.
 
 **DNS rebinding.** A trick where a web page makes your browser treat a private address (such as a Tailscale IP) as if it belonged to the page's own site, so the page can read a server that has no login. Servers defend by checking the `Host` header; Datasette does not (see `browsing.md`).
+
+**flock (file lock)** — an operating-system lock on an open file. `rpipe run` takes one on `.run.lock` in the vault so two runs cannot overlap; the system releases it automatically when the process ends, however it ends.

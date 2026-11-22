@@ -10,7 +10,7 @@ from datetime import date
 from typing import Literal, TypeVar
 
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
-from research_pipeline.llm import LLM, LlmError
+from research_pipeline.llm import LLM, LlmError, LlmTimeout
 from research_pipeline.models import Section, Status
 from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
 from research_pipeline.sources.base import SourceError
@@ -157,4 +157,11 @@ def run_summarize(
             message = f"{type(exc).__name__}: {exc}" if not isinstance(exc, (LlmError, SourceError)) else str(exc)
             record_failure(conn, pid, message)
             errors.append(f"summarize {pid}: {' '.join(message.split())}")
+            if isinstance(exc, LlmTimeout):
+                # A hung model would make every remaining paper wait out the full timeout.
+                errors.append(
+                    "summarize: stopped calling the model after the first timeout;"
+                    " remaining papers show abstracts only"
+                )
+                break
     return counts, errors

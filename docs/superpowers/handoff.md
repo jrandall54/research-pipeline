@@ -42,8 +42,6 @@ From before:
 Phase 3:
 - `cli.py`: `_resolve_paper` picker duplicates `_choose` (about 8 lines).
 - `digest.py`: `_provenance_line` hard-indexes provenance keys (KeyError on a partial dict); `save_summary` provenance is optional.
-- `cli.py` run: `finish_run` itself could raise and mask the original error.
-- No run lock: `Persistent=true` catch-up can overlap a manual `rpipe run`.
 - `schedule.py`: `status` hint is misleading if the user manager is unreachable.
 - `profile_edit`/onboarding: C1 and bidi control characters are not stripped from topics; `seed_queries` are not cleaned (never shown raw).
 - Tests: weak assertions on some messages and exit codes; weak negative digest test.
@@ -55,7 +53,6 @@ From Phase 2 and auto-model:
 - The 1024-token margin is also applied when a model fits at its full trained context.
 - Tests: duplicate `AlwaysSummary`, and test-to-test imports.
 - No command to edit or remove a single gold fact (`gold add-fact` now adds one; there is still no edit or remove).
-- No stop after the first LLM timeout in a run.
 
 Dropped as resolved in Phase 3: no way to add a gold fact (`rpipe gold add-fact` exists).
 

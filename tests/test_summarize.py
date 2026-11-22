@@ -346,3 +346,44 @@ def test_run_summarize_records_provenance(conn):
     prov = get_provenance(conn, "2501.00001")
     assert (prov["model"], prov["prompt_version"], prov["paper_version"], prov["num_ctx"]) == (
         "fake-llm", PROMPT_VERSION, 1, 32768)
+
+
+def test_run_summarize_stops_calling_the_model_after_first_timeout(conn):
+    from research_pipeline.llm import LlmTimeout
+
+    class HangingLLM:
+        model_name, num_ctx = "m", 32768
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, system, user, schema):
+            self.calls += 1
+            raise LlmTimeout("Ollama at http://x timed out after 600s")
+
+    for pid in ("2501.00001", "2501.00002", "2501.00003"):
+        add_triaged(conn, pid)
+    llm = HangingLLM()
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
+    assert llm.calls == 1  # not once per paper
+    assert counts["summary_failed"] == 1 and counts["summarized"] == 0
+    assert any("timed out after 600s" in e for e in errors)
+    assert any("stopped calling the model after the first timeout" in e for e in errors)
+
+
+def test_run_summarize_keeps_going_after_a_non_timeout_llm_error(conn):
+    class FlakyLLM:
+        model_name, num_ctx = "m", 32768
+
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, system, user, schema):
+            self.calls += 1
+            raise LlmError("bad output")
+
+    for pid in ("2501.00001", "2501.00002"):
+        add_triaged(conn, pid)
+    llm = FlakyLLM()
+    run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
+    assert llm.calls == 2

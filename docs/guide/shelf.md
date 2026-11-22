@@ -2,7 +2,7 @@
 
 ## What it does
 
-The shelf is a folder of your own material (`my_work/` in the vault): rough ideas, notes, coursework, drafts. Files on it are split into small pieces, turned into embeddings (numbers capturing meaning) and stored so the pipeline can later ask "which new papers sit close to something I am working on?". You can add to it and remove from it at any time. This page covers the indexing half: keeping the shelf and its stored vectors in step with the files. Using it to boost rankings is a later task and is described in [triage.md](triage.md) once built.
+The shelf is a folder of your own material (`my_work/` in the vault): rough ideas, notes, coursework, drafts. Files on it are split into small pieces, turned into embeddings (numbers capturing meaning) and stored so the pipeline can later ask "which new papers sit close to something I am working on?". You can add to it and remove from it at any time with `rpipe shelf`. This page covers indexing and the commands; how the shelf boosts rankings is in [triage.md](triage.md).
 
 Everything stays on your machine. The shelf code uses only the local embedding model; it never calls the language model or the network, and a test (`test_shelf_is_local_only`) checks that `shelf.py` imports no HTTP library and no LLM client.
 
@@ -67,10 +67,52 @@ A one-line note with no heading gives one chunk, `idea\nTry retrieval for malwar
 - **Heading prefix on each chunk.** Without it a paragraph reading "It fails on long inputs." has no subject once separated from its note.
 - **Plain size constants.** 200 and 1500 characters are rules of thumb; there is no setting for them, so there is nothing for a user to hand-edit.
 
+## The commands
+
+Nobody has to touch files by hand: four `rpipe shelf` commands cover everything.
+
+- `rpipe shelf add <text-or-file>`: save a note (any text) or copy in a `.md`/`.txt` file, then index it.
+- `rpipe shelf list`: show every item with its chunk count and the day it was added.
+- `rpipe shelf remove <name>`: move the item's file to `my_work/.removed/` and drop it from the index.
+- `rpipe shelf sync`: re-index after you dropped, edited or deleted files in `my_work/` yourself (the nightly triage also does this).
+
+Real output (fake embedder, fresh vault):
+
+```
+$ rpipe shelf list
+Your shelf is empty. Add a note or file with: rpipe shelf add "your idea" (or a .md/.txt path).
+
+$ rpipe shelf add "Try retrieval for malware triage"
+Added 'try-retrieval-for-malware-triage' to your shelf. Papers close to it will now rank higher.
+
+$ rpipe shelf add notes/idea.md
+File not found: notes/idea.md. Check the path, or put the note in quotes with spaces, e.g. rpipe shelf add "my idea about fuzzing".
+
+$ rpipe shelf sync          # after dropping gamma.md and paper.pdf into my_work/
+Shelf synced: 1 added, 0 updated, 0 removed.
+  Added: gamma
+Ignored 1 file(s): paper.pdf. Only .md and .txt files directly in my_work/ are indexed (if a .md and a .txt share a name, the .md is used).
+
+$ rpipe shelf list
+Shelf: 2 items
+  gamma  1 chunk  added 2026-11-22
+  try-retrieval-for-malware-triage  1 chunk  added 2026-11-22
+
+$ rpipe shelf remove gamma
+Removed 'gamma'. The file is in my_work/.removed/ if you want it back.
+```
+
+Two guards the command line adds on top of `add_to_shelf`:
+
+- **Mistyped paths.** `add_to_shelf` treats anything that is not an existing file as note text. That is wrong for `notes/idea.md` with a typo in the folder: you would get a note whose text is the path. So the command first checks: if the argument is one word (no whitespace) ending `.md` or `.txt`, or names a directory, and is not an existing file, it prints "File not found" and exits with code 1. A note with spaces, like `rewrite the README.md`, is still a note.
+- **Nothing skipped silently.** `sync` prints the `ignored` files (other extensions such as a PDF, or `a.txt` when `a.md` exists, because both would be item `a`) with a one-line reason.
+
+An unknown name for `remove` exits with code 1 and lists the closest names. `list` and `remove` do not load the embedding model; `add` and `sync` do.
+
 ## How to run / check it
 
-Tests: `uv run pytest tests/test_shelf.py -q` (offline, fake embedder). The `rpipe shelf add|remove|list|sync` commands arrive in a later task; until then the functions below are the whole interface.
+Use the commands above. Tests: `uv run pytest tests/test_shelf.py tests/test_cli_shelf.py -q` (offline, fake embedder).
 
 ## Where the code is
 
-`src/research_pipeline/shelf.py`: `chunk_text`, `sync_shelf`, `add_to_shelf`, `remove_from_shelf`, `SyncResult`. Storage helpers are in `db.py` (`upsert_shelf_item`, `delete_shelf_item`, `list_shelf_items`, `shelf_chunk_rows`); the tables are described in [data-model.md](data-model.md).
+The commands are `shelf_app` in `src/research_pipeline/cli.py`. Logic is in `src/research_pipeline/shelf.py`: `chunk_text`, `sync_shelf`, `add_to_shelf`, `remove_from_shelf`, `SyncResult`. Storage helpers are in `db.py` (`upsert_shelf_item`, `delete_shelf_item`, `list_shelf_items`, `shelf_chunk_rows`); the tables are described in [data-model.md](data-model.md).

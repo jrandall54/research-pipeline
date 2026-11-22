@@ -19,13 +19,14 @@ from typing import Annotated
 import typer
 
 from research_pipeline.collect import run_collect
-from research_pipeline.db import SchemaTooNewError, clear_skip, get_summary, record_skip, UnknownPaperError, current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
+from research_pipeline.db import SchemaTooNewError, list_shelf_items, clear_skip, get_summary, record_skip, UnknownPaperError, current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
 from research_pipeline.digest import render_summary, write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
 from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, edit_fact, has_gold, load_gold, remove_fact, remove_gold
 from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.review import later_queue, queue_progress, review_queue
+from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.run_lock import RunLocked, run_lock
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
@@ -766,6 +767,95 @@ def profile_set_categories(
         profile_edit.set_categories(ctx.vault, categories)
     cleaned = ["all" if c.strip().lower() == "all" else c.strip() for c in categories]
     typer.echo(f"arXiv categories are now: {_categories_text(cleaned)}")
+
+
+# ---------------------------------------------------------------- shelf commands
+
+shelf_app = typer.Typer(help="Your own notes and writing (the shelf): papers close to them rank higher.", no_args_is_help=True)
+app.add_typer(shelf_app, name="shelf")
+
+
+def _looks_like_path(source: str) -> bool:
+    """A single token ending .md/.txt, or naming a directory: the user meant a path, not a note."""
+    s = source.strip()
+    if not s:
+        return False
+    if len(s.split()) == 1 and s.lower().endswith((".md", ".txt")):
+        return True
+    try:
+        return Path(s).expanduser().is_dir()
+    except (OSError, ValueError):
+        return False
+
+
+def _item_count(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+@shelf_app.command("add")
+def shelf_add(
+    source: Annotated[str, typer.Argument(help="A .md or .txt file to copy in, or the text of a note.")],
+    vault: VaultOption = None,
+) -> None:
+    """Add a file or a short note to the shelf and index it."""
+    ctx = _open(vault)
+    path = Path(source.strip()).expanduser() if _looks_like_path(source) else None
+    if path is not None and not path.is_file():
+        raise _fail(
+            f"File not found: {source.strip()}. Check the path, or put the note in quotes "
+            'with spaces, e.g. rpipe shelf add "my idea about fuzzing".'
+        )
+    embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model)
+    with _clean_errors():
+        name = add_to_shelf(ctx.conn, ctx.vault / "my_work", embedder, source)
+    typer.echo(f"Added '{name}' to your shelf. Papers close to it will now rank higher.")
+
+
+@shelf_app.command("list")
+def shelf_list(vault: VaultOption = None) -> None:
+    """Show what is on the shelf."""
+    ctx = _open(vault)
+    rows = list_shelf_items(ctx.conn)
+    if not rows:
+        typer.echo('Your shelf is empty. Add a note or file with: rpipe shelf add "your idea" (or a .md/.txt path).')
+        return
+    typer.echo(f"Shelf: {_item_count(len(rows), 'item')}")
+    for r in rows:
+        typer.echo(f"  {r['name']}  {_item_count(r['n_chunks'], 'chunk')}  added {str(r['added_at'])[:10]}")
+
+
+@shelf_app.command("remove")
+def shelf_remove(
+    name: Annotated[str, typer.Argument(help="The item name shown by `rpipe shelf list`.")],
+    vault: VaultOption = None,
+) -> None:
+    """Take an item off the shelf (its file is moved to my_work/.removed/, not deleted)."""
+    ctx = _open(vault)
+    try:
+        remove_from_shelf(ctx.conn, ctx.vault / "my_work", name)
+    except KeyError as exc:
+        raise _fail(str(exc.args[0])) from exc
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"Removed '{name}'. The file is in my_work/.removed/ if you want it back.")
+
+
+@shelf_app.command("sync")
+def shelf_sync(vault: VaultOption = None) -> None:
+    """Re-index my_work/ after you added, edited or deleted files by hand."""
+    ctx = _open(vault)
+    embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model)
+    res = sync_shelf(ctx.conn, ctx.vault / "my_work", embedder)
+    typer.echo(f"Shelf synced: {len(res.added)} added, {len(res.updated)} updated, {len(res.removed)} removed.")
+    for label, names in (("Added", res.added), ("Updated", res.updated), ("Removed", res.removed)):
+        if names:
+            typer.echo(f"  {label}: {', '.join(names)}")
+    if res.ignored:
+        typer.echo(
+            f"Ignored {len(res.ignored)} file(s): {', '.join(res.ignored)}. "
+            "Only .md and .txt files directly in my_work/ are indexed "
+            "(if a .md and a .txt share a name, the .md is used)."
+        )
 
 
 # ---------------------------------------------------------------- gold commands

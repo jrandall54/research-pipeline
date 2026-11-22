@@ -1,8 +1,12 @@
-# Handoff — state after Phase 3 (2026-11-21)
+# Handoff — state after Phase 4 slice 1, the shelf (2026-11-22)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next.
 
 ## Done
+- **Phase 4 slice 1, the shelf**, is done on branch `phase-4-shelf`. **NOT merged; the owner merges.** Plan: `plans/2026-11-22-shelf.md`, design `specs/2026-11-22-shelf-design.md`. `rpipe shelf add|list|remove|sync` index your notes in `my_work/` (local embeddings only), and triage boosts papers near them (`shelf.py`, `rank.py`; docs `shelf.md`, `triage.md`). The `TODO(phase4)` `my_work` stub is gone. **To start using it, run `rpipe shelf add "<a note>"` or `rpipe shelf add <file.md>`.**
+  - Follow-up: `SHELF_REASON_FLOOR` was set with the fake embedder; check it against real bge-small scores and adjust.
+  - Next slice: a local-model judge for overlap callouts plus rows in the `links` table, then a feasibility tag, then weekly synthesis.
+  - Plan-time idea: future plans should mark which tasks can run in parallel and which files each task owns.
 - **Phase 3, the daily habit**, is complete and on branch `phase-3-daily-habit`. It is **NOT merged to main; the owner merges.** Plan: `plans/2026-11-21-phase3-daily-habit.md`.
   - Votes and saves (`rpipe vote|save|unsave|feedback`), stored in `votes` and `saves`; schema versioning with `user_version` and a migration ladder (`db.py`).
   - Implicit profile in triage: votes and saves nudge scores, with a half-life decay (`rpipe profile set-feedback-halflife`).
@@ -56,8 +60,8 @@ Fixed, or closed by a ruling (see Rulings), apart from these new ones:
 
 Dropped as resolved in Phase 3: no way to add a gold fact (`rpipe gold add-fact` exists).
 
-## Next: Phase 4
-Not fully known here: see the master plan in Claude Docs. The repo docs hint at it: `my_work/` similarity in the triage score (currently a 0.0 stub, `TODO(phase4)` in `rank.py`/`triage.md`) and the `links` table for relating papers to your notes (`data-model.md`). RSS collection is also marked as a later phase.
+## Next: rest of Phase 4
+See the master plan in Claude Docs and the slice order under Done. The `links` table (`data-model.md`) is still unused. RSS collection is also marked as a later phase.
 
 ## Process notes
 - Plans are executed subagent-driven (implementer, per-task review, fix rounds). Phase 3 used 1 to 2 fix rounds on tasks 3, 5, 6, 7, 8. The T6 implementer in Phase 2 wrote code before tests; disclosed.

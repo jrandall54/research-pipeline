@@ -21,6 +21,9 @@ Read this first in a new session.
 - **Phase 5 smoke test passed:** a canary line in `~/.claude/CLAUDE.md` did not leak into any summary (`--setting-sources ""` works). Owner still needs to remove the line: `sed -i '/PINEAPPLE-CANARY/d' ~/.claude/CLAUDE.md`.
 - Not yet reviewed by an independent reviewer (only the per-feature tests): run a review before merging `summarize-backlog`.
 
+## NOT verified on the default tier (do before merging)
+Everything run for real on 2026-11-22 used the **claude-code** backend. The **Ollama** path (the default tier) has only offline tests with a fake model. Test it for real: `rpipe model set-backend ollama`, `rpipe model check`, `rpipe summarize 2611.25005`, read the result, and judge the new prompts (`PROMPT_VERSION` 2026-11-p4, claim-count limits), the factory (`backends`/`build_backend`) and time per paper on the local model. The nightly timer uses whichever backend is configured (currently claude-code, so it spends plan quota).
+
 ## Next up (owner asked for, not built)
 1. `rpipe show <id>...` (print one paper's summary and critique, no voting; accepts ids or title fragments) and `rpipe show --recent`.
 2. A reader page in `rpipe serve` (it shows raw JSON today). `rpipe review` is a vote loop, not for reading.

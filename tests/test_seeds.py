@@ -71,3 +71,15 @@ def test_fetch_failure_raises_with_the_seeds_already_resolved(conn, tmp_path):
         resolve_seed_texts(conn, tmp_path / "seeds.json", ["2501.00001", "2501.00009"], fetch)
     assert list(info.value.texts) == ["2501.00001"]
     assert not (tmp_path / "seeds.json").exists()
+
+
+def test_progress_notes_only_seeds_fetched_from_arxiv(conn, tmp_path):
+    from research_pipeline.progress import ListReporter
+
+    cache = tmp_path / "seeds.json"
+    cache.write_text(json.dumps({"2401.00002": "cached"}))
+    rep = ListReporter()
+    resolve_seed_texts(
+        conn, cache, ["2401.00002", "2401.00001"], Fetcher([meta("2401.00001")]), reporter=rep
+    )
+    assert [e.label for e in rep.events if e.kind == "note"] == ["looking up seed 2401.00001"]

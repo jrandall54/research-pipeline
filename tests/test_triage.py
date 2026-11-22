@@ -214,3 +214,24 @@ def test_shelf_syncs_even_when_no_new_papers(conn, embedder, tmp_path):
     (my_work / "idea.md").write_text("tomato basil sauce experiments\n", encoding="utf-8")
     assert run_triage(conn, embedder, PROFILE, SEEDS, my_work=my_work)["triaged"] == 0
     assert [r["item_id"] for r in conn.execute("SELECT item_id FROM embeddings WHERE item_id LIKE 'shelf:%'")]
+
+
+def test_progress_zero_new_papers_is_start_and_done_only(conn, embedder):
+    from research_pipeline.progress import ListReporter
+
+    rep = ListReporter()
+    run_triage(conn, embedder, PROFILE, SEEDS, reporter=rep)
+    assert [e.kind for e in rep.events] == ["start", "done"]
+    assert rep.events[0].total is None
+
+
+def test_progress_notes_how_many_papers_are_embedded(conn, embedder):
+    from research_pipeline.progress import ListReporter
+
+    fill(conn)
+    rep = ListReporter()
+    run_triage(conn, embedder, PROFILE, SEEDS, reporter=rep)
+    assert [e.kind for e in rep.events] == ["start", "note", "done"]
+    n = len(papers_with_status(conn, Status.triaged)) + len(papers_with_status(conn, Status.skipped))
+    assert n > 0
+    assert rep.events[1].label == f"embedding {n} papers"

@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from research_pipeline.models import PaperMeta
+from research_pipeline.progress import Reporter, stage
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,8 @@ def resolve_seed_texts(
     cache_path: Path,
     seed_ids: list[str],
     fetch: Callable[[list[str]], list[PaperMeta]],
+    *,
+    reporter: Reporter | None = None,
 ) -> dict[str, str]:
     """Return `{seed_id: "title\\nabstract"}` for every seed we can find text for.
 
@@ -83,7 +86,10 @@ def resolve_seed_texts(
     if not missing:
         return texts
     try:
-        fetched = fetch(missing)
+        with stage(reporter, "seeds") as handle:  # cached seeds never get here: they stay silent
+            for sid in missing:
+                handle.note(f"looking up seed {sid}")
+            fetched = fetch(missing)
     except Exception as exc:  # noqa: BLE001 - any failure must not stop the run
         log.warning("could not fetch seed papers %s: %s", missing, exc)
         raise SeedFetchError(f"seeds: could not fetch {', '.join(missing)}: {exc}", texts) from exc

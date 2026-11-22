@@ -64,7 +64,7 @@ from research_pipeline.gold import (
 from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
 from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline.progress import ListReporter, ProgressEvent, Reporter
+from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, review_queue
@@ -251,19 +251,25 @@ def _load_profile(ctx: _Context) -> Profile:
         raise _fail(str(exc)) from exc
 
 
-def _load_embedder(pipeline: Pipeline, model_name: str) -> Embedder:
-    """Build the embedder; any failure becomes a RuntimeError whose message says what to do."""
+def _load_embedder(
+    pipeline: Pipeline, model_name: str, *, reporter: Reporter | None = None
+) -> Embedder:
+    """Build the embedder; any failure becomes a RuntimeError whose message says what to do.
+
+    Shown as a progress stage because the first run downloads the model (hundreds of MB).
+    """
     try:
-        return pipeline.make_embedder()
+        with stage(reporter, "embedding model", label=model_name):
+            return pipeline.make_embedder()
     except RuntimeError:  # e.g. the `embed` extra is not installed (message has the hint)
         raise
     except Exception as exc:  # noqa: BLE001 - failed download, broken torch install, ...
         raise RuntimeError(f"could not load embedding model {model_name}: {exc}") from exc
 
 
-def _embedder(pipeline: Pipeline, model_name: str) -> Embedder:
+def _embedder(pipeline: Pipeline, model_name: str, *, reporter: Reporter | None = None) -> Embedder:
     try:
-        return _load_embedder(pipeline, model_name)
+        return _load_embedder(pipeline, model_name, reporter=reporter)
     except RuntimeError as exc:
         raise _fail(str(exc)) from exc
 
@@ -283,12 +289,17 @@ def _sigterm_as_interrupt():
 
 
 def _seed_texts(
-    ctx: _Context, profile: Profile, pipeline: Pipeline, errors: list[str]
+    ctx: _Context,
+    profile: Profile,
+    pipeline: Pipeline,
+    errors: list[str],
+    *,
+    reporter: Reporter | None = None,
 ) -> dict[str, str]:
     """Seed texts for triage; a failed lookup is appended to `errors`, never fatal."""
     cache = ctx.vault / "cache" / "seeds.json"
     try:
-        texts = resolve_seed_texts(ctx.conn, cache, profile.seeds, pipeline.seed_fetcher)
+        texts = resolve_seed_texts(ctx.conn, cache, profile.seeds, pipeline.seed_fetcher, reporter=reporter)
     except SeedFetchError as exc:
         errors.append(str(exc))
         return exc.texts
@@ -372,7 +383,10 @@ def _run_locked(ctx: _Context) -> None:
             stage = "embed"
             errors += pipeline.startup_errors  # before anything can crash, so they are never dropped
             try:
-                embedder = _load_embedder(pipeline, ctx.config.embedding_model)
+                with _reporter() as reporter:
+                    embedder = _load_embedder(
+                        pipeline, ctx.config.embedding_model, reporter=reporter
+                    )
                 stage = "collect"
                 with _reporter() as reporter:
                     counts, errors2 = run_collect(
@@ -380,8 +394,11 @@ def _run_locked(ctx: _Context) -> None:
                     )
                 errors += errors2
                 stage = "triage"
-                seeds = _seed_texts(ctx, profile, pipeline, errors)
-                counts |= run_triage(ctx.conn, embedder, profile, seeds, ctx.vault / "my_work")
+                with _reporter() as reporter:
+                    seeds = _seed_texts(ctx, profile, pipeline, errors, reporter=reporter)
+                    counts |= run_triage(
+                        ctx.conn, embedder, profile, seeds, ctx.vault / "my_work", reporter=reporter
+                    )
                 # Triage is done with the embedder; free its GPU memory before the model probe
                 # measures what is free (the nightly summaries run without it).
                 del embedder
@@ -490,10 +507,13 @@ def triage(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     profile = _load_profile(ctx)
     pipeline = build_pipeline(ctx.config)
-    embedder = _embedder(pipeline, ctx.config.embedding_model)
     errors: list[str] = []
-    seeds = _seed_texts(ctx, profile, pipeline, errors)
-    counts = run_triage(ctx.conn, embedder, profile, seeds, ctx.vault / "my_work")
+    with _reporter() as reporter:
+        embedder = _embedder(pipeline, ctx.config.embedding_model, reporter=reporter)
+        seeds = _seed_texts(ctx, profile, pipeline, errors, reporter=reporter)
+        counts = run_triage(
+            ctx.conn, embedder, profile, seeds, ctx.vault / "my_work", reporter=reporter
+        )
     typer.echo("Triaged:")
     _report(counts, errors)
 
@@ -977,7 +997,8 @@ def shelf_add(
             f"File not found: {source.strip()}. Check the path, or put the note in quotes "
             'with spaces, e.g. rpipe shelf add "my idea about fuzzing".'
         )
-    embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model)
+    with _reporter() as reporter:
+        embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
     with _clean_errors():
         name = add_to_shelf(ctx.conn, ctx.vault / "my_work", embedder, source)
     typer.echo(f"Added '{name}' to your shelf. Papers close to it will now rank higher.")
@@ -1019,8 +1040,9 @@ def shelf_remove(
 def shelf_sync(vault: VaultOption = None) -> None:
     """Re-index my_work/ after you added, edited or deleted files by hand."""
     ctx = _open(vault)
-    embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model)
-    res = sync_shelf(ctx.conn, ctx.vault / "my_work", embedder)
+    with _reporter() as reporter:
+        embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
+        res = sync_shelf(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
     typer.echo(f"Shelf synced: {len(res.added)} added, {len(res.updated)} updated, {len(res.removed)} removed.")
     for label, names in (("Added", res.added), ("Updated", res.updated), ("Removed", res.removed)):
         if names:

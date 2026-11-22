@@ -9,6 +9,7 @@ import numpy as np
 from research_pipeline.db import current_votes, list_saved, papers_with_status, set_status
 from research_pipeline.embed import Embedder
 from research_pipeline.models import Profile, Status
+from research_pipeline.progress import Reporter, stage
 from research_pipeline.rank import (
     build_feedback_vectors,
     build_profile_vectors,
@@ -28,6 +29,8 @@ def run_triage(
     profile: Profile,
     seed_texts: dict[str, str],
     my_work: Path | None = None,
+    *,
+    reporter: Reporter | None = None,
 ) -> dict[str, int]:
     """Rank `new` papers; top `profile.top_n` become triaged, the rest skipped.
 
@@ -35,9 +38,11 @@ def run_triage(
     your own notes get a boost.
     """
     if my_work is not None:
-        sync_shelf(conn, my_work, embedder)  # always, so the index follows your files even on quiet nights
+        sync_shelf(conn, my_work, embedder, reporter=reporter)  # always, so the index follows your files even on quiet nights
     papers = papers_with_status(conn, Status.new)
     if not papers:
+        with stage(reporter, "triage"):  # nothing to do: start and done only
+            pass
         return {"triaged": 0, "skipped": 0, "embedded": 0}
 
     model = embedder.model_name
@@ -48,16 +53,21 @@ def run_triage(
         )
     }
     todo = [p for p in papers if p["id"] not in stored]
-    if todo:
-        new_vecs = np.asarray(embedder.embed([_text(p) for p in todo]), dtype=np.float32)
-        for p, v in zip(todo, new_vecs, strict=True):
-            stored[p["id"]] = v
-            conn.execute(
-                "INSERT OR REPLACE INTO embeddings (item_id, embedding_model, vector, dim)"
-                " VALUES (?, ?, ?, ?)",
-                (p["id"], model, v.tobytes(), len(v)),
-            )
+    with stage(reporter, "triage", total=len(todo) or None) as handle:
+        if todo:
+            handle.note(f"embedding {len(todo)} papers")  # one embed call, so no per-paper steps
+            new_vecs = np.asarray(embedder.embed([_text(p) for p in todo]), dtype=np.float32)
+            for p, v in zip(todo, new_vecs, strict=True):
+                stored[p["id"]] = v
+                conn.execute(
+                    "INSERT OR REPLACE INTO embeddings (item_id, embedding_model, vector, dim)"
+                    " VALUES (?, ?, ?, ?)",
+                    (p["id"], model, v.tobytes(), len(v)),
+                )
+        return _rank_and_store(conn, embedder, profile, seed_texts, my_work, papers, stored, len(todo))
 
+
+def _rank_and_store(conn, embedder, profile, seed_texts, my_work, papers, stored, n_embedded):
     paper_vecs = np.stack([stored[p["id"]] for p in papers])
     pv = build_profile_vectors(embedder, profile, seed_texts)
     votes, saves = current_votes(conn), list_saved(conn)
@@ -78,4 +88,4 @@ def run_triage(
             set_status(conn, s.id, Status.skipped, score=s.score, reasons=s.reasons)
     conn.commit()
     kept = min(profile.top_n, len(ranked))
-    return {"triaged": kept, "skipped": len(ranked) - kept, "embedded": len(todo)}
+    return {"triaged": kept, "skipped": len(ranked) - kept, "embedded": n_embedded}

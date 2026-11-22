@@ -313,3 +313,23 @@ def test_remove_moves_every_file_with_that_stem(conn, my_work):
     assert not (my_work / "a.md").exists() and not (my_work / "a.txt").exists()
     assert sync_shelf(conn, my_work, _Emb()).added == []
     assert _names(conn) == []
+
+
+def test_progress_one_step_per_changed_file(conn, my_work, embedder):
+    from research_pipeline.progress import ListReporter
+
+    (my_work / "a.md").write_text("alpha")
+    (my_work / "b.txt").write_text("beta")
+    rep = ListReporter()
+    sync_shelf(conn, my_work, embedder, reporter=rep)
+    steps = [e for e in rep.events if e.kind == "step"]
+    assert [e.label for e in steps] == ["a.md", "b.txt"]
+    assert steps[0].total == 2
+
+
+def test_progress_empty_shelf_is_start_and_done_only(conn, my_work, embedder):
+    from research_pipeline.progress import ListReporter
+
+    rep = ListReporter()
+    sync_shelf(conn, my_work, embedder, reporter=rep)
+    assert [e.kind for e in rep.events] == ["start", "done"]

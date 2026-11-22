@@ -16,6 +16,7 @@ import numpy as np
 
 from research_pipeline import db
 from research_pipeline.embed import Embedder
+from research_pipeline.progress import Reporter, stage
 
 MIN_CHUNK_CHARS = 200
 MAX_CHUNK_CHARS = 1500
@@ -130,11 +131,14 @@ def _has_embeddings(conn: sqlite3.Connection, name: str, n_chunks: int, model: s
     return found == n_chunks
 
 
-def sync_shelf(conn: sqlite3.Connection, my_work: Path, embedder: Embedder) -> SyncResult:
+def sync_shelf(
+    conn: sqlite3.Connection, my_work: Path, embedder: Embedder, *, reporter: Reporter | None = None
+) -> SyncResult:
     """Bring the database in line with ``my_work/``: add, re-index, or drop items. Commits."""
     res = SyncResult()
     files, res.ignored = _shelf_files(my_work)
     existing = {r["name"]: r for r in db.list_shelf_items(conn)}
+    todo: list[tuple[str, Path, bytes, str]] = []  # files that need (re)embedding
     for name, path in files.items():
         try:
             data = path.read_bytes()
@@ -149,19 +153,23 @@ def sync_shelf(conn: sqlite3.Connection, my_work: Path, embedder: Embedder) -> S
             and _has_embeddings(conn, name, row["n_chunks"], embedder.model_name)
         ):
             continue
-        chunks = chunk_text(name, data.decode("utf-8", errors="replace"))
-        db.upsert_shelf_item(conn, name, digest, chunks)
-        if chunks:
-            vecs = np.asarray(embedder.embed(chunks), dtype=np.float32)
-            conn.executemany(
-                "INSERT OR REPLACE INTO embeddings (item_id, embedding_model, vector, dim)"
-                " VALUES (?, ?, ?, ?)",
-                [
-                    (db.shelf_embedding_id(name, i), embedder.model_name, v.tobytes(), len(v))
-                    for i, v in enumerate(vecs)
-                ],
-            )
-        (res.updated if row else res.added).append(name)
+        todo.append((name, path, data, digest))
+    with stage(reporter, "shelf", total=len(todo) or None) as handle:  # nothing changed: start/done only
+        for i, (name, path, data, digest) in enumerate(todo, 1):
+            chunks = chunk_text(name, data.decode("utf-8", errors="replace"))
+            db.upsert_shelf_item(conn, name, digest, chunks)
+            if chunks:
+                vecs = np.asarray(embedder.embed(chunks), dtype=np.float32)
+                conn.executemany(
+                    "INSERT OR REPLACE INTO embeddings (item_id, embedding_model, vector, dim)"
+                    " VALUES (?, ?, ?, ?)",
+                    [
+                        (db.shelf_embedding_id(name, j), embedder.model_name, v.tobytes(), len(v))
+                        for j, v in enumerate(vecs)
+                    ],
+                )
+            (res.updated if name in existing else res.added).append(name)
+            handle.step(path.name, current=i)
     for name in existing:
         if name not in files:
             db.delete_shelf_item(conn, name, commit=False)

@@ -122,6 +122,8 @@ An unknown name for `remove` exits with code 1 and lists the closest names. `lis
 
 ## How to run / check it
 
+- Progress (stderr). `rpipe shelf sync` first shows `embedding model <name>` while the embedding model loads, then a `shelf` stage with one step per new or edited file (`[1/2] a.md`, `[2/2] b.txt`); files that did not change are not listed, and when nothing changed the stage starts and finishes with no steps. The **first run downloads the embedding model** (hundreds of MB; about 130 MB for the default). That can take minutes, and the "still waiting" heartbeat (every 30 s) shows it is working. `rpipe shelf add` shows the model-loading stage only. `sync_shelf` takes an optional `reporter`; the nightly triage passes its own down.
+
 Use the commands above. Tests: `uv run pytest tests/test_shelf.py tests/test_cli_shelf.py -q` (offline, fake embedder).
 
 ## Where the code is

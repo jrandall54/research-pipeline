@@ -26,6 +26,8 @@ STOPWORDS = frozenset(
     "a an and are as at be by for from in into is it its of on or that the this to with without "
     "via using toward towards over under about".split()
 )
+
+
 class ProposedProfile(BaseModel):
     topics: list[str] = Field(default_factory=list)
     seed_queries: list[str] = Field(default_factory=list)

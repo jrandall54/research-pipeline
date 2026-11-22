@@ -222,3 +222,52 @@ def test_cli_remove_fact_yes_guided_and_errors(vault):
     last = grun(vault, "remove-fact", "2307.15043", "1", "--yes")
     assert last.exit_code == 1 and "only fact" in last.output
     assert facts(vault) == ["three"]
+
+
+def test_cli_guided_prompt_with_unknown_id_exits_1(vault):
+    three(vault)
+    for cmd, extra in (("edit-fact", []), ("remove-fact", ["--yes"])):
+        res = runner.invoke(cli.app, ["gold", cmd, *extra, "--vault", str(vault)], input="1111.1111\n")
+        assert res.exit_code == 1 and "1111.1111 is not in your gold set" in res.output
+    assert facts(vault) == ["one", "two", "three"]
+
+
+def test_cli_fact_commands_accept_versioned_and_mixed_case_ids(vault):
+    three(vault)
+    res = grun(vault, "edit-fact", "2307.15043v2", "1", "uno")
+    assert res.exit_code == 0 and "Updated fact 1 of 2307.15043." in res.output
+    res = grun(vault, "remove-fact", "ArXiv:2307.15043v3", "2", "--yes")
+    assert res.exit_code == 0 and "Removed fact 2 of 2307.15043." in res.output
+    assert facts(vault) == ["uno", "three"]
+
+
+def test_cli_edit_and_remove_fact_clean_error_when_paper_vanishes(vault, monkeypatch):
+    three(vault)
+    monkeypatch.setattr(cli, "edit_fact", lambda *a: None)
+    monkeypatch.setattr(cli, "remove_fact", lambda *a: None)
+    res = grun(vault, "edit-fact", "2307.15043", "1", "x")
+    assert res.exit_code == 1 and "not in your gold set" in res.output
+    res = grun(vault, "remove-fact", "2307.15043", "1", "--yes")
+    assert res.exit_code == 1 and "not in your gold set" in res.output
+    assert "Traceback" not in res.output
+
+
+def test_gold_fact_input_is_cleaned_like_topics(vault):
+    add_gold(vault, gp())
+    add_fact(vault, "2307.15043", "bad\x1b[31m fact‮  here\x07")
+    edit_fact(vault, "2307.15043", 1, "ed\x85ited‮  one")
+    assert load_gold(vault)[0].key_facts == ["ed ited one", "bad [31m fact here"]
+
+
+def test_cli_gold_add_cleans_typed_facts(vault, monkeypatch):
+    use(monkeypatch, StubArxiv(by_id=[paper()]))
+    res = grun(vault, "add", "2307.15043", "--yes", input="clean\x07 me‮\n\n")
+    assert res.exit_code == 0
+    assert facts(vault) == ["clean me"]
+
+
+def test_cli_add_fact_and_edit_fact_clean_and_reject_control_only_text(vault):
+    three(vault)
+    assert grun(vault, "add-fact", "2307.15043", "\x07‮").exit_code == 1
+    assert grun(vault, "edit-fact", "2307.15043", "1", "\x07‮").exit_code == 1
+    assert facts(vault) == ["one", "two", "three"]

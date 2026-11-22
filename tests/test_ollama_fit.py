@@ -581,3 +581,13 @@ def test_margin_still_applies_when_only_our_ceiling_stops_the_search(mock):
                       free=20 * GB, kv_per_token=1_000)
     fake.install(mock)
     assert choose(URL, list_models(URL), None, None).num_ctx == 131072 - 1024
+
+
+def test_hand_pinned_context_below_the_floor_is_cached_not_reprobed_every_night(mock, tmp_path):
+    fake = three_models()
+    fake.install(mock)
+    first = resolve(URL, tmp_path, "auto", 4096)  # only reachable by hand-editing config.yaml
+    assert first.num_ctx == 4096
+    fake.generate_calls.clear()
+    assert resolve(URL, tmp_path, "auto", 4096) == first
+    assert fake.generate_calls == []

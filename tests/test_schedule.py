@@ -226,3 +226,12 @@ def test_rpipe_path_prefers_the_running_program(tmp_path, monkeypatch):
 def test_vault_path_with_newline_is_rejected(tmp_path):
     with pytest.raises(schedule.ScheduleError, match="control character"):
         schedule.render_service(tmp_path / "a\nb", "/usr/bin/rpipe")
+
+
+def test_cli_status_without_systemctl_binary_fails_cleanly(fake, monkeypatch):
+    calls, unit_dir, vault = fake
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    res = runner.invoke(cli.app, ["schedule", "status"])
+    assert res.exit_code == 1 and "systemctl not found" in res.output
+    assert "Traceback" not in res.output
+    assert calls == []

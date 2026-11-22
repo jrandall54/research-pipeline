@@ -779,7 +779,7 @@ def _ask_facts() -> list[str]:
     typer.echo("Type one per line; press Enter on an empty line to finish. Aim for 3 or more.")
     facts: list[str] = []
     while True:
-        line = typer.prompt(f"Fact {len(facts) + 1}", default="", show_default=False).strip()
+        line = profile_edit.normalise_text(typer.prompt(f"Fact {len(facts) + 1}", default="", show_default=False))
         if not line:
             return facts
         facts.append(line)
@@ -870,7 +870,8 @@ def gold_add_fact(
 ) -> None:
     """Add one more key fact to a paper already in the gold set."""
     ctx = _open(vault)
-    if not fact.strip():
+    fact = profile_edit.normalise_text(fact)
+    if not fact:
         raise _fail("The fact is empty.")
     with _clean_errors():
         if not add_fact(ctx.vault, paper_id, fact):
@@ -878,8 +879,8 @@ def gold_add_fact(
     typer.echo(f"Added a fact to {paper_id}.")
 
 
-def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str) -> tuple[str, int]:
-    """Resolve (paper id, fact number), prompting for whatever was omitted. Validates before any write."""
+def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str) -> tuple[str, int, str]:
+    """Resolve (paper id, fact number, fact text), prompting for whatever was omitted. Validates before any write."""
     papers = load_gold(vault)
     if paper_id is None:
         paper_id = typer.prompt("Paper id")
@@ -894,7 +895,7 @@ def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str)
         number = typer.prompt(f"Number of the fact to {verb}", type=int)
     if not 1 <= number <= len(paper.key_facts):
         raise _fail(f"{paper.paper_id} has {len(paper.key_facts)} fact(s); there is no fact {number}. See: rpipe gold list")
-    return paper.paper_id, number
+    return paper.paper_id, number, paper.key_facts[number - 1]
 
 
 @gold_app.command("edit-fact")
@@ -907,15 +908,18 @@ def gold_edit_fact(
     """Replace one key fact of a gold paper (prompts for anything you leave out)."""
     ctx = _open(vault)
     with _clean_errors():
-        paper_id, number = _pick_fact(ctx.vault, paper_id, number, "edit")
+        paper_id, number, _old = _pick_fact(ctx.vault, paper_id, number, "edit")
         if text is None:
             text = typer.prompt("New text for the fact")
-        if not text.strip():
+        text = profile_edit.normalise_text(text)
+        if not text:
             raise _fail("The fact is empty.")
         try:
-            edit_fact(ctx.vault, paper_id, number, text)
+            old = edit_fact(ctx.vault, paper_id, number, text)
         except ValueError as exc:
             raise _fail(str(exc)) from exc
+        if old is None:
+            raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
     typer.echo(f"Updated fact {number} of {paper_id}.")
 
 
@@ -929,15 +933,16 @@ def gold_remove_fact(
     """Remove one key fact from a gold paper (asks first unless --yes)."""
     ctx = _open(vault)
     with _clean_errors():
-        paper_id, number = _pick_fact(ctx.vault, paper_id, number, "remove")
-        fact = next(p for p in load_gold(ctx.vault) if has_gold([p], paper_id)).key_facts[number - 1]
+        paper_id, number, fact = _pick_fact(ctx.vault, paper_id, number, "remove")
         if not yes and not typer.confirm(f'Remove fact {number} of {paper_id} ("{fact}")?', default=False):
             typer.echo("Cancelled. Nothing was changed.")
             return
         try:
-            remove_fact(ctx.vault, paper_id, number)
+            removed = remove_fact(ctx.vault, paper_id, number)
         except ValueError as exc:
             raise _fail(str(exc)) from exc
+        if removed is None:
+            raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
     typer.echo(f"Removed fact {number} of {paper_id}.")
 
 
@@ -1364,9 +1369,9 @@ def _rpipe_path() -> str:
     return os.path.abspath(found)
 
 
-def _need_systemctl() -> None:
+def _need_systemctl(writes: bool = False) -> None:
     if shutil.which("systemctl") is None:
-        raise _fail("systemctl not found (is systemd available?). Nothing was written.")
+        raise _fail("systemctl not found (is systemd available?)." + ("" if not writes else " Nothing was written."))
 
 
 def _schedule_vault(vault: Path | None) -> Path:
@@ -1407,7 +1412,7 @@ def schedule_install(
     except ValueError as exc:
         raise _fail(str(exc)) from exc
     rpipe_cmd = _rpipe_path()
-    _need_systemctl()
+    _need_systemctl(writes=True)
     try:
         written = schedule.install(path, time, schedule.default_unit_dir(), schedule.system_runner, rpipe_cmd)
     except schedule.ScheduleError as exc:
@@ -1421,6 +1426,7 @@ def schedule_install(
 @schedule_app.command("status")
 def schedule_status() -> None:
     """Show when the timer last ran and will run next."""
+    _need_systemctl()
     try:
         enabled = schedule.status(schedule.system_runner)
     except schedule.ScheduleError as exc:

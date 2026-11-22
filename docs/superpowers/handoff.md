@@ -40,11 +40,7 @@ From before:
 - Hidden-text stripping has documented gaps (`fulltext.md`).
 
 ## Parked (not fixed, no owner decision needed yet)
-Phase 3:
-- Tests: weak assertions on some messages and exit codes; weak negative digest test.
-
-From Phase 2 and auto-model:
-- Tests: duplicate `AlwaysSummary`, and test-to-test imports.
+(none: all parked items are fixed.)
 
 Dropped as resolved in Phase 3: no way to add a gold fact (`rpipe gold add-fact` exists).
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from research_pipeline.profile_edit import normalise_arxiv_id
+from research_pipeline.profile_edit import normalise_arxiv_id, normalise_text
 from research_pipeline.vault import ConfigError
 
 GOLD_TARGET = 10
@@ -95,7 +95,7 @@ def add_fact(vault: Path, paper_id: str, fact: str) -> bool:
     papers = load_gold(vault)
     for p in papers:
         if _key(p.paper_id) == _key(paper_id):
-            p.key_facts.append(fact.strip())
+            p.key_facts.append(normalise_text(fact))
             _save(vault, papers)
             return True
     return False
@@ -116,14 +116,15 @@ def edit_fact(vault: Path, paper_id: str, number: int, text: str) -> str | None:
 
     Raises ValueError for a number out of range or empty text. Nothing is written on error.
     """
-    if not text.strip():
+    text = normalise_text(text)
+    if not text:
         raise ValueError("The fact is empty.")
     papers = load_gold(vault)
     p, i = _fact_target(papers, paper_id, number)
     if p is None:
         return None
     old = p.key_facts[i]
-    p.key_facts[i] = text.strip()
+    p.key_facts[i] = text
     _save(vault, papers)
     return old
 

@@ -9,10 +9,12 @@ The gold set is a short list of papers you know well, each with a list of **key 
 1. You add a paper: `rpipe gold add 2307.15043` (an arXiv link, id or title all work). The command looks the paper up on arXiv, shows it, and asks you to confirm.
 2. It then asks for key facts, one per line. A blank line finishes. Nothing is saved until you finish: Ctrl-C or end of input at that point leaves the file untouched.
 3. At least one fact is required (the command warns and saves nothing otherwise); three or more make a better test.
-4. `rpipe gold list` shows `n/10` and every paper with its facts. `rpipe gold add-fact ID "fact"` adds one more fact later, and `rpipe gold remove ID` removes a paper.
+4. `rpipe gold list` shows `n/10` and every paper with its facts. `rpipe gold add-fact ID "fact"` adds one more fact later, and `rpipe gold remove ID` removes a paper. The facts in `list` are numbered (see the sample below).
 5. Facts are numbered in `rpipe gold list` (`1.`, `2.`, ...). `rpipe gold edit-fact ID 2 "new text"` replaces fact 2, and `rpipe gold remove-fact ID 2` deletes it after a yes/no confirmation (`--yes` skips the question). Leave out the id, the number or the text and the command asks for it, showing the paper's numbered facts first. A number out of range, an empty replacement or an unknown paper is refused with nothing changed. The last remaining fact cannot be removed (a gold paper needs at least one); use `rpipe gold remove ID` to drop the whole paper.
 
-Ids are compared without version suffixes, so `2307.15043v2` and `2307.15043` are the same paper.
+Ids are compared without version suffixes (and `arXiv:` prefixes and letter case are ignored), so `2307.15043v2` and `2307.15043` are the same paper.
+
+Fact text is cleaned the same way as topics (see `profile.md`): control characters such as a terminal escape code become a space, invisible bidi-control characters are dropped, and runs of spaces collapse. This applies to facts typed in `gold add`, `add-fact` and `edit-fact`; a fact that is empty after cleaning is refused.
 
 Worked example (illustrative output; your numbers will differ):
 
@@ -25,6 +27,17 @@ Fact 2: The suffixes found on open models transfer to closed models such as Chat
 Fact 3 (blank line to finish):
 Saved with 2 fact(s); 3 or more make a better test (rpipe gold add-fact).
 Added 2307.15043: Universal and Transferable Adversarial Attacks ...
+```
+
+Afterwards `rpipe gold list` shows the numbers that `edit-fact` and `remove-fact` use (illustrative output):
+
+```
+$ rpipe gold list
+Gold set: 1/10 papers
+
+2307.15043  Universal and Transferable Adversarial Attacks on Aligned Language Models
+  1. Finds adversarial suffixes automatically by greedy and gradient-based search
+  2. The suffixes found on open models transfer to closed models such as ChatGPT
 ```
 
 Fact numbers, not fact text, identify a fact: the numbers are what `list` shows, and typing a whole sentence to match it would be error-prone. The trade-off is that numbers shift after a removal, so the commands re-read the file each time and the guided prompt always shows the current numbering. Both new commands write the file atomically like `add-fact`, so a refused edit never leaves a half-written gold set.

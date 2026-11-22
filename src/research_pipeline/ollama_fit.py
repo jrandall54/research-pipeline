@@ -328,16 +328,18 @@ def _cache_key(url: str, model: str, num_ctx: int | str, models: list[ModelInfo]
     )
 
 
-def _in_bounds(fit: Fit, models: list[ModelInfo]) -> bool:
-    """A cached context must still be at least MIN_CONTEXT and within the model's trained context."""
-    if fit.num_ctx < MIN_CONTEXT:
+def _in_bounds(fit: Fit, models: list[ModelInfo], floor: bool = True) -> bool:
+    """A cached context must still be within the model's trained context, and (when it was
+    chosen automatically, `floor=True`) at least MIN_CONTEXT. A context pinned by hand is
+    the user's own choice, so the floor does not apply to it."""
+    if floor and fit.num_ctx < MIN_CONTEXT:
         return False
     m = next((m for m in models if m.name == fit.model), None)
     return m is not None and (m.max_context is None or fit.num_ctx <= m.max_context)
 
 
 def _cached(vault: Path, key: str, models: list[ModelInfo],
-            log: Callable[[str], None] = lambda s: None) -> Fit | LlmError | None:
+            log: Callable[[str], None] = lambda s: None, floor: bool = True) -> Fit | LlmError | None:
     """The cached outcome for this exact situation: a Fit, the cached failure, or None."""
     cached = _read_cache(vault / "cache" / CACHE_NAME)
     if cached.get("key") != key:
@@ -349,7 +351,7 @@ def _cached(vault: Path, key: str, models: list[ModelInfo],
             fit = Fit(model=cached["model"], num_ctx=cached["num_ctx"])
         except (KeyError, ValueError):
             return None
-        if _in_bounds(fit, models):
+        if _in_bounds(fit, models, floor):
             return fit
         log(f"the saved context of {fit.num_ctx} tokens for {fit.model} is outside what it "
             f"supports (at least {MIN_CONTEXT}, at most its trained context); probing again")
@@ -369,7 +371,7 @@ def cached_fit(url: str, vault: Path, model: str, num_ctx: int | str,
         raise
     except LlmError:
         return None
-    hit = _cached(vault, _cache_key(url, model, num_ctx, models), models)
+    hit = _cached(vault, _cache_key(url, model, num_ctx, models), models, floor=num_ctx == "auto")
     return hit if isinstance(hit, Fit) else None
 
 
@@ -397,7 +399,7 @@ def resolve(
     key = _cache_key(url, model, num_ctx, models)
     path = vault / "cache" / CACHE_NAME
     if not force:
-        hit = _cached(vault, key, models, log)
+        hit = _cached(vault, key, models, log, floor=num_ctx == "auto")
         if isinstance(hit, LlmError):
             raise hit
         if hit is not None:

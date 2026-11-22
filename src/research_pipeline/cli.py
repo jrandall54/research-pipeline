@@ -20,7 +20,7 @@ from typing import Annotated
 
 import typer
 
-from research_pipeline import ollama_fit, onboarding, profile_edit, registry, schedule
+from research_pipeline import categories, ollama_fit, onboarding, profile_edit, registry, schedule
 from research_pipeline import serve as serve_mod
 from research_pipeline.backends.claude_code import LOGIN_HINT, find_claude, logged_in, resolve_model
 from research_pipeline.collect import run_collect
@@ -326,7 +326,11 @@ def _seed_texts(
 
 
 def health_line(
-    day: date, counts: dict[str, int], errors: list[str], previous_unfinished: bool = False
+    day: date,
+    counts: dict[str, int],
+    errors: list[str],
+    previous_unfinished: bool = False,
+    unknown_categories: list[str] | None = None,
 ) -> str:
     detail = "; ".join(" ".join(e.split()) for e in errors) or "none"
     extras = ""
@@ -338,6 +342,8 @@ def health_line(
         extras += f" · summary failures {counts['summary_failed']}"
     if counts.get("summaries_off"):
         extras += " · summaries off (abstracts-only mode)"
+    if unknown_categories:
+        extras += f" · unknown categories: {', '.join(unknown_categories)}"
     return (
         f"Run {day.isoformat()}: collected {counts.get('inserted', 0)} new, "
         f"{counts.get('updated', 0)} updated · kept {counts.get('triaged', 0)} · "
@@ -388,6 +394,13 @@ def run(vault: VaultOption = None) -> None:
 
 def _run_locked(ctx: _Context) -> None:
     profile = _load_profile(ctx)
+    bad_categories = categories.unknown(ctx.config.arxiv_categories)
+    if bad_categories:
+        typer.echo(
+            f"warning: unknown categories: {', '.join(bad_categories)} "
+            "(fix with `rpipe profile set-categories`)",
+            err=True,
+        )
     pipeline = build_pipeline(ctx.config)
     run_id = start_run(ctx.conn)  # before anything can fail, so every failure leaves a runs row
     counts: dict[str, int] = {}
@@ -448,7 +461,10 @@ def _run_locked(ctx: _Context) -> None:
             unfinished = previous_run_unfinished(ctx.conn, run_id)
             try:
                 out = write_digest(
-                    ctx.conn, ctx.vault, today, health_line(today, counts, errors, unfinished)
+                    ctx.conn, ctx.vault, today, health_line(
+                        today, counts, errors, unfinished,
+                        unknown_categories=bad_categories,
+                    )
                 )
             except KeyboardInterrupt:
                 errors.append("digest: interrupted")
@@ -680,6 +696,9 @@ def profile_show(vault: VaultOption = None) -> None:
     typer.echo(f"Top N: {profile.top_n}")
     typer.echo(f"Feedback half-life: {profile.feedback_halflife_days:g} days")
     typer.echo(f"arXiv categories: {_categories_text(ctx.config.arxiv_categories)}")
+    bad = categories.unknown(ctx.config.arxiv_categories)
+    if bad:
+        typer.echo(f"unknown categories: {', '.join(bad)}")
 
 
 def _categories_text(cats: list[str]) -> str:

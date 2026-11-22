@@ -17,6 +17,7 @@ from ruamel.yaml.error import YAMLError
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from research_pipeline.backends.claude_code import resolve_model
+from research_pipeline.categories import describe_unknown, unknown
 from research_pipeline.llm import NO_MODEL
 from research_pipeline.models import ALL_CATEGORIES, CATEGORY_RE, Config, Profile
 from research_pipeline.vault import ConfigError, load_config, load_profile
@@ -293,6 +294,12 @@ def set_categories(vault: Path, cats: list[str]) -> None:
         raise ConfigError(
             f"{path}: invalid arXiv categories {bad or cats!r}: {CATEGORY_ERROR_HINT}; "
             "give at least one"
+        )
+    not_real = unknown(cleaned)
+    if not_real:
+        raise ValueError(
+            "; ".join(describe_unknown(c) for c in not_real)
+            + ". Full list: https://arxiv.org/category_taxonomy"
         )
 
     def change(data) -> bool:

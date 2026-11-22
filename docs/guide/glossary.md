@@ -6,7 +6,7 @@
 
 **Vault** — the folder (default `~/research-vault/`) holding everything personal: config, profile, database, digests. Kept outside the repo.
 
-**arXiv category** — the subject tag every arXiv paper carries, such as `cs.CR` (security) or `cs.LG` (machine learning). Only papers in your configured categories are collected; the single value `all` means every computer-science category (`cs.*`; not physics, maths or stat). See "Choosing categories" in `profile.md`.
+**arXiv category** — the subject tag every arXiv paper carries, such as `cs.CR` (security) or `cs.LG` (machine learning). Only papers in your configured categories are collected; the single value `all` means every computer-science category (`cs.*`; not physics, maths or stat). Codes are checked against a packaged copy of arXiv's list, so `cs.ML` is refused with a did-you-mean (`cs.LG`). See "Choosing categories" in `profile.md`.
 
 **Seed** — an arXiv id of a paper you like; new papers are ranked by similarity to your seeds. You can add one from an arXiv link, an id or a title search (see `profile.md`).
 

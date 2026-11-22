@@ -101,3 +101,11 @@ No production code changes except where a tightened test exposes a real bug (fix
 - Add a CLI-level test that `rpipe model show` prints the "last choice: unknown. Ollama did not answer in time" output when probing times out.
 - `cli.py` ~982: the `ProbeTimeout` branch in `model show` returns before any other output; check whether showing the rest of `model show` (model, server, context) first is better, and keep it if intended (say so in the report).
 - `ollama_fit.py` ~333: a hand-edited pinned `num_ctx` below 8192 is cached then rejected every load (re-probe each night). Make `_in_bounds` apply the floor only to auto-chosen values, or document the behaviour in llm.md.
+
+### Task 7 addendum 4 (carried from Task 6 review, Minor)
+
+- `cli.py` `gold_edit_fact`/`gold_remove_fact`: `edit_fact`/`remove_fact` return `None` for an unknown paper and the CLI ignores it; handle it (clean error).
+- `cli.py` `gold_remove_fact`: drop the redundant reload plus `next(...)` (can raise `StopIteration`); have `_pick_fact` return the fact text.
+- `docs/guide/evaluation.md`: "How it works" step 4 and the worked example still show `gold list` without numbers; add a numbered `list` output sample.
+- Tests: guided prompt with an unknown id; a mixed-case/versioned id at CLI level.
+- Consistency: `add_fact`, `edit_fact` and `gold add` only `.strip()`; route gold fact/text input through `normalise_text` (control/bidi stripping) like topics, with a test, and one line in `evaluation.md`.

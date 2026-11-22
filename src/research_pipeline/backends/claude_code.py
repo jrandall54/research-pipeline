@@ -123,11 +123,13 @@ def _structured_failure(envelope: dict | None) -> str | None:
 def _classify(message: str, envelope: dict | None = None) -> LlmError:
     """Turn a failed call into the right error. Quota is recognised by wording or HTTP 429."""
     low = message.lower()
-    structured = _structured_failure(envelope)
-    if structured and (envelope or {}).get("api_error_status") != 429:
-        return LlmError(structured)
+    # Quota first: _QUOTA only matches genuine plan-limit wording, so a quota hit after
+    # several turns is still a limit (stop the run) and not a structured-output failure.
     if (envelope or {}).get("api_error_status") == 429 or _QUOTA.search(low):
         return LlmLimitReached(f"Claude Code usage limit reached: {message[:200]}")
+    structured = _structured_failure(envelope)
+    if structured:
+        return LlmError(structured)
     if re.search(r"log ?in|logged|authenticat", low):
         return LlmError(f"Claude Code is not logged in: {LOGIN_HINT}")
     if re.search(r"unknown option|unrecognized", low):

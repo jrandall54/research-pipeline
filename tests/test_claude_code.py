@@ -231,6 +231,15 @@ def test_structured_output_failure_with_tool_use_is_not_a_limit():
     assert "structured" in str(e.value).lower()
 
 
+def test_quota_after_several_turns_is_still_a_limit():
+    # A genuine plan limit hit mid-call (many turns, stopped on tool_use) must stop the run,
+    # not burn a retry per paper as an ordinary structured-output failure.
+    env = _env(subtype="error_during_execution", num_turns=4, stop_reason="tool_use",
+               result="You've hit your session limit - resets 5pm")
+    with pytest.raises(LlmLimitReached):
+        client(FakeRunner(env)).generate("S", "U", Out)
+
+
 @pytest.mark.parametrize("subtype", ["error_max_turns", "error_max_structured_output_retries"])
 def test_max_turns_and_structured_retries_are_plain_errors(subtype):
     env = _env(subtype=subtype, num_turns=5, result="reached the limit of retries")

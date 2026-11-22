@@ -106,12 +106,12 @@ If `ANTHROPIC_API_KEY` is set in your shell, Claude Code would silently bill tha
 
 ### Failures: usage limit versus everything else
 
-When the reply is an error (`is_error`, or a non-zero exit) the adapter looks at the envelope (the JSON Claude Code prints: `subtype`, `is_error`, `result`, `stop_reason`, `num_turns`, `api_error_status`) and decides which kind of failure it is. The order matters.
+When the reply is an error (`is_error`, or a non-zero exit) the adapter looks at the envelope (the JSON Claude Code prints: `subtype`, `is_error`, `result`, `stop_reason`, `num_turns`, `api_error_status`) and decides which kind of failure it is. The rows are checked top to bottom, and the order matters: quota is checked first, so a genuine limit hit after several turns still stops the run instead of costing every remaining paper a retry.
 
 | What the envelope shows | Raised | What a run does |
 |---|---|---|
-| `subtype` starting `error_max` (`error_max_turns`, `error_max_structured_output_retries`), or `stop_reason: "tool_use"`, or more than 2 turns, and no HTTP 429 | `LlmError` ("could not produce valid structured output") | that paper is recorded as a failure and retried on a later run; the others carry on |
 | `api_error_status` 429, or `result`/stderr text such as "usage limit reached", "5-hour limit", "weekly limit", "session limit", "credit balance is too low", "out of credits", "hit your ... limit" | `LlmLimitReached` | the run stops calling the model without counting a failure; remaining papers go in abstracts-only |
+| otherwise: `subtype` starting `error_max` (`error_max_turns`, `error_max_structured_output_retries`), or `stop_reason: "tool_use"`, or more than 2 turns | `LlmError` ("could not produce valid structured output") | that paper is recorded as a failure and retried on a later run; the others carry on |
 | not logged in; a Claude Code too old to know a flag ("update Claude Code"); a missing binary (names `rpipe model setup`; the nightly timer often lacks `~/.local/bin` on its PATH) | `LlmError` | per-paper failure (or the run's health line says the backend is unavailable) |
 | nothing finishes in 600 s | `LlmTimeout` | recorded, the loop stops |
 

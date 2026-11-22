@@ -2,6 +2,7 @@
 
 import gc
 import json
+import os
 import shutil
 import sqlite3
 import sys
@@ -1105,7 +1106,12 @@ def _rpipe_path() -> str:
     found = shutil.which("rpipe")
     if found is None:
         raise _fail("rpipe is not on PATH. Install it first (`uv tool install .` in the repo), then retry.")
-    return found
+    return os.path.abspath(found)
+
+
+def _need_systemctl() -> None:
+    if shutil.which("systemctl") is None:
+        raise _fail("systemctl not found (is systemd available?). Nothing was written.")
 
 
 def _schedule_vault(vault: Path | None) -> Path:
@@ -1141,8 +1147,10 @@ def schedule_install(
         schedule.render_timer(time)
     except ValueError as exc:
         raise _fail(str(exc)) from exc
+    rpipe_cmd = _rpipe_path()
+    _need_systemctl()
     try:
-        written = schedule.install(path, time, schedule.default_unit_dir(), schedule.system_runner, _rpipe_path())
+        written = schedule.install(path, time, schedule.default_unit_dir(), schedule.system_runner, rpipe_cmd)
     except schedule.ScheduleError as exc:
         raise _fail(str(exc)) from exc
     for f in written:
@@ -1154,15 +1162,21 @@ def schedule_install(
 @schedule_app.command("status")
 def schedule_status() -> None:
     """Show when the timer last ran and will run next."""
-    if schedule.status(schedule.system_runner) != 0:
-        raise _fail("systemctl could not list the timer (is systemd available?).")
+    try:
+        enabled = schedule.status(schedule.system_runner)
+    except schedule.ScheduleError as exc:
+        raise _fail(str(exc)) from exc
+    if not enabled:
+        typer.echo("The nightly timer is not installed or not enabled. Run `rpipe schedule install` to set it up.")
 
 
 @schedule_app.command("remove")
 def schedule_remove() -> None:
     """Disable the timer and delete the unit files."""
     try:
-        removed = schedule.remove(schedule.default_unit_dir(), schedule.system_runner)
+        removed, warnings = schedule.remove(schedule.default_unit_dir(), schedule.system_runner)
     except schedule.ScheduleError as exc:
         raise _fail(str(exc)) from exc
+    for w in warnings:
+        typer.echo(f"warning: {w}", err=True)
     typer.echo("\n".join(f"removed {f}" for f in removed) or "nothing was installed")

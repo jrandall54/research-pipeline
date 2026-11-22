@@ -4,19 +4,20 @@
 
 `rpipe schedule` makes the pipeline run by itself every night, without cron and without you remembering. It writes two small files that tell systemd (the Linux service manager) to run `rpipe run` once a day at a time you choose (default 03:00), and switches them on.
 
-Commands (all take the time or vault as options; no file editing needed):
+Commands (`install` and `show` take `--time` and `--vault`; no file editing needed):
 
 - `rpipe schedule install [--time HH:MM] [--vault PATH]` writes the units and enables the timer.
 - `rpipe schedule show [--time HH:MM] [--vault PATH]` prints the units without writing anything, so you can review them first.
-- `rpipe schedule status` shows when the timer last fired and when it fires next.
-- `rpipe schedule remove` disables the timer and deletes both files.
+- `rpipe schedule status` shows when the timer last fired and when it fires next; if the timer is not enabled it says so and suggests `rpipe schedule install`.
+- `rpipe schedule remove` disables the timer and deletes both files (and reloads systemd only if something was removed). If disabling fails it warns and still removes the files. With nothing installed it just says so.
 
 ## How it works
 
-1. `install` finds your vault (the `--vault` option, `$RESEARCH_VAULT` or `~/research-vault`) and checks it exists. It finds the `rpipe` program with `which rpipe`; if it is not on your PATH it stops with an install hint.
+1. `install` finds your vault (the `--vault` option, `$RESEARCH_VAULT` or `~/research-vault`) and checks it exists. It finds the `rpipe` program with `which rpipe` (made absolute); if it is not on your PATH it stops with an install hint.
+1a. It checks `systemctl` exists and that the user manager answers (`systemctl --user show-environment`); if not it stops with "nothing written".
 2. It validates the time (`HH:MM`, 24-hour; `25:00` and `3am` are rejected) before touching any file.
 3. It writes `~/.config/systemd/user/research-pipeline.service` (what to run) and `research-pipeline.timer` (when to run it).
-4. It runs `systemctl --user daemon-reload` (make systemd re-read its files) and `systemctl --user enable --now research-pipeline.timer` (start now and on every login/boot). If either fails, the files stay where they are, the error says so, and you can re-run `install` after fixing the cause.
+4. It runs `systemctl --user daemon-reload` (make systemd re-read its files) and `systemctl --user enable --now research-pipeline.timer` (start now, and again at each login or boot; to run with nobody logged in you also need linger, below). If either fails, the files stay where they are, the error says so, and you can re-run `install` after fixing the cause.
 5. It prints `loginctl enable-linger $USER`. This is only printed, never run: see "Linger" below.
 
 Sample of what is generated (vault `/home/you/research vault`, `rpipe` at `/home/you/.local/bin/rpipe`):

@@ -1,5 +1,6 @@
 """Nightly scheduling via a systemd *user* timer (see docs/guide/scheduling.md)."""
 
+import os
 import re
 import subprocess
 from collections.abc import Callable
@@ -21,7 +22,10 @@ def default_unit_dir() -> Path:
 
 def system_runner(cmd: list[str]) -> int:
     """Run a command with output going straight to the terminal; return its exit code."""
-    return subprocess.run(cmd, check=False).returncode
+    try:
+        return subprocess.run(cmd, check=False).returncode
+    except OSError as exc:
+        raise ScheduleError("systemctl not found (is systemd available?)") from exc
 
 
 def _quote(text: str) -> str:
@@ -74,6 +78,9 @@ def render_timer(time: str = "03:00") -> str:
 def install(vault: Path, time: str, unit_dir: Path, runner: Runner, rpipe_cmd: str) -> list[Path]:
     service_text = render_service(vault, rpipe_cmd)
     timer_text = render_timer(time)  # validates before anything is written
+    # Probe the user manager BEFORE writing, so an unreachable systemd leaves nothing behind.
+    if runner(["systemctl", "--user", "show-environment"]) != 0:
+        raise ScheduleError("systemd user manager is not reachable (`systemctl --user` failed); nothing written.")
     unit_dir.mkdir(parents=True, exist_ok=True)
     paths = [unit_dir / SERVICE_NAME, unit_dir / TIMER_NAME]
     paths[0].write_text(service_text)
@@ -89,20 +96,25 @@ def install(vault: Path, time: str, unit_dir: Path, runner: Runner, rpipe_cmd: s
     return paths
 
 
-def remove(unit_dir: Path, runner: Runner) -> list[Path]:
-    """Disable the timer and delete the unit files; returns the files deleted."""
-    runner(["systemctl", "--user", "disable", "--now", TIMER_NAME])  # fine if never installed
-    removed = []
-    for name in (TIMER_NAME, SERVICE_NAME):
-        path = unit_dir / name
-        if path.exists():
-            path.unlink()
-            removed.append(path)
-    code = runner(["systemctl", "--user", "daemon-reload"])
-    if code != 0:
-        raise ScheduleError(f"files removed but `systemctl --user daemon-reload` failed (exit {code})")
-    return removed
+def remove(unit_dir: Path, runner: Runner) -> tuple[list[Path], list[str]]:
+    """Disable the timer and delete the unit files; returns (files deleted, warnings)."""
+    paths = [unit_dir / TIMER_NAME, unit_dir / SERVICE_NAME]
+    warnings: list[str] = []
+    present = [p for p in paths if os.path.lexists(p)]  # lexists: a broken symlink still counts
+    if present and runner(["systemctl", "--user", "disable", "--now", TIMER_NAME]) != 0:
+        warnings.append("`systemctl --user disable --now` failed; the timer may still be enabled "
+                        f"(check `systemctl --user list-timers`). Files are being removed anyway.")
+    for path in present:
+        path.unlink(missing_ok=True)
+    if present and runner(["systemctl", "--user", "daemon-reload"]) != 0:
+        warnings.append("files removed but `systemctl --user daemon-reload` failed")
+    return present, warnings
 
 
-def status(runner: Runner) -> int:
-    return runner(["systemctl", "--user", "list-timers", TIMER_NAME, "--all"])
+def status(runner: Runner) -> bool:
+    """Print the timer schedule; return False (printing nothing) when it is not enabled."""
+    if runner(["systemctl", "--user", "is-enabled", "--quiet", TIMER_NAME]) != 0:
+        return False
+    if runner(["systemctl", "--user", "list-timers", TIMER_NAME, "--all"]) != 0:
+        raise ScheduleError("systemctl could not list the timer.")
+    return True

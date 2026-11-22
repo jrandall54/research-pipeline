@@ -41,22 +41,64 @@ def test_install_writes_files_and_calls_systemctl_in_order(tmp_path):
     assert [p.name for p in paths] == ["research-pipeline.service", "research-pipeline.timer"]
     assert all(p.exists() for p in paths)
     assert "04:30:00" in paths[1].read_text()
-    assert calls == [["systemctl", "--user", "daemon-reload"],
+    assert calls == [["systemctl", "--user", "show-environment"],
+                     ["systemctl", "--user", "daemon-reload"],
                      ["systemctl", "--user", "enable", "--now", "research-pipeline.timer"]]
 
 
 def test_install_failure_raises_schedule_error(tmp_path):
     with pytest.raises(schedule.ScheduleError, match="left in place"):
-        schedule.install(tmp_path / "v", "03:00", tmp_path / "u", lambda c: 1, "/bin/rpipe")
+        schedule.install(tmp_path / "v", "03:00", tmp_path / "u",
+                         lambda c: 1 if "enable" in c else 0, "/bin/rpipe")
     assert (tmp_path / "u" / "research-pipeline.timer").exists()
+
+
+def test_failing_probe_writes_nothing(tmp_path):
+    with pytest.raises(schedule.ScheduleError, match="nothing written"):
+        schedule.install(tmp_path / "v", "03:00", tmp_path / "u", lambda c: 1, "/bin/rpipe")
+    assert not (tmp_path / "u").exists()
+
+
+def test_system_runner_missing_systemctl_raises_schedule_error(monkeypatch):
+    def boom(cmd, check):
+        raise FileNotFoundError("systemctl")
+    monkeypatch.setattr(schedule.subprocess, "run", boom)
+    with pytest.raises(schedule.ScheduleError, match="systemctl not found"):
+        schedule.system_runner(["systemctl", "--user", "x"])
 
 
 def test_remove_deletes_files(tmp_path):
     calls = []
     schedule.install(tmp_path / "v", "03:00", tmp_path / "u", lambda c: 0, "/bin/rpipe")
-    removed = schedule.remove(tmp_path / "u", lambda c: calls.append(c) or 0)
-    assert len(removed) == 2 and not list((tmp_path / "u").iterdir())
+    removed, warnings = schedule.remove(tmp_path / "u", lambda c: calls.append(c) or 0)
+    assert len(removed) == 2 and not warnings and not list((tmp_path / "u").iterdir())
     assert calls[0][:3] == ["systemctl", "--user", "disable"]
+    assert calls[-1][2] == "daemon-reload"
+
+
+def test_remove_when_nothing_installed_runs_nothing(tmp_path):
+    calls = []
+    removed, warnings = schedule.remove(tmp_path / "u", lambda c: calls.append(c) or 0)
+    assert removed == [] and warnings == [] and calls == []
+
+
+def test_remove_failing_disable_warns_but_removes(tmp_path):
+    schedule.install(tmp_path / "v", "03:00", tmp_path / "u", lambda c: 0, "/bin/rpipe")
+    removed, warnings = schedule.remove(tmp_path / "u", lambda c: 1 if "disable" in c else 0)
+    assert len(removed) == 2 and any("disable" in w for w in warnings)
+
+
+def test_remove_deletes_broken_symlink(tmp_path):
+    u = tmp_path / "u"
+    u.mkdir()
+    (u / "research-pipeline.timer").symlink_to(tmp_path / "gone")
+    removed, _ = schedule.remove(u, lambda c: 0)
+    assert len(removed) == 1 and not (u / "research-pipeline.timer").is_symlink()
+
+
+def test_status_false_when_not_enabled():
+    assert schedule.status(lambda c: 1) is False
+    assert schedule.status(lambda c: 0) is True
 
 
 @pytest.fixture
@@ -65,7 +107,7 @@ def fake(tmp_path, monkeypatch):
     unit_dir = tmp_path / "units"
     monkeypatch.setattr(schedule, "default_unit_dir", lambda: unit_dir)
     monkeypatch.setattr(schedule, "system_runner", lambda c: calls.append(c) or 0)
-    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/rpipe")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: f"/usr/bin/{name}")
     init_vault(tmp_path / "v", topics=["x"])
     return calls, unit_dir, tmp_path / "v"
 
@@ -104,3 +146,42 @@ def test_cli_remove_and_status(fake):
     assert runner.invoke(cli.app, ["schedule", "status"]).exit_code == 0
     assert runner.invoke(cli.app, ["schedule", "remove"]).exit_code == 0
     assert not list(unit_dir.iterdir())
+
+
+def _boom(cmd):
+    raise schedule.ScheduleError("systemctl not found (is systemd available?)")
+
+
+def test_cli_systemctl_absent(fake, monkeypatch):
+    calls, unit_dir, vault = fake
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None if name == "systemctl" else "/usr/bin/rpipe")
+    res = runner.invoke(cli.app, ["schedule", "install", "--vault", str(vault)])
+    assert res.exit_code == 1 and "systemctl not found" in res.output
+    assert not unit_dir.exists()
+    monkeypatch.setattr(schedule, "system_runner", _boom)
+    for sub in ("remove", "status"):
+        (unit_dir).mkdir(exist_ok=True)
+        if sub == "remove":
+            (unit_dir / "research-pipeline.timer").write_text("x")
+        res = runner.invoke(cli.app, ["schedule", sub])
+        assert res.exit_code == 1 and "systemctl not found" in res.output
+        assert "Traceback" not in res.output
+
+
+def test_cli_install_failure_reports_files_left(fake, monkeypatch):
+    calls, unit_dir, vault = fake
+    monkeypatch.setattr(schedule, "system_runner", lambda c: 1 if "enable" in c else 0)
+    res = runner.invoke(cli.app, ["schedule", "install", "--vault", str(vault)])
+    assert res.exit_code == 1 and "left in place" in res.output
+    assert (unit_dir / "research-pipeline.timer").exists()
+
+
+def test_cli_status_not_installed_hints_install(fake, monkeypatch):
+    monkeypatch.setattr(schedule, "system_runner", lambda c: 1)
+    res = runner.invoke(cli.app, ["schedule", "status"])
+    assert res.exit_code == 0 and "rpipe schedule install" in res.output
+
+
+def test_cli_remove_nothing_installed(fake):
+    res = runner.invoke(cli.app, ["schedule", "remove"])
+    assert res.exit_code == 0 and "nothing was installed" in res.output

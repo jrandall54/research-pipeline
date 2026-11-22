@@ -3,10 +3,11 @@
 import gc
 import json
 import os
-import tempfile
 import shutil
+import signal
 import sqlite3
 import sys
+import tempfile
 from contextlib import contextmanager
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -1200,6 +1201,7 @@ def serve_cmd(
         raise _fail("Datasette is not installed. Install it with: uv sync --extra serve")
     fd, name = tempfile.mkstemp(prefix="rpipe-datasette-", suffix=".json")
     meta = Path(name)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))  # so the finally below still runs
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(serve_mod.build_metadata(), f)

@@ -1,5 +1,6 @@
-import sqlite3
+import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,22 @@ def _fake(stdout="", returncode=0, raises=None):
     return run
 
 
-@pytest.mark.parametrize("bad", ["0.0.0.0", "::", "[::]", " 0.0.0.0 "])
+BAD = ["", " ", "0", "0.0.0.0", "0.0.0", "::", "::0", "[::]", "[::0]", "0:0:0:0:0:0:0:0",
+       "::ffff:0.0.0.0", "192.168.1.5", "8.8.8.8", "example.com"]
+GOOD = ["localhost", "127.0.0.1", "::1", "100.64.0.5", "100.127.255.254", "fd7a:115c:a1e0::1"]
+
+
+@pytest.mark.parametrize("good", GOOD)
+def test_allowlist_accepts(good):
+    assert serve.resolve_host(good, _fake(raises=AssertionError)) == good
+
+
+def test_tailscale_result_is_checked():
+    with pytest.raises(serve.ServeError):
+        serve.resolve_host(None, _fake("0.0.0.0\n"))
+
+
+@pytest.mark.parametrize("bad", BAD)
 def test_refuses_all_interfaces(bad):
     with pytest.raises(serve.ServeError):
         serve.resolve_host(bad, _fake("100.64.0.5\n"))
@@ -97,6 +113,8 @@ def test_read_queries_run(tmp_path):
 
 def test_command_argv(tmp_path):
     argv = serve.command(Path("/v/vault.sqlite"), "100.64.0.5", 8001, Path("/t/m.json"))
+    assert argv == [sys.executable, "-m", "datasette", "serve", "/v/vault.sqlite",
+                    "--host", "100.64.0.5", "--port", "8001", "--metadata", "/t/m.json"]
     assert argv[:2] == ["datasette", "serve"] or argv[1:3] == ["-m", "datasette"]
     assert "/v/vault.sqlite" in argv and "/t/m.json" in argv
     assert argv[argv.index("--host") + 1] == "100.64.0.5"
@@ -134,3 +152,12 @@ def test_cli_refuses_all_interfaces(tmp_path):
     init_vault(tmp_path / "v")
     r = runner.invoke(cli.app, ["serve", "--host", "0.0.0.0", "--vault", str(tmp_path / "v")])
     assert r.exit_code == 1
+
+
+def test_metadata_is_json_and_write_flags():
+    meta = json.loads(json.dumps(serve.build_metadata()))
+    queries = meta["databases"]["vault"]["queries"]
+    assert {n for n, q in queries.items() if q.get("write") is True} == {
+        "vote_up", "vote_down", "vote_clear", "save", "unsave"}
+    assert all("write" not in q for n, q in queries.items() if n in ("todays_digest", "saved"))
+    assert all("on_success_message" in queries[n] for n in ("save", "unsave", "vote_up"))

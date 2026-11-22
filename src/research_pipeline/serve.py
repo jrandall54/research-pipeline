@@ -5,6 +5,7 @@ started as a separate process, so this module only builds its metadata and comma
 """
 
 import importlib.util
+import ipaddress
 import subprocess
 import sys
 from collections.abc import Callable
@@ -15,7 +16,8 @@ Runner = Callable[[list[str]], subprocess.CompletedProcess]
 # Same format as db._now(): 2026-11-21T09:30:00+00:00
 _TS = "strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now')"
 _EXISTS = "EXISTS (SELECT 1 FROM papers WHERE id = :paper_id)"
-_FORBIDDEN_HOSTS = {"0.0.0.0", "::", "[::]"}
+_TAILSCALE_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+_ALLOWED = "localhost, a loopback address (127.0.0.0/8, ::1), or a Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48)"
 
 
 class ServeError(Exception):
@@ -56,11 +58,13 @@ def build_metadata() -> dict:
             "write": True,
             "sql": f"INSERT OR IGNORE INTO saves (paper_id, created_at) "
             f"SELECT :paper_id, {_TS} WHERE {_EXISTS}",
+            "on_success_message": "Saved",
         },
         "unsave": {
             "title": "Unsave paper",
             "write": True,
             "sql": "DELETE FROM saves WHERE paper_id = :paper_id",
+            "on_success_message": "Unsaved",
         },
     }
     return {"title": "Research vault", "databases": {"vault": {"queries": queries}}}
@@ -68,6 +72,30 @@ def build_metadata() -> dict:
 
 def system_runner(argv: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)
+
+
+def check_host(host: str) -> str:
+    """Allowlist: localhost, loopback IPs and Tailscale IPs only. Anything else is refused."""
+    h = host.strip()
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    if h == "localhost":
+        return h
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if getattr(ip, "ipv4_mapped", None) is None and (
+            ip.is_loopback or any(ip in net for net in _TAILSCALE_NETS if net.version == ip.version)
+        ):
+            return h
+        reason = "is not a loopback or Tailscale address"
+    else:
+        reason = "is not an IP address (or localhost)"
+    raise ServeError(
+        f"Refusing to listen on {host!r}: it {reason}, and this server has no login. Allowed: {_ALLOWED}."
+    )
 
 
 def tailscale_ip(runner: Runner) -> str:
@@ -79,19 +107,11 @@ def tailscale_ip(runner: Runner) -> str:
     lines = (result.stdout or "").strip().splitlines()
     if result.returncode != 0 or not lines:
         raise ServeError(msg)
-    return lines[0].strip()
+    return check_host(lines[0])
 
 
 def resolve_host(host: str | None, runner: Runner) -> str:
-    if host is None:
-        return tailscale_ip(runner)
-    host = host.strip()
-    if host in _FORBIDDEN_HOSTS:
-        raise ServeError(
-            "Refusing to listen on all interfaces: this server has no login. "
-            "Use the Tailscale address (the default) or 127.0.0.1."
-        )
-    return host
+    return tailscale_ip(runner) if host is None else check_host(host)
 
 
 def command(vault_db: Path, host: str, port: int, metadata_path: Path) -> list[str]:

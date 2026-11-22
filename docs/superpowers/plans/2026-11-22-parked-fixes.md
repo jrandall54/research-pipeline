@@ -93,3 +93,11 @@ No production code changes except where a tightened test exposes a real bug (fix
 - `tests/test_onboarding.py`: one-line comment on the seed-query test explaining ESC becomes a space while `[31m` stays.
 - `docs/guide/profile.md` normalisation table: state that ZWJ/ZWNJ (U+200D/U+200C) are deliberately kept (needed for Persian, Indic and emoji text), and describe the bidi example in words rather than a literal invisible character. Add a test that ZWJ/ZWNJ survive.
 - Add tests that `add_author` and `add_keyword` strip these characters (the docs claim they do).
+
+### Task 7 addendum 3 (carried from Task 5 review, Minor)
+
+- `docs/guide/llm.md`: confirm it says the 900 s/10 s deadline is enforced between requests and can overshoot by up to the 30 s unload / loaded-models timeouts (`ollama_fit.py` `_unload`, `loaded_models` ignore the session cap); add the sentence if missing.
+- `tests/test_ollama_fit.py::test_failed_unload_warns_once_per_session`: strengthen `"m" in warnings[0]` to `"could not unload m"`.
+- Add a CLI-level test that `rpipe model show` prints the "last choice: unknown. Ollama did not answer in time" output when probing times out.
+- `cli.py` ~982: the `ProbeTimeout` branch in `model show` returns before any other output; check whether showing the rest of `model show` (model, server, context) first is better, and keep it if intended (say so in the report).
+- `ollama_fit.py` ~333: a hand-edited pinned `num_ctx` below 8192 is cached then rejected every load (re-probe each night). Make `_in_bounds` apply the floor only to auto-chosen values, or document the behaviour in llm.md.

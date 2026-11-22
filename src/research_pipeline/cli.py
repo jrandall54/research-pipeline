@@ -68,7 +68,7 @@ from research_pipeline.models import Config, PaperMeta, Profile, Section
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
-from research_pipeline.review import later_queue, queue_progress, review_queue
+from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
 from research_pipeline.run_lock import RunLocked, run_lock
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
@@ -1946,6 +1946,29 @@ def review(
         typer.echo(f"Voted {voted}, skipped {skipped} this session. {left} left in the queue.")
         if aborted:
             raise typer.Abort()
+    finally:
+        ctx.conn.close()
+
+
+@app.command("show")
+def show(
+    papers: Annotated[list[str] | None, typer.Argument(help="Paper ids or parts of titles.")] = None,
+    recent: Annotated[int | None, typer.Option("--recent", help="Show every paper of the latest N digests (N is 1 or more).")] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Print a paper's summary and critique. Read-only: no voting."""
+    if not papers and recent is None:
+        raise _fail("Say which paper: `rpipe show ID_OR_TITLE`, or `rpipe show --recent 1` for the latest digest.")
+    if recent is not None and recent < 1:
+        raise _fail("--recent must be 1 or more.")
+    ctx = _open(vault)
+    try:
+        pids = [_resolve_paper(ctx.conn, p) for p in papers or []]
+        rows = [get_paper(ctx.conn, pid) for pid in pids]
+        if recent is not None:
+            rows += recent_digest_papers(ctx.conn, recent)
+        for row in rows:
+            _show_paper(ctx.conn, row, f"Paper {row['id']}")
     finally:
         ctx.conn.close()
 

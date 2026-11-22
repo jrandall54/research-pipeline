@@ -41,3 +41,14 @@ def queue_progress(conn: sqlite3.Connection, digest_date: str) -> tuple[int, int
         (digest_date,),
     ).fetchone()
     return int(row[1]), int(row[0])
+
+
+def recent_digest_papers(conn: sqlite3.Connection, n: int) -> list[sqlite3.Row]:
+    """Papers of the latest `n` distinct digest dates: newest date first, digest order within a date."""
+    return conn.execute(
+        "SELECT * FROM papers WHERE digest_date IN"
+        " (SELECT DISTINCT digest_date FROM papers WHERE digest_date IS NOT NULL"
+        "  ORDER BY digest_date DESC LIMIT ?)"
+        " ORDER BY digest_date DESC, triage_score DESC, id ASC",
+        (n,),
+    ).fetchall()

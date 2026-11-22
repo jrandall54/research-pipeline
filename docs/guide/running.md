@@ -56,6 +56,7 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 | `triage` | rank the `new` papers, keep the top N | statuses, scores, reasons, embeddings |
 | `summarize` | summarise and critique every paper still waiting (`triaged`, `fetched`, or in today's digest without a summary) with the local model (fetching arXiv HTML full text first; abstract only if there is none) | full texts, summaries, statuses `fetched` then `summarized` |
 | `runs [--limit N]` | list recent runs, newest first | nothing |
+| `serve [--host H] [--port 8001]` | browse the vault and vote/save from a phone with Datasette over Tailscale (needs `uv sync --extra serve`; see [browsing.md](browsing.md)) | `votes`, `saves` (only when you press a button) |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
 **The summarize stage.** `rpipe run` checks that Ollama is up and the model installed before this stage. If not, it skips the stage, records the cause in the health line and `runs.errors`, and still writes the digest (abstracts only), so a stopped Ollama never costs you the night's digest. A single paper that fails (model error, network error fetching its text) keeps its status, gets its `error` and `retry_count` set, and the rest carry on.

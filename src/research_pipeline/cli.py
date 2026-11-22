@@ -3,6 +3,7 @@
 import gc
 import json
 import os
+import tempfile
 import shutil
 import sqlite3
 import sys
@@ -24,7 +25,7 @@ from research_pipeline.gold import GOLD_TARGET, GoldPaper, add_fact, add_gold, h
 from research_pipeline.llm import LLM, LlmError, OllamaClient
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline import ollama_fit, profile_edit, schedule
+from research_pipeline import ollama_fit, profile_edit, schedule, serve as serve_mod
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.sources.arxiv import ArxivSource
@@ -1180,3 +1181,31 @@ def schedule_remove() -> None:
     for w in warnings:
         typer.echo(f"warning: {w}", err=True)
     typer.echo("\n".join(f"removed {f}" for f in removed) or "nothing was installed")
+
+
+@app.command("serve")
+def serve_cmd(
+    host: Annotated[str | None, typer.Option(help="Address to listen on (default: this machine's Tailscale IPv4).")] = None,
+    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8001,
+    vault: VaultOption = None,
+) -> None:
+    """Browse the vault and vote/save from a phone with Datasette (private network only; no login)."""
+    ctx = _open(vault)  # applies WAL mode and schema upgrades before Datasette sees the file
+    ctx.conn.close()
+    try:
+        bind = serve_mod.resolve_host(host, serve_mod.system_runner)
+    except serve_mod.ServeError as exc:
+        raise _fail(str(exc)) from exc
+    if not serve_mod.datasette_available():
+        raise _fail("Datasette is not installed. Install it with: uv sync --extra serve")
+    fd, name = tempfile.mkstemp(prefix="rpipe-datasette-", suffix=".json")
+    meta = Path(name)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(serve_mod.build_metadata(), f)
+        typer.echo(f"Serving {ctx.vault / 'vault.sqlite'} at http://{bind}:{port}/ (no login: reachable by anyone who can reach this address)")
+        code = serve_mod.run_datasette(serve_mod.command(ctx.vault / "vault.sqlite", bind, port, meta))
+    finally:
+        meta.unlink(missing_ok=True)
+    if code:
+        raise typer.Exit(code=code)

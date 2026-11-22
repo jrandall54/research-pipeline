@@ -143,3 +143,9 @@
 **Linger** — `loginctl enable-linger $USER`: keeps your user services running while you are logged out, so the nightly timer fires with nobody logged in. `rpipe schedule install` prints it but never runs it. See `scheduling.md`.
 
 **`Type=oneshot`** — a service that runs to completion and exits; systemd treats it as finished when the process ends. See `scheduling.md`.
+
+**Datasette** — an open-source tool that serves a SQLite file as a website you can browse and query. `rpipe serve` runs it (optional extra `serve`). See `browsing.md`.
+
+**Tailscale** — a private network between your own devices; each gets a stable address (the `100.x.y.z` one `tailscale ip -4` prints), reachable only by devices on your tailnet. `rpipe serve` listens only on that address. See `browsing.md`.
+
+**Canned query** — a named SQL statement stored in Datasette's metadata and shown as a page or button; with `write: true` it can change data (our vote and save buttons). See `browsing.md`.

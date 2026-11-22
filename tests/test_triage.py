@@ -97,3 +97,19 @@ def test_skipped_papers_still_in_fts(conn, embedder):
     assert get_paper(conn, "2501.00004")["status"] == "skipped"
     hits = conn.execute("SELECT rowid FROM papers_fts WHERE papers_fts MATCH 'gardening'").fetchall()
     assert len(hits) == 1
+
+
+def test_votes_and_saves_reach_ranking(conn, embedder):
+    from research_pipeline.db import record_vote, set_saved
+    fill(conn)
+    profile = Profile(topics=[], seeds=[], top_n=10)
+    run_triage(conn, embedder, profile, {})  # embeds everything
+    base = get_paper(conn, "2501.00003")["triage_score"]
+    record_vote(conn, "2501.00001", 1)
+    set_saved(conn, "2501.00001", True)
+    conn.execute("UPDATE papers SET status = 'new'")
+    conn.commit()
+    run_triage(conn, embedder, profile, {})
+    row = get_paper(conn, "2501.00003")
+    assert row["triage_score"] > base
+    assert "liked similar: 2501.00001" in json.loads(row["triage_reasons"])

@@ -202,6 +202,16 @@ def test_set_top_n(vault):
     assert res.exit_code == 1 and "Traceback" not in res.output
 
 
+def test_set_feedback_halflife_validates(vault):
+    for bad in ("0", "abc", "5000"):
+        res = run(vault, "set-feedback-halflife", bad)
+        assert res.exit_code != 0 and "Traceback" not in res.output
+    assert load_profile(vault / "profile.yaml").feedback_halflife_days == 60.0
+    res = run(vault, "set-feedback-halflife", "30")
+    assert res.exit_code == 0 and "30" in res.output
+    assert load_profile(vault / "profile.yaml").feedback_halflife_days == 30.0
+
+
 def test_set_categories_and_invalid_exit_1(vault):
     res = run(vault, "set-categories", "cs.CR", "stat.ML")
     assert res.exit_code == 0 and "cs.CR, stat.ML" in res.output

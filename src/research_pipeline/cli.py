@@ -355,6 +355,7 @@ def profile_show(vault: VaultOption = None) -> None:
     typer.echo(f"Followed authors:\n{_numbered(profile.followed_authors)}")
     typer.echo(f"Keywords:\n{_numbered(profile.keywords)}")
     typer.echo(f"Top N: {profile.top_n}")
+    typer.echo(f"Feedback half-life: {profile.feedback_halflife_days:g} days")
     typer.echo(f"arXiv categories: {_categories_text(ctx.config.arxiv_categories)}")
 
 
@@ -510,6 +511,18 @@ def profile_set_top_n(
     with _clean_errors():
         profile_edit.set_top_n(ctx.vault, n)
     typer.echo(f"top_n is now {n}.")
+
+
+@profile_app.command("set-feedback-halflife")
+def profile_set_feedback_halflife(
+    days: Annotated[str, typer.Argument(help="Days until a vote or save counts half as much (1 to 3650).")],
+    vault: VaultOption = None,
+) -> None:
+    """Set how fast old votes and saves fade from your implicit profile."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_feedback_halflife(ctx.vault, days)
+    typer.echo(f"feedback_halflife_days is now {float(days):g}.")
 
 
 @profile_app.command("set-categories")

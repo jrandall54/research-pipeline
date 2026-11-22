@@ -121,3 +121,9 @@
 **Vote** — your thumbs up or down on a digest paper, recorded with `rpipe vote`. Votes are appended, never overwritten: the latest one counts and `clear` records a neutral vote. See `digest.md`.
 
 **Save** — a bookmark on a paper (`rpipe save`), shown as `★ saved` in later digests and listed by `rpipe feedback`. See `digest.md`.
+
+**Implicit profile** — what your behaviour says you like (papers you up-voted or saved), as opposed to the explicit profile you wrote (seeds, topics). Triage nudges scores toward papers similar to your likes and away from your dislikes. See `triage.md`.
+
+**Decay** — old feedback counting for less over time: a vote's weight is `0.5 ** (age / half-life)`. See `triage.md`.
+
+**Half-life** — the number of days after which a vote or save counts half as much (`feedback_halflife_days`, default 60; set with `rpipe profile set-feedback-halflife`). See `triage.md`.

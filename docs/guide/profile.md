@@ -4,7 +4,7 @@
 
 The **profile** (`profile.yaml` in your vault) says what you care about: topics, seed papers, followed authors, keywords and how many papers to keep per digest. `top_n` is in `profile.yaml`; the arXiv categories are in `config.yaml`, which the same library edits. `src/research_pipeline/profile_edit.py` is the small library that changes these files safely. The `rpipe profile ...` commands (documented in the command reference below) are thin wrappers around it, so nobody has to open a YAML file in an editor.
 
-Each function takes the vault folder and changes one thing: `add_topic`, `remove_topic`, `add_author`, `remove_author`, `add_keyword`, `remove_keyword`, `add_seed_id`, `remove_seed`, `set_top_n`, `set_categories`. The `add_*` and `remove_*` ones return `True` if the file changed and `False` if it was already in that state (adding something twice, removing something that is not there), so a command can say "already there" instead of failing.
+Each function takes the vault folder and changes one thing: `add_topic`, `remove_topic`, `add_author`, `remove_author`, `add_keyword`, `remove_keyword`, `add_seed_id`, `remove_seed`, `set_top_n`, `set_feedback_halflife`, `set_categories`. The `add_*` and `remove_*` ones return `True` if the file changed and `False` if it was already in that state (adding something twice, removing something that is not there), so a command can say "already there" instead of failing.
 
 ## How it works
 
@@ -109,6 +109,7 @@ Every command takes `--vault PATH` (same resolution as `init`). Messages are pla
 | `rpipe profile add-seed INPUT [--yes]` | Add a seed from an arXiv link, id or title (see "Adding a seed"). `--yes` skips the question and takes the only (or first) match. |
 | `rpipe profile remove-seed ID_OR_NUMBER` | Remove a seed by id or by its number in `show`. |
 | `rpipe profile set-top-n N` | Papers kept per digest (at least 1). |
+| `rpipe profile set-feedback-halflife DAYS` | Days until a vote or save counts half as much in the implicit profile (1 to 3650, default 60; see `triage.md`). Stored as `feedback_halflife_days`. |
 | `rpipe profile set-categories CAT [CAT ...]` | Replace the arXiv categories (`cs.CR stat.ML hep-th`), or give the single word `all` for every computer-science category (`cs.*`). `--help` explains what a category is. |
 
 Sample session (vault freshly made by `rpipe init`):
@@ -138,6 +139,7 @@ Followed authors:
 Keywords:
   (none)
 Top N: 10
+Feedback half-life: 60 days
 arXiv categories: cs.LG, cs.CL, cs.CR, cs.OS, cs.SE
 ```
 

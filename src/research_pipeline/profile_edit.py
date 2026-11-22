@@ -224,6 +224,22 @@ def set_top_n(vault: Path, n: int) -> None:
     _edit(_profile_path(vault), Profile, change)
 
 
+def set_feedback_halflife(vault: Path, days: float | str) -> None:
+    """Days after which a vote or save counts half as much (1 to 3650)."""
+    try:
+        value = float(days)
+    except (TypeError, ValueError):
+        raise ValueError(f"{days!r} is not a number of days (give 1 to 3650, for example 60)") from None
+    if not 1 <= value <= 3650:  # also rejects nan
+        raise ValueError(f"{days!r} is out of range: give a number of days from 1 to 3650")
+
+    def change(data) -> bool:
+        data["feedback_halflife_days"] = value
+        return True
+
+    _edit(_profile_path(vault), Profile, change)
+
+
 def set_categories(vault: Path, cats: list[str]) -> None:
     path = _config_path(vault)
     cleaned = [c.strip() for c in cats]

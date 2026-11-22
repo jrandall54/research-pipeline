@@ -7,7 +7,16 @@ import pytest
 from research_pipeline.db import get_paper, open_db, upsert_paper
 from research_pipeline.embed import SentenceTransformerEmbedder
 from research_pipeline.models import PaperMeta, Profile
-from research_pipeline.rank import ProfileVectors, build_profile_vectors, score_papers
+from datetime import UTC, datetime
+
+from research_pipeline.rank import (
+    FEEDBACK_BOOST,
+    FeedbackVectors,
+    ProfileVectors,
+    build_feedback_vectors,
+    score_papers,
+    build_profile_vectors,
+)
 
 
 def make_rows(tmp_path, papers):
@@ -158,3 +167,78 @@ def test_popular_paper_cannot_beat_a_clearly_closer_one_at_realistic_similarity_
     rows = make_rows(tmp_path, [meta("2501.00001", "close"), meta("2501.00002", "viral", hf_upvotes=42)])
     ranked = score_papers(rows, np.stack([vec(0.85), vec(0.75)]), profile, pv)
     assert ranked[0].id == "2501.00001"
+
+
+# ---------------------------------------------------------------- implicit profile (feedback)
+
+NOW = datetime(2026, 11, 21, 12, 0, 0, tzinfo=UTC)
+EMPTY_PV = ProfileVectors([], np.zeros((0, 0)), [], np.zeros((0, 0)))
+E1, E2 = np.array([1.0, 0.0]), np.array([0.0, 1.0])
+
+
+def fb_score(tmp_path, feedback, vecs=(E1, E2)):
+    sub = tmp_path / f"db{len(list(tmp_path.iterdir()))}"
+    sub.mkdir()
+    rows = make_rows(sub, [meta("2501.00001", "Alpha"), meta("2501.00002", "Beta")])
+    return {s.id: s for s in score_papers(rows, np.array(vecs), Profile(topics=[], seeds=[]),
+                                          EMPTY_PV, feedback)}
+
+
+def row(pid, vote, created="2026-11-21T12:00:00+00:00"):
+    return {"paper_id": pid, "vote": vote, "created_at": created}
+
+
+def test_liked_neighbour_scores_higher(tmp_path):
+    fv = build_feedback_vectors([row("L", 1)], [], {"L": E1}, 60.0, NOW)
+    got = fb_score(tmp_path, fv)
+    assert got["2501.00001"].score > got["2501.00002"].score
+    assert "liked similar: L" in got["2501.00001"].reasons
+
+
+def test_disliked_neighbour_scores_lower(tmp_path):
+    fv = build_feedback_vectors([row("D", -1)], [], {"D": E1}, 60.0, NOW)
+    got = fb_score(tmp_path, fv)
+    assert got["2501.00001"].score < got["2501.00002"].score
+    assert "disliked similar: D" in got["2501.00001"].reasons
+
+
+def test_old_vote_decays(tmp_path):
+    base = fb_score(tmp_path, None)["2501.00001"].score
+    fresh = build_feedback_vectors([row("L", 1)], [], {"L": E1}, 60.0, NOW)
+    old = build_feedback_vectors([row("L", 1, "2026-09-22T12:00:00+00:00")], [], {"L": E1}, 60.0, NOW)
+    assert old.liked[0][2] == pytest.approx(0.5 ** (60 / 60.0))  # 60 days = 1 half-life
+    gain_fresh = fb_score(tmp_path, fresh)["2501.00001"].score - base
+    gain_old = fb_score(tmp_path, old)["2501.00001"].score - base
+    assert gain_fresh == pytest.approx(FEEDBACK_BOOST * 1.0, abs=1e-9)
+    assert abs(gain_old / gain_fresh - 0.5) < 1e-9
+
+
+@pytest.mark.parametrize("stamp", ["2026-11-21 12:00:00", "2026-11-21T12:00:00Z", "2026-11-21T12:00:00+00:00"])
+def test_timestamp_forms_tolerated(stamp):
+    fv = build_feedback_vectors([row("L", 1, stamp)], [], {"L": E1}, 60.0, NOW)
+    assert fv.liked[0][2] == pytest.approx(1.0)
+
+
+def test_vote_without_embedding_ignored(tmp_path):
+    fv = build_feedback_vectors([row("X", 1), row("Y", -1)], [row("X", 1)], {}, 60.0, NOW)
+    assert fv.liked == [] and fv.disliked == []
+    assert fb_score(tmp_path, fv)["2501.00001"].reasons == []
+
+
+def test_upvote_and_save_count_once_with_max_weight():
+    saves = [{"paper_id": "L", "created_at": "2026-11-21T12:00:00+00:00"}]
+    fv = build_feedback_vectors([row("L", 1, "2026-09-22T12:00:00+00:00")], saves, {"L": E1}, 60.0, NOW)
+    assert len(fv.liked) == 1 and fv.liked[0][2] == pytest.approx(1.0)
+
+
+def test_save_alone_is_liked():
+    saves = [{"paper_id": "S", "created_at": "2026-11-21T12:00:00+00:00"}]
+    fv = build_feedback_vectors([], saves, {"S": E1}, 60.0, NOW)
+    assert [x[0] for x in fv.liked] == ["S"]
+
+
+def test_no_feedback_scores_unchanged(tmp_path):
+    a = fb_score(tmp_path, None)
+    b = fb_score(tmp_path, FeedbackVectors([], []))
+    assert {k: v.score for k, v in a.items()} == {k: v.score for k, v in b.items()}
+    assert all(v.reasons == [] for v in a.values())

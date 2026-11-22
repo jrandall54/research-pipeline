@@ -4,7 +4,8 @@ import json
 import logging
 import math
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -23,7 +24,15 @@ AUTHOR_BOOST = 0.02  # per followed author on the paper: a clear nudge, about ha
 KEYWORD_BOOST = 0.01  # per keyword found in title/abstract: weak, keywords are blunt
 KEYWORD_BOOST_CAP = 0.04  # many keywords must not swamp similarity
 MY_WORK_WEIGHT = 0.0  # TODO(phase4): similarity to the user's own notes in my_work/
-VOTE_PENALTY = 0.0  # TODO(phase3): penalty for topics the user has downvoted
+# Implicit profile (votes and saves). The term is FEEDBACK x (decayed similarity to your liked
+# papers, divided by how many there are), so it is a taste signal, not a similarity replacement.
+# A paper identical to one fresh like gains the full 0.20; one at similarity 0.6 (the typical
+# "unrelated" level) gains 0.12. The gap between a near neighbour and an average paper is
+# 0.2 x ~0.2 = ~0.04, about one standard deviation of similarity: enough to reorder close
+# calls, not enough to override a clear topical gap. Dislikes are slightly weaker (0.15)
+# because a downvote is often "not today" rather than "never".
+FEEDBACK_BOOST = 0.20
+FEEDBACK_PENALTY = 0.15
 
 
 @dataclass
@@ -35,10 +44,71 @@ class ProfileVectors:
 
 
 @dataclass
+class FeedbackVectors:
+    """Papers you voted on or saved: (paper id, embedding, decayed weight)."""
+
+    liked: list[tuple[str, np.ndarray, float]] = field(default_factory=list)
+    disliked: list[tuple[str, np.ndarray, float]] = field(default_factory=list)
+
+
+@dataclass
 class ScoredPaper:
     id: str
     score: float
     reasons: list[str]
+
+
+def _age_days(stamp: str, now: datetime) -> float:
+    """Days between a stored timestamp and `now`; accepts 'T'/space and 'Z'/offset/naive forms."""
+    t = datetime.fromisoformat(str(stamp).strip().replace("Z", "+00:00"))
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=UTC)
+    return max(0.0, (now - t).total_seconds() / 86400)
+
+
+def build_feedback_vectors(
+    votes,
+    saves,
+    embeddings_by_id: dict[str, np.ndarray],
+    halflife_days: float,
+    now: datetime,
+) -> FeedbackVectors:
+    """Turn current votes and saves into weighted vectors; weight = 0.5 ** (age / half-life).
+
+    An up vote and a save both have base weight 1.0; a paper that is both counts once, at the
+    fresher (larger) weight. A down vote wins over a save of the same paper. Papers with no
+    embedding are skipped.
+    """
+    liked: dict[str, float] = {}
+    disliked: dict[str, float] = {}
+
+    def weight(stamp: str) -> float:
+        return 0.5 ** (_age_days(stamp, now) / halflife_days)
+
+    for r in votes:
+        pid = r["paper_id"]
+        if pid not in embeddings_by_id:
+            continue
+        (liked if r["vote"] > 0 else disliked)[pid] = weight(r["created_at"])
+    for r in saves:
+        pid = r["paper_id"]
+        if pid in embeddings_by_id and pid not in disliked:
+            liked[pid] = max(liked.get(pid, 0.0), weight(r["created_at"]))
+    return FeedbackVectors(
+        [(p, embeddings_by_id[p], w) for p, w in liked.items()],
+        [(p, embeddings_by_id[p], w) for p, w in disliked.items()],
+    )
+
+
+def _feedback_term(
+    vec: np.ndarray, group: list[tuple[str, np.ndarray, float]]
+) -> tuple[float, str | None]:
+    """(sum of weight x similarity) / count, plus the id contributing most."""
+    if not group:
+        return 0.0, None
+    contrib = [(w * float(v @ vec), pid) for pid, v, w in group]
+    best = max(contrib, key=lambda c: c[0])[1]
+    return sum(c for c, _ in contrib) / len(group), best
 
 
 def build_profile_vectors(
@@ -77,6 +147,7 @@ def score_papers(
     paper_vecs: np.ndarray,
     profile: Profile,
     profile_vecs: ProfileVectors,
+    feedback: FeedbackVectors | None = None,
 ) -> list[ScoredPaper]:
     """Score papers; best first, ties broken by id for determinism."""
     followed = {a.lower(): a for a in profile.followed_authors}
@@ -103,7 +174,14 @@ def score_papers(
         score += min(kw_boost, KEYWORD_BOOST_CAP)
 
         score += MY_WORK_WEIGHT * 0.0  # TODO(phase4)
-        score -= VOTE_PENALTY * 0.0  # TODO(phase3)
+        if feedback:
+            liked, liked_id = _feedback_term(vec, feedback.liked)
+            disliked, disliked_id = _feedback_term(vec, feedback.disliked)
+            score += FEEDBACK_BOOST * liked - FEEDBACK_PENALTY * disliked
+            if liked_id:
+                reasons.append(f"liked similar: {liked_id}")
+            if disliked_id:
+                reasons.append(f"disliked similar: {disliked_id}")
         out.append(ScoredPaper(row["id"], score, reasons))
 
     out.sort(key=lambda s: (-s.score, s.id))

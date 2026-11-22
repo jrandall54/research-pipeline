@@ -57,7 +57,8 @@ score = max over seeds & topics of cosine(paper, profile item)
       + 0.02 × (number of followed authors on the paper)
       + min(0.04, 0.01 × (number of keywords found in title/abstract))
       + 0.0  (my_work similarity, Phase 4)
-      − 0.0  (downvote penalty, Phase 3)
+      + 0.20 × (decayed similarity to papers you liked, ÷ how many)
+      − 0.15 × (decayed similarity to papers you disliked, ÷ how many)
 ```
 
 **Scale matters.** Cosine similarity is *not* spread over 0 to 1 in practice. It can in principle be anywhere from -1 to 1 (we do not clamp it, so an unrelated paper can score below 0 before boosts), but real embedding models bunch related-sounding text together. In the first real run (about 340 papers, `bge-small`) similarity ran from 0.57 to 0.85 with a standard deviation of only 0.045: *every* paper that mentions LLMs looks fairly similar to an LLM seed. The first version of the weights used boosts up to 0.19 for a 42-upvote paper, which is four standard deviations, and the top of the digest filled with popular papers off your topics. The boosts below are sized against that real spread, so they reorder close calls but do not override a clear similarity gap.
@@ -69,13 +70,14 @@ score = max over seeds & topics of cosine(paper, profile item)
 | Followed author | 0.02 each | Worth about half a standard deviation of similarity: a clear nudge, not decisive. Case-insensitive exact name match (no fuzzy matching, so "Ada Lovelace Jr" does not match "Ada Lovelace"). |
 | Keyword | 0.01 each, capped at 0.04 | Keywords are blunt (a word can appear in an unrelated paper), so each is a nudge and four of them are the most you can get. Each keyword counts once; matching is case-insensitive substring in title or abstract. |
 | my_work | 0.0 (stub) | `TODO(phase4)`: similarity to your own notes. |
-| Vote penalty | 0.0 (stub) | `TODO(phase3)`: penalty for topics you downvote. |
+| Liked papers | +0.20 × mean | Your **implicit profile**: papers you up-voted or saved (`rpipe vote`, `rpipe save`). For each liked paper, similarity × its decay weight; summed and divided by the number of liked papers. A paper almost identical to one fresh like gains 0.20; one at the typical unrelated similarity of 0.6 gains 0.12, so the real difference between a near neighbour and an average paper is about 0.2 × 0.2 = 0.04, roughly one standard deviation of similarity: it reorders close calls without overriding a clear topical gap. |
+| Disliked papers | −0.15 × mean | Same calculation over down-voted papers, slightly weaker because a downvote is often "not today" rather than "never". |
 
 The weights are named constants at the top of `rank.py`; if you change the embedding model, re-check the similarity spread first, because a model with a wider spread can carry larger boosts.
 
 ### Reasons
 
-Each paper gets reasons in this order: one similarity reason for the best match, formatted `closest seed: <id> (0.71)` or `topic: <topic> (0.64)`; then `HF upvotes: <n>` (if above 0); `followed author: <name>` per hit; `keyword: <kw>` per hit. With no seeds and no topics there is no similarity reason and the score comes from the boosts alone.
+Each paper gets reasons in this order: one similarity reason for the best match, formatted `closest seed: <id> (0.71)` or `topic: <topic> (0.64)`; then `HF upvotes: <n>` (if above 0); `followed author: <name>` per hit; `keyword: <kw>` per hit; then `liked similar: <paper id>` and `disliked similar: <paper id>` (the single liked/disliked paper contributing most, present only when you have such feedback). With no seeds and no topics there is no similarity reason and the score comes from the boosts alone.
 
 ### Worked example
 
@@ -127,3 +129,21 @@ Vectors are stored in the `embeddings` table as raw float32 bytes, keyed by (pap
 - `src/research_pipeline/triage.py`: `run_triage`
 - `src/research_pipeline/seeds.py`: `resolve_seed_texts`
 - `tests/conftest.py`: `FakeEmbedder`
+
+
+### Implicit profile: votes and saves with decay
+
+**What it does.** Your explicit profile (seeds, topics) is what you *said* you like. Your votes and saves are what you *did* like. Each night triage turns them into a second, implicit profile and nudges scores toward papers resembling your up-votes and saves, and away from papers resembling your down-votes.
+
+**How it works.**
+1. `run_triage` reads the latest non-neutral vote per paper (`db.current_votes`) and every save (`db.list_saved`), and loads those papers' stored embeddings. Papers with no embedding are skipped.
+2. `rank.build_feedback_vectors` gives each one a weight `0.5 ** (age_days / half-life)`. The **half-life** is the number of days after which a vote counts half as much; the default is 60 days (`feedback_halflife_days` in your profile). An up vote and a save both start at weight 1.0; a paper that is both counts once with the larger (fresher) weight. A down vote beats a save of the same paper. Timestamps may be ISO with `T`/`Z` or plain `YYYY-MM-DD HH:MM:SS`.
+3. For each candidate paper, `score_papers` computes the cosine to each liked vector, multiplies by that vector's weight, adds them up and divides by the *number* of liked papers (not by the sum of weights: dividing by the weights would cancel the decay for a single vote). Same for disliked. The score then gains `0.20 × liked` and loses `0.15 × disliked`.
+
+Worked example: you up-voted paper L 60 days ago (weight 0.5) and a candidate has cosine 0.8 to it. Gain = 0.20 × (0.5 × 0.8) / 1 = 0.08. Had the vote been today it would be 0.16: exactly twice. Reason added: `liked similar: L`.
+
+**Why this way.** Constants are sized against the ~0.045 similarity spread (table above). Dividing by the count means a long history of likes dilutes any one of them, so the signal measures overall taste rather than one lucky neighbour; a constant shift that applies to every paper cannot change the order. Rejected: using only the single nearest liked paper (noisy: one stray vote would dominate) and dividing by the weight sum (a lone ten-year-old vote would count as much as a fresh one).
+
+**How to run / check.** `rpipe vote <id> up` or `rpipe save <id>`, then `rpipe triage`; look for `liked similar:` in a paper's reasons. Change the fade speed with `rpipe profile set-feedback-halflife DAYS` (1 to 3650). Tests: `tests/test_rank.py` (decay ratio exact to 1e-9), `tests/test_triage.py`.
+
+**Where the code.** `src/research_pipeline/rank.py` (`FeedbackVectors`, `build_feedback_vectors`, `FEEDBACK_BOOST`, `FEEDBACK_PENALTY`), `triage.py` (loads feedback), `profile_edit.set_feedback_halflife`.

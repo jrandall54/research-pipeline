@@ -77,7 +77,7 @@ The weights are named constants at the top of `rank.py`; if you change the embed
 
 ### Reasons
 
-Each paper gets reasons in this order: one similarity reason for the best match, formatted `closest seed: <id> (0.71)` or `topic: <topic> (0.64)`; then `HF upvotes: <n>` (if above 0); `followed author: <name>` per hit; `keyword: <kw>` per hit; then `liked similar: <paper id>` and `disliked similar: <paper id>` (the nearest liked/disliked paper). These appear only when that paper's raw cosine (before decay) reaches `FEEDBACK_REASON_FLOOR` = 0.70, about two similarity standard deviations above the 0.6 typical for unrelated papers, so a reason always means a real neighbour, however old the vote. Decay scales only the score effect, never whether the reason is shown. With no seeds and no topics there is no similarity reason and the score comes from the boosts alone.
+Each paper gets reasons in this order: one similarity reason for the best match, formatted `closest seed: <id> (0.71)` or `topic: <topic> (0.64)`; then `HF upvotes: <n>` (if above 0); `followed author: <name>` per hit; `keyword: <kw>` per hit; then `near your shelf: <note name>` (the nearest chunk of your own work, shown at raw cosine 0.70 or more); then `liked similar: <paper id>` and `disliked similar: <paper id>` (the nearest liked/disliked paper). The two feedback reasons appear only when that paper's raw cosine (before decay) reaches `FEEDBACK_REASON_FLOOR` = 0.70, about two similarity standard deviations above the 0.6 typical for unrelated papers, so a reason always means a real neighbour, however old the vote. Decay scales only the score effect, never whether the reason is shown. With no seeds and no topics there is no similarity reason and the score comes from the boosts alone.
 
 ### Worked example
 
@@ -121,6 +121,8 @@ Worked example: you up-voted paper L 60 days ago (weight 0.5^(60/60) = 0.5) and 
 At the start of triage, `run_triage` is given the vault's `my_work/` folder and calls `sync_shelf` (`shelf.py`), which embeds any new or edited notes (unchanged notes are not re-embedded). `rank.build_shelf_vectors` then loads every chunk's stored vector, and `score_papers` adds `0.20 ×` the cosine to the nearest chunk. With an empty shelf, or no folder, scores are exactly what they were before. `rpipe run` and `rpipe triage` both pass the folder.
 
 Worked example: a note `cooking_pasta.md` holds "tomato basil". A paper whose title and abstract are "Cooking pasta / tomato basil" has cosine 1.0 to that chunk, gains 0.20 and gets the reason `near your shelf: cooking_pasta`. A paper at cosine 0.55 gains 0.11 and no reason (below the 0.70 floor).
+
+The 0.70 reason floor is borrowed from the feedback floor and has not been tuned separately for note chunks. A note chunk compared with an abstract may score lower than paper-to-paper, so the reason may fire rarely on short or informal notes; the boost itself applies at any cosine.
 
 ## Why it's built this way
 

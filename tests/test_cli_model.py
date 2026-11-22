@@ -306,7 +306,7 @@ def test_ollama_backend_ignores_effort(vault, monkeypatch):
 
 
 def test_summarize_command_prints_one_line_per_paper(vault, monkeypatch):
-    def fake(conn, llm, fetch, num_ctx, today=None, backlog_limit=None, paper_ids=None, on_progress=None):
+    def fake(conn, llm, fetch, num_ctx, today=None, backlog_limit=None, paper_ids=None, on_progress=None, refetch=False):
         on_progress(1, 2, "2611.26408", "done", 41.2, "")
         on_progress(2, 2, "2611.26409", "failed", 3.0, "bad json")
         on_progress(2, 2, "2611.26410", "stopped", 1.0, "")
@@ -325,3 +325,32 @@ def test_summarize_command_prints_one_line_per_paper(vault, monkeypatch):
     assert "[1/2] 2611.26408 done (summary + critique, 41s)" in result.output
     assert "[2/2] 2611.26410 stopped: usage limit reached" in result.output
     assert "[2/2] 2611.26409 failed: bad json" in result.output
+
+
+def test_refetch_needs_ids_and_rejects_backlog(vault):
+    for args in (["summarize", "--refetch"], ["summarize", "--backlog", "--refetch"]):
+        result = run(vault, *args)
+        assert result.exit_code != 0
+        assert "--refetch" in result.output and "paper id" in result.output
+    mixed = run(vault, "summarize", "2611.26408", "--backlog", "--refetch")
+    assert mixed.exit_code != 0
+
+
+def test_summarize_refetch_is_passed_through(vault, monkeypatch):
+    seen = {}
+
+    def fake(conn, llm, fetch, num_ctx, **kw):
+        seen.update(kw)
+        return {}, []
+    monkeypatch.setattr(cli, "run_summarize", fake)
+    llm = SimpleNamespace(name="claude-code", local=False, model_name="haiku", num_ctx=1000)
+    monkeypatch.setattr(cli, "_ready_llm", lambda p: llm)
+    set_config(vault, llm_backend="claude-code")
+    from research_pipeline.db import open_db, upsert_paper
+    from research_pipeline.models import PaperMeta
+    conn = open_db(vault / "vault.sqlite")
+    upsert_paper(conn, PaperMeta(id="2611.26408", title="T", source="arxiv", url="http://x"))
+    conn.commit()
+    conn.close()
+    assert run(vault, "summarize", "2611.26408", "--refetch").exit_code == 0
+    assert seen["refetch"] is True and seen["paper_ids"] == ["2611.26408"]

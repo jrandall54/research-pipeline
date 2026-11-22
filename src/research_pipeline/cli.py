@@ -463,11 +463,16 @@ def summarize(
     limit: Annotated[
         int | None, typer.Option("--limit", help="With --backlog: most backlog papers to summarize this run (default 10).")
     ] = None,
+    refetch: Annotated[
+        bool, typer.Option("--refetch", help="With paper ids: re-download and re-parse each paper's full text first (replaces the stored text).")
+    ] = False,
     vault: VaultOption = None,
 ) -> None:
     """Summarize and critique kept papers (and today's digest papers lacking a summary) with the configured summary model."""
     if paper_ids and backlog:
         raise _fail("Give either paper ids or --backlog, not both.")
+    if refetch and (backlog or not paper_ids):
+        raise _fail("--refetch needs explicit paper ids (rpipe summarize ID... --refetch) and cannot be used with --backlog.")
     if limit is not None and not backlog:
         raise _fail("--limit only works with --backlog.")
     if limit is not None and limit < 1:
@@ -502,7 +507,7 @@ def summarize(
     counts, errors = run_summarize(
         ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
         today=today, backlog_limit=cap, paper_ids=paper_ids or None,
-        on_progress=_paper_progress(typer.echo),
+        on_progress=_paper_progress(typer.echo), refetch=refetch,
     )
     typer.echo("Summarized:")
     _report(counts, errors)

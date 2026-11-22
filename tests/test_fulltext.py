@@ -153,3 +153,42 @@ def test_ensure_usable_rejects_empty_and_thin_pages():
         ensure_usable([Section(title="1 Intro", text="  tiny ")])
     ok = [Section(title="1 Intro", text="x" * 60)]
     assert ensure_usable(ok) == ok
+
+
+LATEXML = (Path(__file__).parent / "fixtures" / "arxiv_latexml.html").read_text(encoding="utf-8")
+
+
+def test_latexml_headings_are_clean_and_keep_numbers():
+    titles = [s.title for s in parse_sections(LATEXML)]
+    assert titles == ["Abstract", "1 Introduction", "2 Method ℝd"]
+    assert not any("\\" in t for t in titles)
+    assert not any("materiaDisplay" in t for t in titles)
+
+
+def test_latexml_math_is_plain_text_exactly_once():
+    secs = {s.title: s.text for s in parse_sections(LATEXML)}
+    body = " ".join(secs.values())
+    assert "\\" not in body  # no macro soup, no \displaystyle / \qquad / \materiaDisplay
+    assert "Let x_{i} be the inputs" in secs["1 Introduction"]  # short alttext kept, once
+    assert "x_{i}x_{i}" not in body and body.count("x_{i}") == 1
+    assert "p<0.05 in every run" in body  # entity-decoded, not duplicated
+    assert "We study α-stable models." in secs["Abstract"]  # \alpha -> its MathML symbol
+    # long formula: MathML symbols, annotation text not repeated
+    assert "ℒ(θ)=" in body and "\\mathcal" not in body
+    assert "μ=" in body and "∑" in body
+
+
+def test_latexml_prose_survives():
+    body = " ".join(s.text for s in parse_sections(LATEXML))
+    assert "We train a real classifier." in body
+    assert "We fit a linear probe." in body
+
+
+def test_long_math_is_cut():
+    long_tex = "+".join(f"a{i}" for i in range(200))
+    html = (
+        "<h2>1 Intro</h2><p>Before <math alttext=\"" + long_tex + "\" display=\"block\"><semantics><mi>"
+        + long_tex + "</mi></semantics></math> after prose.</p>"
+    )
+    text = parse_sections(html)[0].text
+    assert len(text) < fulltext.MAX_MATH_CHARS + 40 and "after prose." in text

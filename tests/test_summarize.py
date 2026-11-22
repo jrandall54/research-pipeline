@@ -567,3 +567,60 @@ def test_progress_count_includes_backlog_and_default_is_none(conn):
     assert events == [(1, 2), (2, 2)]
     add_triaged(conn, "2501.00003")
     run_summarize(conn, FakeLLM([summary(), critique()]), lambda pid: SECTIONS, 32768, today=TODAY)  # no callback: fine
+
+
+NEW_SECTIONS = [Section(title=t.title, text="Freshly parsed, clean text of the paper. " * 3) for t in SECTIONS]
+
+
+def test_refetch_replaces_stored_sections_before_summarizing(conn):
+    add_triaged(conn, "2501.00001")
+    save_fulltext(conn, "2501.00001", SECTIONS)  # old, messy text
+    llm = FakeLLM([summary(), critique()])
+    counts, errors = run_summarize(conn, llm, lambda pid: NEW_SECTIONS, 32768,
+                                   paper_ids=["2501.00001"], refetch=True)
+    assert counts["summarized"] == 1 and errors == []
+    assert get_fulltext(conn, "2501.00001") == NEW_SECTIONS
+
+
+def test_without_refetch_stored_sections_are_kept(conn):
+    add_triaged(conn, "2501.00001")
+    save_fulltext(conn, "2501.00001", SECTIONS)
+    run_summarize(conn, FakeLLM([summary(), critique()]), lambda pid: NEW_SECTIONS, 32768,
+                  paper_ids=["2501.00001"])
+    assert get_fulltext(conn, "2501.00001") == SECTIONS
+
+
+def test_refetch_without_html_falls_back_to_stored_text_and_says_so(conn):
+    add_triaged(conn, "2501.00001")
+    save_fulltext(conn, "2501.00001", SECTIONS)
+
+    def none(pid):
+        raise FullTextUnavailable("no HTML")
+
+    counts, errors = run_summarize(conn, FakeLLM([summary(), critique()]), none, 32768,
+                                   paper_ids=["2501.00001"], refetch=True)
+    assert counts["summarized"] == 1 and counts["fetched"] == 1
+    assert get_fulltext(conn, "2501.00001") == SECTIONS
+    assert len(errors) == 1 and "2501.00001" in errors[0] and "kept the stored full text" in errors[0]
+
+
+def test_refetch_without_html_and_nothing_stored_uses_abstract(conn):
+    add_triaged(conn, "2501.00001")
+
+    def none(pid):
+        raise FullTextUnavailable("no HTML")
+
+    ok_s = Summary(one_line="x", problem=Claim(text="a", sections=["Abstract"]),
+                   approach=Claim(text="b", sections=["Abstract"]),
+                   results=Claim(text="c", sections=["Abstract"]),
+                   limitations=Claim(text="d", sections=["Abstract"]))
+    ok_c = Critique(strengths=[Claim(text="e", sections=["Abstract"])], weaknesses=[], questions=[])
+    counts, errors = run_summarize(conn, FakeLLM([ok_s, ok_c]), none, 32768,
+                                   paper_ids=["2501.00001"], refetch=True)
+    assert counts["abstract_only"] == 1
+    assert "no usable HTML" in errors[0] and "abstract" in errors[0]
+
+
+def test_refetch_needs_explicit_ids(conn):
+    with pytest.raises(ValueError, match="paper ids"):
+        run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, refetch=True)

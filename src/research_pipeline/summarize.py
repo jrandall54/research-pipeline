@@ -100,6 +100,7 @@ def run_summarize(
     backlog_limit: int | None = None,
     paper_ids: list[str] | None = None,
     on_progress: Callable[[int, int, str, str, float, str], None] | None = None,
+    refetch: bool = False,
 ) -> tuple[dict[str, int], list[str]]:
     """Summarise the papers that need it: full text (stored, else fetched), then the model.
 
@@ -115,8 +116,13 @@ def run_summarize(
     ``on_progress(index, total, paper_id, outcome, seconds, detail)`` is called once per paper
     as it finishes (outcome ``done``, ``failed`` or ``stopped``; detail is the short failure
     reason); total counts every queued paper, backlog and explicit ids included.
+    ``refetch=True`` (needs ``paper_ids``) re-downloads and re-parses each paper's full text
+    and replaces the stored sections first; if the HTML is no longer usable the stored text
+    is kept (else the abstract is used) and a note is added to the errors.
     See docs/guide/running.md.
     """
+    if refetch and paper_ids is None:
+        raise ValueError("refetch needs explicit paper ids")
     # Imported here because db.py imports the schemas defined above.
     from research_pipeline.db import (
         clear_error,
@@ -158,7 +164,14 @@ def run_summarize(
         listed = paper["status"] not in (Status.triaged.value, Status.fetched.value)
         try:
             sections = get_fulltext(conn, pid)
-            if sections is None:
+            if refetch:
+                try:
+                    sections = ensure_usable(fetch(pid))
+                    save_fulltext(conn, pid, sections)
+                except FullTextUnavailable:
+                    kept = "kept the stored full text" if sections is not None else "using the abstract"
+                    errors.append(f"summarize {pid}: no usable HTML version now; {kept}")
+            elif sections is None:
                 try:
                     sections = ensure_usable(fetch(pid))
                     save_fulltext(conn, pid, sections)

@@ -203,3 +203,9 @@
 **Effort** — a setting (`low`, `medium`, `high`) telling Claude how much to think before it answers. Lower is faster and cheaper but can be shallower. rpipe passes it to Claude Code as `--effort` and defaults to `low`; change it with `rpipe model set-effort`. See `backends.md`.
 
 **Thinking tokens** — the words (counted in tokens) a model writes to itself while working out an answer, before the answer you see. You do not see them, but you wait for them and they use up your subscription allowance. Without a limit, Haiku wrote about 13,000 of them for one critique. See Effort.
+
+**LaTeXML** — the tool arXiv uses to turn a paper's LaTeX source into its HTML version. It writes each formula as MathML plus the original TeX (an `<annotation>` and an `alttext` attribute), and marks macros it does not understand with `ltx_ERROR` spans. Our extractor picks one copy of each formula and deletes those spans. See `fulltext.md`.
+
+**MathML** — the XML vocabulary for maths on web pages (`<mi>x</mi><mo>=</mo>...`); its visible text is the Unicode symbols (`α`, `∑`). Not to be confused with the TeX source stored beside it.
+
+**Refetch** — re-downloading and re-parsing a paper's full text and replacing the stored copy: `rpipe summarize ID... --refetch`. See `fulltext.md`.

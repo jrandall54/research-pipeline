@@ -146,9 +146,61 @@ def _norm(text: str) -> str:
     return " ".join(text.split())
 
 
+# Layout-only TeX that carries no meaning in plain text.
+_TEX_LAYOUT = re.compile(
+    r"\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle|left|right|"
+    r"[bB]ig{1,2}[lr]?|materiaDisplay)(?![A-Za-z])"
+)
+_TEX_SPACE = re.compile(r"\\(?:qquad|quad)(?![A-Za-z])|\\[,;:! ]")
+_MATHML_INVISIBLE = re.compile("[\u2061-\u2064]")  # function application, invisible times, ...
+MAX_MATH_CHARS = 160  # a longer formula is cut so one equation cannot swamp the prose
+_SHORT_TEX = 30
+
+
+def _clean_tex(tex: str) -> str:
+    tex = _TEX_LAYOUT.sub("", tex)
+    tex = _TEX_SPACE.sub(" ", tex)
+    return _norm(tex)
+
+
+def _math_text(m: Tag) -> str:
+    """One compact plain-text form of a <math> element (its meaning, exactly once).
+
+    LaTeXML writes each formula as MathML (visible symbols) plus an `<annotation>` with the
+    TeX source plus an `alttext` attribute with the same TeX. Taking all the text duplicates it
+    and leaks macros, so we choose one: the cleaned `alttext` if it is short and has no
+    backslash macro (`x_i`, `p<0.05`), otherwise the MathML symbols (Unicode: `μ`, `∑`, `∈`).
+    """
+    tex = _clean_tex(m.get("alttext") or "")
+    if tex and len(tex) <= _SHORT_TEX and "\\" not in tex:
+        text = tex
+    else:
+        for junk in m.find_all(["annotation", "annotation-xml"]):
+            junk.decompose()
+        text = _norm(_MATHML_INVISIBLE.sub("", m.get_text("")))
+        if not text:
+            text = _norm(re.sub(r"\\[A-Za-z]+", "", tex))
+    if len(text) > MAX_MATH_CHARS:
+        text = text[: MAX_MATH_CHARS - 1].rstrip() + "…"
+    return text
+
+
+def _flatten_math(soup: BeautifulSoup) -> None:
+    """Replace every math element by its plain text; drop LaTeXML's failed-macro spans."""
+    for err in soup.find_all(class_="ltx_ERROR"):
+        err.decompose()  # undefined macro such as \materiaDisplay: typesetting residue
+    for m in soup.find_all("math"):
+        if m.decomposed:
+            continue
+        text = _math_text(m)
+        block = m.get("display") == "block"
+        m.replace_with(f" {text} " if block else text)
+
+
 def parse_sections(html: str) -> list[Section]:
     """Split visible text into sections; each h2/h3 heading starts a new one."""
     soup = BeautifulSoup(strip_hidden(html), "html.parser")
+    _flatten_math(soup)
     root = soup.body or soup
     sections: list[tuple[str, list[str]]] = []
     current: list[str] | None = None

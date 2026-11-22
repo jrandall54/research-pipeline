@@ -27,7 +27,7 @@ def test_open_db_creates_all_tables(tmp_path):
         for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table')")
     }
     assert {
-        "papers", "summaries", "votes", "embeddings", "links", "runs", "papers_fts",
+        "papers", "summaries", "votes", "saves", "embeddings", "links", "runs", "papers_fts",
     } <= names
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 

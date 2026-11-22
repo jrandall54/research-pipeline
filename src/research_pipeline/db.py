@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS votes (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS saves (
+    paper_id   TEXT PRIMARY KEY REFERENCES papers(id),
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS embeddings (
     item_id         TEXT NOT NULL,
     embedding_model TEXT NOT NULL,
@@ -91,14 +96,76 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+SCHEMA_VERSION = 1
+
+
+def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
+    """Bring an older database up to SCHEMA_VERSION (one ``if`` step per version)."""
+    if from_version < 1:
+        pass  # v0 -> v1: the `saves` table is added by CREATE TABLE IF NOT EXISTS
+
+
 def open_db(path: Path) -> sqlite3.Connection:
     """Open (creating if needed) the database with all tables, WAL and Row access."""
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version < SCHEMA_VERSION:
+        _migrate(conn, version)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
     return conn
+
+
+def record_vote(
+    conn: sqlite3.Connection, paper_id: str, vote: int, now: str | None = None
+) -> None:
+    """Append a vote (+1, -1, or 0 to clear). Commits."""
+    if vote not in (-1, 0, 1):
+        raise ValueError(f"vote must be -1, 0 or 1, got {vote!r}")
+    conn.execute(
+        "INSERT INTO votes (paper_id, vote, created_at) VALUES (?, ?, ?)",
+        (paper_id, vote, now or _now()),
+    )
+    conn.commit()
+
+
+def current_votes(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Latest vote per paper, leaving out papers whose latest vote is 0."""
+    return conn.execute(
+        "SELECT paper_id, vote, created_at FROM votes WHERE id IN"
+        " (SELECT MAX(id) FROM votes GROUP BY paper_id) AND vote != 0"
+        " ORDER BY id"
+    ).fetchall()
+
+
+def set_saved(
+    conn: sqlite3.Connection, paper_id: str, saved: bool, now: str | None = None
+) -> None:
+    """Save or unsave a paper (idempotent). Commits."""
+    if saved:
+        conn.execute(
+            "INSERT OR IGNORE INTO saves (paper_id, created_at) VALUES (?, ?)",
+            (paper_id, now or _now()),
+        )
+    else:
+        conn.execute("DELETE FROM saves WHERE paper_id = ?", (paper_id,))
+    conn.commit()
+
+
+def is_saved(conn: sqlite3.Connection, paper_id: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM saves WHERE paper_id = ?", (paper_id,)
+    ).fetchone() is not None
+
+
+def list_saved(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Saved papers, newest save first; columns paper_id, created_at."""
+    return conn.execute(
+        "SELECT paper_id, created_at FROM saves ORDER BY created_at DESC, rowid DESC"
+    ).fetchall()
 
 
 def _index(conn: sqlite3.Connection, rowid: int, title: str, abstract: str) -> None:

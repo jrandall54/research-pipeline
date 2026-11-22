@@ -113,3 +113,7 @@
 **Probe** — a test load: we load a model at a given context with an empty prompt and check whether it sits fully on the GPU, then unload it. See `llm.md`.
 
 **Safety margin** — the 1024 tokens (one search step) subtracted from the largest context a probe measured, so the nightly run still fits if slightly less GPU memory is free than during the probe. Never applied to a context you pinned. See `llm.md`.
+
+**`user_version`** — a spare integer SQLite stores in the database file header (`PRAGMA user_version`). We use it as the schema version so `open_db()` knows whether an older vault needs upgrading. See `data-model.md`.
+
+**Migration** — a small step that upgrades an existing database from an older schema to the current one, run automatically on open. See `data-model.md`.

@@ -33,7 +33,7 @@ MY_WORK_WEIGHT = 0.0  # TODO(phase4): similarity to the user's own notes in my_w
 # (0.15) because a downvote is often "not today" rather than "never".
 FEEDBACK_BOOST = 0.20
 FEEDBACK_PENALTY = 0.15
-# A "liked/disliked similar" reason is only written when weight x cosine reaches this floor:
+# A "liked/disliked similar" reason is only written when the RAW cosine of the neighbour (before decay) reaches this floor:
 # about two similarity standard deviations (0.045) above the 0.6 typical for unrelated papers.
 FEEDBACK_REASON_FLOOR = 0.70
 
@@ -105,12 +105,12 @@ def build_feedback_vectors(
 
 def _feedback_term(
     vec: np.ndarray, group: list[tuple[str, np.ndarray, float]]
-) -> tuple[float, str | None]:
-    """Largest weight x cosine over the group, and the id that gives it (None if empty)."""
+) -> tuple[float, str | None, float]:
+    """(largest weight x cosine, id that gives it, that paper's raw cosine); empty -> (0, None, 0)."""
     if not group:
-        return 0.0, None
-    best, best_id = max((w * float(v @ vec), pid) for pid, v, w in group)
-    return best, best_id
+        return 0.0, None, 0.0
+    best, best_id, raw = max((w * (c := float(v @ vec)), pid, c) for pid, v, w in group)
+    return best, best_id, raw
 
 
 def build_profile_vectors(
@@ -177,12 +177,12 @@ def score_papers(
 
         score += MY_WORK_WEIGHT * 0.0  # TODO(phase4)
         if feedback:
-            liked, liked_id = _feedback_term(vec, feedback.liked)
-            disliked, disliked_id = _feedback_term(vec, feedback.disliked)
+            liked, liked_id, liked_raw = _feedback_term(vec, feedback.liked)
+            disliked, disliked_id, disliked_raw = _feedback_term(vec, feedback.disliked)
             score += FEEDBACK_BOOST * liked - FEEDBACK_PENALTY * disliked
-            if liked_id and liked >= FEEDBACK_REASON_FLOOR:
+            if liked_id and liked_raw >= FEEDBACK_REASON_FLOOR:
                 reasons.append(f"liked similar: {liked_id}")
-            if disliked_id and disliked >= FEEDBACK_REASON_FLOOR:
+            if disliked_id and disliked_raw >= FEEDBACK_REASON_FLOOR:
                 reasons.append(f"disliked similar: {disliked_id}")
         out.append(ScoredPaper(row["id"], score, reasons))
 

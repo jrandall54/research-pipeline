@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from research_pipeline.db import get_paper, open_db, upsert_paper
+from research_pipeline.db import current_votes, get_paper, open_db, record_vote, upsert_paper
 from research_pipeline.embed import SentenceTransformerEmbedder
 from research_pipeline.models import PaperMeta, Profile
 from research_pipeline.rank import (
@@ -246,7 +246,6 @@ def test_no_feedback_scores_unchanged(tmp_path):
 
 def test_up_then_clear_contributes_nothing(tmp_path):
     conn = open_db(tmp_path / "v.db")
-    from research_pipeline.db import current_votes, record_vote
     record_vote(conn, "L", 1)
     record_vote(conn, "L", 0)
     fv = build_feedback_vectors(current_votes(conn), [], {"L": E1}, 60.0, NOW)
@@ -288,3 +287,13 @@ def test_reason_floor_both_sides(tmp_path):
 
     assert reasons(FEEDBACK_REASON_FLOOR + 0.01) == ["liked similar: L"]
     assert reasons(FEEDBACK_REASON_FLOOR - 0.01) == []
+
+
+def test_old_like_still_gets_reason_and_decayed_score(tmp_path):
+    v = np.array([0.9, (1 - 0.81) ** 0.5])
+    old = build_feedback_vectors([row("L", 1, "2026-07-24T12:00:00+00:00")], [], {"L": v}, 60.0, NOW)
+    base = fb_score(tmp_path, None)["2501.00001"].score
+    got = fb_score(tmp_path, old)["2501.00001"]
+    assert old.liked[0][2] == pytest.approx(0.25, abs=1e-3)  # 120 days = 2 half-lives
+    assert "liked similar: L" in got.reasons
+    assert got.score - base == pytest.approx(0.2 * old.liked[0][2] * 0.9, abs=1e-9)

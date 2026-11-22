@@ -2,7 +2,14 @@ import json
 
 import pytest
 
-from research_pipeline.db import get_paper, open_db, papers_with_status, upsert_paper
+from research_pipeline.db import (
+    get_paper,
+    open_db,
+    papers_with_status,
+    record_vote,
+    set_saved,
+    upsert_paper,
+)
 from research_pipeline.models import PaperMeta, Profile, Status
 from research_pipeline.triage import run_triage
 
@@ -100,7 +107,6 @@ def test_skipped_papers_still_in_fts(conn, embedder):
 
 
 def test_votes_and_saves_reach_ranking(conn, embedder):
-    from research_pipeline.db import record_vote, set_saved
     fill(conn)
     profile = Profile(topics=[], seeds=[], top_n=10)
     run_triage(conn, embedder, profile, {})  # embeds everything
@@ -116,7 +122,6 @@ def test_votes_and_saves_reach_ranking(conn, embedder):
 
 
 def test_vote_on_paper_without_embedding_is_ignored(conn, embedder):
-    from research_pipeline.db import record_vote
     fill(conn)
     record_vote(conn, "9999.99999", 1)  # never embedded
     counts = run_triage(conn, embedder, Profile(topics=[], seeds=[], top_n=10), {})

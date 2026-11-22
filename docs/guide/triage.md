@@ -77,7 +77,7 @@ The weights are named constants at the top of `rank.py`; if you change the embed
 
 ### Reasons
 
-Each paper gets reasons in this order: one similarity reason for the best match, formatted `closest seed: <id> (0.71)` or `topic: <topic> (0.64)`; then `HF upvotes: <n>` (if above 0); `followed author: <name>` per hit; `keyword: <kw>` per hit; then `liked similar: <paper id>` and `disliked similar: <paper id>` (the nearest liked/disliked paper). These appear only when its weight × cosine reaches `FEEDBACK_REASON_FLOOR` = 0.70, about two similarity standard deviations above the 0.6 typical for unrelated papers, so a reason always means a real neighbour. The score effect applies regardless of the floor. With no seeds and no topics there is no similarity reason and the score comes from the boosts alone.
+Each paper gets reasons in this order: one similarity reason for the best match, formatted `closest seed: <id> (0.71)` or `topic: <topic> (0.64)`; then `HF upvotes: <n>` (if above 0); `followed author: <name>` per hit; `keyword: <kw>` per hit; then `liked similar: <paper id>` and `disliked similar: <paper id>` (the nearest liked/disliked paper). These appear only when that paper's raw cosine (before decay) reaches `FEEDBACK_REASON_FLOOR` = 0.70, about two similarity standard deviations above the 0.6 typical for unrelated papers, so a reason always means a real neighbour, however old the vote. Decay scales only the score effect, never whether the reason is shown. With no seeds and no topics there is no similarity reason and the score comes from the boosts alone.
 
 ### Worked example
 
@@ -114,7 +114,7 @@ Your explicit profile (seeds, topics) is what you *said* you like. Your votes an
 2. `rank.build_feedback_vectors` gives each one a weight `0.5 ** (age_days / half-life)`. The **half-life** is the number of days after which a vote counts half as much; the default is 60 days (`feedback_halflife_days` in your profile). An up vote and a save both start at weight 1.0; a paper that is both counts once with the larger (fresher) weight. A down vote beats a save of the same paper. Timestamps may be ISO with `T`/`Z` or plain `YYYY-MM-DD HH:MM:SS`.
 3. For each candidate paper, `score_papers` finds the liked paper with the largest weight × cosine; the score gains `0.20 ×` that. The same over disliked papers subtracts `0.15 ×`.
 
-Worked example: you up-voted paper L 20 days ago (weight 0.5^(20/60) = 0.79) and a candidate has cosine 0.9 to it. Weighted cosine 0.714, gain 0.20 × 0.714 = 0.143, and because 0.714 is at or above the 0.70 floor the reason `liked similar: L` is added. Had the vote been 60 days old the weight would be 0.5, the weighted cosine 0.45, the gain 0.09 (exactly half of a fresh vote's), and no reason would be shown.
+Worked example: you up-voted paper L 60 days ago (weight 0.5^(60/60) = 0.5) and a candidate has cosine 0.9 to it. Gain = 0.20 × 0.5 × 0.9 = 0.09, exactly half of the 0.18 a fresh vote would give. The reason `liked similar: L` is added because the raw cosine 0.9 is at or above the 0.70 floor; decay does not hide it. At cosine 0.65 the gain would still be 0.065 but no reason is shown.
 
 ## Why it's built this way
 

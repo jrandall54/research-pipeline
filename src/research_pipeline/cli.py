@@ -1340,12 +1340,13 @@ def model_set_backend(
     vault: VaultOption = None,
     force: Annotated[bool, typer.Option("--force", help="Switch without checking the backend is ready.")] = False,
 ) -> None:
-    """Choose where summaries come from. Checks the backend first unless --force; the model resets to auto."""
+    """Choose where summaries come from. Checks the backend first unless --force. Changing backend resets the model to auto; re-choosing the current one keeps it."""
     ctx = _open(vault)
     cfg = ctx.config
     name = name.strip()
     known = {n for n, p in registry.plugins(registry.BACKEND_GROUP).items() if p.factory}
     cli_path: str | None = None
+    changed = cfg.llm_backend != name
     if name == "claude-code":
         cli_path = find_claude(cfg.llm_cli_path)
         if not force:
@@ -1363,7 +1364,8 @@ def model_set_backend(
             raise _fail(f"{exc} (or use --force to switch anyway).") from exc
     with _clean_errors():
         profile_edit.set_llm_backend(ctx.vault, name, known, cli_path)
-    typer.echo(f"backend is now {name}; model reset to auto. Check it with `rpipe model check`.")
+    note = "; model reset to auto" if changed else "; model unchanged"
+    typer.echo(f"backend is now {name}{note}. Check it with `rpipe model check`.")
 
 
 @model_app.command("set-url")

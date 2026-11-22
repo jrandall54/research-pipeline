@@ -354,3 +354,12 @@ def test_summarize_refetch_is_passed_through(vault, monkeypatch):
     conn.close()
     assert run(vault, "summarize", "2611.26408", "--refetch").exit_code == 0
     assert seen["refetch"] is True and seen["paper_ids"] == ["2611.26408"]
+
+
+def test_set_backend_message_says_reset_only_when_backend_changes(vault):
+    run(vault, "model", "set", "qwen3:14b")
+    same = run(vault, "model", "set-backend", "ollama", "--force")
+    assert "model unchanged" in same.output and "reset" not in same.output
+    assert load_config(vault / "config.yaml").llm_model == "qwen3:14b"
+    changed = run(vault, "model", "set-backend", "none", "--force")
+    assert "model reset to auto" in changed.output

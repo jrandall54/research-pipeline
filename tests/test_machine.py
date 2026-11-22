@@ -1,10 +1,13 @@
 import json
+import subprocess
 
+import httpx
 import pytest
+import respx
 
 from research_pipeline.machine import (
     APPLE_GPU_FRACTION, OLLAMA_INSTALL, Gpu, MachineInfo, ModelChoice, detect_gpu,
-    detect_machine, load_model_table, recommend, system_cmd,
+    detect_machine, load_model_table, ollama_tags, recommend, system_cmd,
 )
 from research_pipeline.models import Config
 
@@ -72,6 +75,38 @@ def test_no_tools_no_gpu():
 
 def test_system_cmd_missing_binary_is_127():
     assert system_cmd(["definitely-not-a-real-binary-xyz"], 1.0) == (127, "")
+
+
+def test_system_cmd_timeout_is_124(monkeypatch):
+    def slow(argv, **kw):
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", slow)
+    assert system_cmd(["anything"], 0.1) == (124, "")
+
+
+@respx.mock
+def test_ollama_tags_lists_model_names():
+    respx.get("http://x:11434/api/tags").respond(json={"models": [{"name": "qwen3:14b"}, {"name": "a:1b"}]})
+    assert ollama_tags("http://x:11434") == ["qwen3:14b", "a:1b"]
+
+
+@respx.mock
+def test_ollama_tags_empty_server_is_empty_list():
+    respx.get("http://x:11434/api/tags").respond(json={})
+    assert ollama_tags("http://x:11434") == []
+
+
+@respx.mock
+def test_ollama_tags_none_when_down_or_garbled():
+    respx.get("http://down:11434/api/tags").mock(side_effect=httpx.ConnectError("refused"))
+    assert ollama_tags("http://down:11434") is None
+    respx.get("http://err:11434/api/tags").respond(500)
+    assert ollama_tags("http://err:11434") is None
+    respx.get("http://bad:11434/api/tags").respond(text="not json")
+    assert ollama_tags("http://bad:11434") is None
+    respx.get("http://odd:11434/api/tags").respond(json={"models": [{"nope": 1}]})
+    assert ollama_tags("http://odd:11434") is None
 
 
 def test_detect_machine_with_fakes(tmp_path):

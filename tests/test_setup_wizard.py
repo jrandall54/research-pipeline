@@ -221,3 +221,11 @@ def test_rechoosing_the_same_backend_keeps_model_but_switching_resets(vault):
     assert cfg(vault).llm_model == "qwen3:14b"
     profile_edit.set_llm_backend(vault, "none", known)
     assert cfg(vault).llm_model == "auto"
+
+
+def test_setup_interrupted_says_stopped_and_changes_nothing(vault, monkeypatch):
+    m = machine(gpu=GPU16, ollama_installed=True, ollama_running=True)
+    before = cfg(vault)
+    result, pulled = setup_run(vault, monkeypatch, [m], "")  # input ends at the first question
+    assert result.exit_code == 130 and "Stopped. Nothing further was changed" in result.output
+    assert pulled == [] and cfg(vault) == before

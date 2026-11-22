@@ -128,6 +128,7 @@ def test_grade_flow_saves_each_grade_immediately(vault, monkeypatch):
     erun(vault, "run")
     res = erun(vault, "grade", input="y\n\nn\nwrong numbers\n")  # EOF at paper 3
     assert res.exit_code == 0, res.output
+    assert "Stopped. Grades already given are saved" in res.output
     day = latest_day(vault)
     grades = load_eval(vault, day).grades
     assert [(g.accurate, g.note) for g in grades] == [(True, ""), (False, "wrong numbers")]

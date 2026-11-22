@@ -14,11 +14,11 @@ Commands (`install` and `show` take `--time` and `--vault`; no file editing need
 ## How it works
 
 1. `install` finds your vault (the `--vault` option, `$RESEARCH_VAULT` or `~/research-vault`) and checks it exists. It finds the `rpipe` program with `which rpipe` (made absolute); if it is not on your PATH it stops with an install hint.
-1a. It checks `systemctl` exists and that the user manager answers (`systemctl --user show-environment`); if not it stops with "nothing written".
-2. It validates the time (`HH:MM`, 24-hour; `25:00` and `3am` are rejected) before touching any file.
-3. It writes `~/.config/systemd/user/research-pipeline.service` (what to run) and `research-pipeline.timer` (when to run it).
-4. It runs `systemctl --user daemon-reload` (make systemd re-read its files) and `systemctl --user enable --now research-pipeline.timer` (start now, and again at each login or boot; to run with nobody logged in you also need linger, below). If either fails, the files stay where they are, the error says so, and you can re-run `install` after fixing the cause.
-5. It prints `loginctl enable-linger $USER`. This is only printed, never run: see "Linger" below.
+2. It checks `systemctl` exists and that the user manager answers (`systemctl --user show-environment`); if not it stops with "nothing written".
+3. It validates the time (`HH:MM`, 24-hour; `25:00` and `3am` are rejected) before touching any file.
+4. It writes `~/.config/systemd/user/research-pipeline.service` (what to run) and `research-pipeline.timer` (when to run it).
+5. It runs `systemctl --user daemon-reload` (make systemd re-read its files) and `systemctl --user enable --now research-pipeline.timer` (start now, and again at each login or boot; to run with nobody logged in you also need linger, below). If either fails, the files stay where they are, the error says so, and you can re-run `install` after fixing the cause.
+6. It prints `loginctl enable-linger $USER`. This is only printed, never run: see "Linger" below.
 
 Sample of what is generated (vault `/home/you/research vault`, `rpipe` at `/home/you/.local/bin/rpipe`):
 

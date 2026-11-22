@@ -2,7 +2,7 @@
 
 ## What it does
 
-Every night the pipeline collects new computer-science, security and AI papers, scores them against your personal profile, and writes a short digest of the best ones into your vault (a folder of your own files, kept outside this repo). Each paper in the digest says why it was picked and carries a short summary and critique written by a local model (Ollama) from the paper's full text, with every claim citing the section it came from; code checks the citations and flags any that do not exist. If a paper has no full text, the summary uses the abstract and says so; if Ollama is down, the digest is still written with abstracts. Phase 2 is done when the summaries pass your own accuracy check: at least 9 of your 10 gold papers graded accurate with `rpipe eval` (see [evaluation.md](evaluation.md)). Later phases add voting and note-linking.
+Every night the pipeline collects new computer-science, security and AI papers, scores them against your personal profile, and writes a short digest of the best ones into your vault (a folder of your own files, kept outside this repo). Each paper in the digest says why it was picked and carries a short summary and critique written by a local model (Ollama) from the paper's full text, with every claim citing the section it came from; code checks the citations and flags any that do not exist. If a paper has no full text, the summary uses the abstract and says so; if Ollama is down, the digest is still written with abstracts. Phase 2 is done when the summaries pass your own accuracy check: at least 9 of your 10 gold papers graded accurate with `rpipe eval` (see [evaluation.md](evaluation.md)). You can vote on and save digest items (`rpipe vote`, `rpipe save`, or buttons on your phone via `rpipe serve`) and the pipeline learns from them, and `rpipe schedule install` runs it every night by itself ([scheduling.md](scheduling.md), [browsing.md](browsing.md)). Phase 4 adds note-linking.
 
 ## How it works
 
@@ -16,13 +16,14 @@ Every night the pipeline collects new computer-science, security and AI papers, 
                                                (skipped if Ollama is down)
 ```
 
-One command, `rpipe run`, executes the whole flow and records it. Each stage in a paragraph:
+One command, `rpipe run`, executes the whole flow and records it. Each stage in a paragraph (the sixth is how you use it day to day):
 
 1. **Collect** ([sources.md](sources.md)). Asks arXiv (newest papers in your categories, politely, one request per 3 seconds) and Hugging Face Daily Papers (community-upvoted papers with code links) for recent papers and stores each as a row with status `new`. A paper seen before is not duplicated; a higher version updates it. If one source is down, the other still runs and the failure is recorded.
-2. **Triage** ([triage.md](triage.md)). Turns each new paper into an embedding (numbers capturing its meaning), compares it with your seed papers and topics, adds small boosts for upvotes, followed authors and keywords, keeps the top N as `triaged` and marks the rest `skipped` (still searchable). Every score comes with plain-language reasons.
+2. **Triage** ([triage.md](triage.md)). Turns each new paper into an embedding (numbers capturing its meaning), compares it with your seed papers and topics, adds small boosts for upvotes, followed authors and keywords, nudges scores toward papers resembling your own votes and saves (the implicit profile, with old votes fading by a half-life), keeps the top N as `triaged` and marks the rest `skipped` (still searchable). Every score comes with plain-language reasons.
 3. **Summarize** ([fulltext.md](fulltext.md), [summaries.md](summaries.md), [llm.md](llm.md)). For each kept paper, downloads the arXiv HTML version and strips hidden text (a defence against prompt injection), then asks the local model for a summary and a critique. Each claim must cite paper sections; code checks the citations against the real section titles. The paper moves `triaged` to `fetched` to `summarized`. No HTML version means an abstract-only summary; Ollama being down means this stage is skipped and the cause is shown in the health line. One paper failing never stops the others.
 4. **Digest** ([digest.md](digest.md)). Writes the kept papers, best first, with their summaries, as a markdown file with a one-line health summary on top, then marks them `in_digest`.
-5. **The run record** ([running.md](running.md)). `run` also writes a row to the `runs` table with start and end times, counts per stage and any errors.
+5. **The run record** ([running.md](running.md)). `run` also writes a row to the `runs` table with start and end times, counts per stage and any errors (list them with `rpipe runs`).
+6. **The daily habit** ([scheduling.md](scheduling.md), [browsing.md](browsing.md)). A systemd timer (`rpipe schedule install`) runs `rpipe run` each night; you read the digest, or browse the vault from your phone with `rpipe serve`, and vote or save papers. Those votes feed back into the next triage.
 
 Underneath all of this are the typed objects and the SQLite tables ([data-model.md](data-model.md)) and the vault folder with its two settings files ([vault-and-config.md](vault-and-config.md)).
 

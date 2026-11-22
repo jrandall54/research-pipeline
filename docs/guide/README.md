@@ -50,7 +50,7 @@ New to the project? Read in this order:
 13. [browsing.md](browsing.md): `rpipe serve`, browsing and voting from your phone over Tailscale
 14. [review.md](review.md): `rpipe review`, reading and voting on the digest in the terminal, and the review-later list
 15. [shelf.md](shelf.md): the shelf in `my_work/`, how notes are chunked, embedded, added and removed
-15. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+16. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Read [running.md](running.md) first, then [profile.md](profile.md) for setting up your profile.
 

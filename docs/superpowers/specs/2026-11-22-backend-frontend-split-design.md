@@ -76,10 +76,11 @@ Existing modules stay where they are; the split is declared and tested, not done
 
 | Group | Modules | May import |
 |---|---|---|
-| **Shared** | `models`, `summary_models`, `db` (connection, schema, timestamps), `vault`, config and profile loading, `embed`, `llm`, `backends`, `registry` | shared only |
-| **Pipeline** | `collect`, `sources`, `triage`, `rank`, `fulltext`, `summarize`, `prompts`, `digest`, `evaluate`, `gold`, `schedule`, `ollama_fit`, `machine`, `run_lock`, `requests_queue` (new) | shared, plus the read functions of `library` |
+| **Shared** | `models`, `summary_models`, `db` (connection, schema, timestamps, paper plumbing; it also still holds the pipeline's own writes such as `save_summary` and `start_run`), `vault`, `embed`, `llm`, `backends`, `defaults`, `seeds`, `profile_edit` (profile and config editing), `ids` (new: pure paper-id normalisation, extracted from `profile_edit.normalise_arxiv_id`), `progress` (the Phase 6 helper, when it exists) | shared only |
+| **Pipeline** | `collect`, `sources`, `triage`, `rank`, `fulltext`, `summarize`, `prompts`, `digest`, `evaluate`, `gold`, `schedule`, `ollama_fit`, `machine`, `run_lock`, `requests_queue` (new), `registry` (imports `ollama_fit` and `sources.*`, so it cannot be shared), `seed_input` and `onboarding` (setup flows that import `sources.arxiv`; `onboarding` also `prompts`) | shared, plus the read functions of `library` |
 | **App** | `library` (new: user-action reads and writes moved out of `db.py`), `shelf`, `review`, `serve`, `library_api` (new), `workbench/` (new, empty package for future features) | shared, `library`, `library_api`; **not** pipeline stage modules |
 
+- **Every module is classified.** `cli.py` is the composition layer; each other module and package under `src/research_pipeline` is in exactly one group above. A test fails when a new module is not classified, and a second test checks that shared modules import only shared modules (the first draft broke this by listing `registry` as shared).
 - **`cli.py` is the composition layer.** It may import both groups and wire them together (for example, `rpipe run` syncs the shelf and then runs the pipeline stages). The rules above apply to every other module.
 - **`library.py`** holds the user-action functions now in `db.py`: `record_vote`, `current_votes`, `set_saved`, `list_saved`, `record_skip`, `clear_skip` and the `shelf_*` functions. The pipeline uses only its read functions (`current_votes`, saved ids, `shelf_chunk_rows`) for ranking.
 - **Shelf sync moves out of `triage.py`.** Today triage calls `sync_shelf` so the index follows your files even on quiet nights. `rpipe run` and `rpipe triage` (composition layer) now call it just before triage, so triage itself only reads.
@@ -89,11 +90,11 @@ Existing modules stay where they are; the split is declared and tested, not done
 
 A module of plain Python functions. The first version covers what today's app-side commands need:
 
-- read: get a paper with its summary and critique, list a digest's papers, list saved papers, search papers (the existing full-text index), list shelf items;
-- write: vote, save and unsave, skip, shelf add and remove (delegating to `library`);
+- read: get a paper with its summary, critique and triage reasons, list a digest's papers, list saved papers, search papers (the existing full-text index), list shelf items, the review queues (`review_queue`, `later_queue`, `queue_progress`, wrapping `review.py`), and the current votes with titles (for `feedback`);
+- write: vote, save and unsave, skip, shelf add and remove (delegating to `library`). Writes that create something return a data object (for example `shelf_add` returns the shelf item), never a display string;
 - ask the pipeline for work: `request(kind, payload)`.
 
-`vote`, `save`, `unsave`, `feedback`, `review` and `shelf` route through it. Exact names and signatures are left to the builder. The app's future features (notes, quizzes, concept tree, citations) add functions here, and each adds its own tables to `vault.sqlite` owned by the app group.
+`vote`, `save`, `unsave`, `feedback`, `review` and `shelf` route through it, and a test checks that these commands use only `library_api` (the exit criterion: the app can be built on `library_api` without touching pipeline code). Paper ids go through one pure normaliser (`ids.normalise_paper_id`) shared by `rpipe vote`'s id lookup and `request()`; title-fragment search stays a terminal feature of `cli`. Exact names and signatures are left to the builder. The app's future features (notes, quizzes, concept tree, citations) add functions here, and each adds its own tables to `vault.sqlite` owned by the app group.
 
 ### The request list
 
@@ -128,7 +129,7 @@ Only `summarize` is built now, so the request list is proven end to end. The oth
 
 **One workflow changes.** Running `rpipe summarize` by hand while the nightly run is working now stops at once instead of running alongside it. The nightly run starts at 03:00, so this is rare.
 
-App commands (`vote`, `save`, `review`, `shelf`, `serve`) take no lock. Their writes are single short transactions. The database is put in WAL mode with a 5-second busy timeout (my call), so an app write during a nightly run waits a moment rather than failing. A WAL database lets readers and one writer work at the same time.
+Other commands that use the model, the GPU or the embedder (`model check`, `model setup`, `profile suggest`, `shelf sync`, `shelf add`) are decided one by one in the plan (Task 1, Step 0) and the choice is documented. App commands (`vote`, `save`, `review`, `shelf list|remove`, `serve`) take no lock. Their writes are single short transactions. The database already uses WAL mode and sqlite's default 5-second busy timeout; this work makes the timeout explicit and documents both, so an app write during a nightly run waits a moment rather than failing. `rpipe serve` (Datasette) has canned queries that write votes and saves with raw SQL: a second write path outside `library_api`, left as a documented stopgap. A WAL database lets readers and one writer work at the same time.
 
 ### Ready for a real app later
 
@@ -142,7 +143,7 @@ The owner wants the eventual app to look good and be easy to use, and it will lo
 
 ### Privacy
 
-Library and shelf content goes only to a local model unless the owner opts in per use. `require_local` exists but is not yet wired. It gets wired in `library_api` at the first function that sends library content to a model. That function belongs to an app feature, not to this work; this work adds a test that `library_api` cannot reach a cloud backend without the opt-in flag.
+Library and shelf content goes only to a local model unless the owner opts in per use. `require_local` exists but is not yet wired. It gets wired in `library_api` at the first function that sends library content to a model. That function belongs to an app feature, not to this work; this work adds a test that `library_api` cannot reach `llm` or `backends` (checked over the transitive import closure), which is how it stays unable to reach a cloud backend until that function wires the opt-in flag.
 
 ## The app, at high level (not designed here)
 
@@ -160,10 +161,10 @@ Recorded so the structure above serves it. Each item becomes its own design late
 
 1. `library.py` (user-action functions moved from `db.py`) and `library_api.py`; `vote`, `save`, `unsave`, `feedback`, `review` and `shelf` routed through them; shelf sync moved from `triage.py` to the composition layer.
 2. The `requests` table (a `user_version` step), `requests_queue.py`, `rpipe requests run|list`, the `summarize` kind, and the drain at the end of `rpipe run`.
-3. The run lock on every pipeline command, with the holder named in the message; WAL mode and a busy timeout.
+3. The run lock on every pipeline command, with the holder named in the message; the explicit busy timeout and documentation of the existing WAL mode.
 4. Import-boundary tests, the privacy test for `library_api`, and the test that `library_api` returns data objects, not display strings.
 5. Docs: a new `docs/guide/architecture.md` (the one-page explanation: the two groups, the one door, the request list, the lock), plus updates to `data-model.md`, `shelf.md`, `running.md`, `review.md` and `glossary.md` (pipeline, app, composition layer, request list, WAL).
-6. The master plan (Claude Docs) updated with the two halves, an app section and a revised roadmap: finish the pipeline, then this split, then the app designs.
+6. The master plan (Claude Docs) updated with the two halves, an app section and a revised roadmap: finish the pipeline, then this split, then the app designs. Done 2026-11-22.
 
 ## Pipeline work that follows (separate plans, already in the handoff)
 

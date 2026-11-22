@@ -100,6 +100,8 @@ Without a terminal the command refuses ("rpipe model setup is interactive; use `
 
 `rpipe model setup` (any time; it is safe to re-run), or let `rpipe init` run it. When a config already exists the first question is "Keep current backend (X)? [Y/n]": Enter keeps the backend and any model you pinned with `rpipe model set`, skips the menu and only re-runs the final check; `n` walks the menu (choosing a different backend resets the model to `auto`, because names differ per backend; choosing the same one again keeps it). Tests: `uv run pytest -q tests/test_machine.py tests/test_setup_wizard.py` (offline: machine detection, the model pull and the `claude` program are all faked; they also cover the probe timeout (exit code 124), `ollama_tags`, and Ctrl-C at a question, which prints "Stopped. Nothing further was changed" and exits 130).
 
+After the wizard pulls an Ollama model, the configured model stays `auto` on purpose: the list of installed models is part of the fit cache key, so the next `rpipe model fit` or `rpipe run` notices the new model, re-probes and can pick it (see `llm.md`); pin one with `rpipe model set NAME` if you want a specific model.
+
 ## Where the code is
 
 `src/research_pipeline/machine.py`, `src/research_pipeline/defaults/ollama_models.yaml`; `_wizard_backend` and the `model setup` command in `src/research_pipeline/cli.py`; `pull_model` in `src/research_pipeline/llm.py`. Tests: `tests/test_machine.py`, `tests/test_setup_wizard.py`.

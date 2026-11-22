@@ -20,7 +20,7 @@ from typing import Annotated
 import typer
 
 from research_pipeline.collect import run_collect
-from research_pipeline.db import SchemaTooNewError, list_shelf_items, clear_skip, get_summary, record_skip, UnknownPaperError, current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, start_run
+from research_pipeline.db import SchemaTooNewError, list_shelf_items, clear_skip, get_summary, record_skip, UnknownPaperError, current_votes, finish_run, get_paper, list_runs, list_saved, previous_run_unfinished, record_vote, set_saved, open_db, papers_given_up_on, papers_to_summarize, papers_by_ids, count_missing_summary, start_run
 from research_pipeline.digest import render_summary, write_digest
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, report as eval_report, run_eval, save_grade, ungraded
 from research_pipeline.fulltext import fetch_fulltext
@@ -436,21 +436,57 @@ def triage(vault: VaultOption = None) -> None:
 
 
 @app.command()
-def summarize(vault: VaultOption = None) -> None:
+def summarize(
+    paper_ids: Annotated[
+        list[str] | None,
+        typer.Argument(help="Summarize exactly these paper ids (any status; replaces an existing summary)."),
+    ] = None,
+    backlog: Annotated[
+        bool, typer.Option("--backlog", help="Also summarize papers from earlier digests that have no summary (newest first).")
+    ] = False,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="With --backlog: most backlog papers to summarize this run (default 10).")
+    ] = None,
+    vault: VaultOption = None,
+) -> None:
     """Summarize and critique kept papers (and today's digest papers lacking a summary) with the configured summary model."""
+    if paper_ids and backlog:
+        raise _fail("Give either paper ids or --backlog, not both.")
+    if limit is not None and not backlog:
+        raise _fail("--limit only works with --backlog.")
+    if limit is not None and limit < 1:
+        raise _fail(f"--limit must be a positive whole number, got {limit}.")
     ctx = _open(vault)
     _require_model(ctx.config)
     pipeline = build_pipeline(ctx.config)
-    if not papers_to_summarize(ctx.conn, date.today()) and not papers_given_up_on(ctx.conn, date.today()):
-        typer.echo("Nothing to summarize: no triaged papers, and today's digest has none missing a summary. Run `rpipe run` or `rpipe triage` first.")
-        return
+    today = date.today()
+    if paper_ids:
+        try:
+            papers_by_ids(ctx.conn, paper_ids)
+        except UnknownPaperError as exc:
+            raise _fail(str(exc)) from exc
+    else:
+        normal = papers_to_summarize(ctx.conn, today) or papers_given_up_on(ctx.conn, today)
+        total = count_missing_summary(ctx.conn, today) if backlog else 0
+        if not normal and not total:
+            if backlog:
+                typer.echo("Nothing to summarize: no papers in past digests are missing a summary, and no triaged papers or today's digest papers are waiting either.")
+            else:
+                typer.echo("Nothing to summarize: no triaged papers, and today's digest has none missing a summary. Run `rpipe run` or `rpipe triage` first.")
+            return
     try:
         llm = _ready_llm(pipeline)
     except Exception as exc:  # noqa: BLE001
         raise _fail(f"model unavailable: {exc}") from exc
     if llm is None:
         raise _fail(NO_MODEL)
-    counts, errors = run_summarize(ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx)
+    cap = (limit or 10) if backlog else None
+    if backlog:
+        typer.echo(f"Backlog: {min(cap, total)} of {total} papers missing a summary (newest first; raise --limit for more)")
+    counts, errors = run_summarize(
+        ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+        today=today, backlog_limit=cap, paper_ids=paper_ids or None,
+    )
     typer.echo("Summarized:")
     _report(counts, errors)
 

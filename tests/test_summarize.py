@@ -425,3 +425,115 @@ def test_provenance_records_backend(conn):
     llm.name, llm.model_name = "claude-code", "sonnet"
     run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
     assert get_provenance(conn, "2501.00001")["backend"] == "claude-code"
+
+
+# ---------------------------------------------------------------- backlog and explicit ids
+
+def add_digested(conn, pid, day):
+    add_triaged(conn, pid)
+    mark_in_digest(conn, [pid], day)
+
+
+def two_calls(n):
+    return FakeLLM([x for _ in range(n) for x in (summary(), critique())])
+
+
+def test_backlog_selects_past_digest_unsummarized_newest_first_and_respects_limit(conn):
+    from research_pipeline.db import save_summary
+    from research_pipeline.models import Status as S  # noqa: F401
+    add_digested(conn, "2501.00001", TODAY - timedelta(days=3))
+    add_digested(conn, "2501.00002", TODAY - timedelta(days=1))
+    add_digested(conn, "2501.00003", TODAY - timedelta(days=1))  # same day, later rowid: first
+    add_digested(conn, "2501.00004", TODAY - timedelta(days=2))
+    add_digested(conn, "2501.00005", TODAY - timedelta(days=1))  # already summarized
+    done = run_summarize(conn, two_calls(1), lambda pid: SECTIONS, 32768, today=TODAY, paper_ids=["2501.00005"])
+    assert done[0]["summarized"] == 1
+    llm = two_calls(2)
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, today=TODAY, backlog_limit=2)
+    assert counts["summarized"] == 2 and errors == []
+    assert get_summary(conn, "2501.00003") is not None
+    assert get_summary(conn, "2501.00002") is not None
+    assert get_summary(conn, "2501.00004") is None and get_summary(conn, "2501.00001") is None
+    for pid in ("2501.00001", "2501.00002", "2501.00003"):
+        assert get_paper(conn, pid)["status"] == "in_digest"
+
+
+def test_backlog_ignores_skipped_and_cap_applies_to_backlog_only(conn):
+    add_triaged(conn, "2501.00001")
+    set_status(conn, "2501.00001", Status.skipped)
+    add_digested(conn, "2501.00002", TODAY - timedelta(days=1))
+    add_digested(conn, "2501.00003", TODAY - timedelta(days=2))
+    add_triaged(conn, "2501.00004")  # normal candidate, runs in addition to the cap
+    counts, _ = run_summarize(conn, two_calls(2), lambda pid: SECTIONS, 32768, today=TODAY, backlog_limit=1)
+    assert counts["summarized"] == 2
+    assert get_summary(conn, "2501.00004") is not None and get_summary(conn, "2501.00002") is not None
+    assert get_summary(conn, "2501.00001") is None and get_summary(conn, "2501.00003") is None
+    assert get_paper(conn, "2501.00001")["status"] == "skipped"
+    assert get_paper(conn, "2501.00004")["status"] == "summarized"
+
+
+def test_backlog_respects_retry_cap(conn):
+    from research_pipeline.db import record_failure
+    add_digested(conn, "2501.00001", TODAY - timedelta(days=1))
+    for _ in range(3):
+        record_failure(conn, "2501.00001", "boom")
+    counts, _ = run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, today=TODAY, backlog_limit=10)
+    assert counts["summarized"] == 0
+
+
+def test_explicit_ids_cover_skipped_and_resummary_replaces(conn):
+    add_triaged(conn, "2501.00001")
+    set_status(conn, "2501.00001", Status.skipped)
+    add_digested(conn, "2501.00002", TODAY - timedelta(days=5))
+    counts, _ = run_summarize(conn, two_calls(2), lambda pid: SECTIONS, 32768, today=TODAY,
+                              paper_ids=["2501.00001", "2501.00002"])
+    assert counts["summarized"] == 2
+    assert get_paper(conn, "2501.00001")["status"] == "skipped"
+    assert get_paper(conn, "2501.00002")["status"] == "in_digest"
+    # re-summary of an already summarized paper replaces the rows (no duplicates)
+    new = summary()
+    new = new.model_copy(update={"one_line": "A different line."})
+    llm = FakeLLM([new, critique()])
+    run_summarize(conn, llm, lambda pid: SECTIONS, 32768, today=TODAY, paper_ids=["2501.00001"])
+    assert get_summary(conn, "2501.00001").summary.one_line == "A different line."
+    n = conn.execute("SELECT COUNT(*) FROM summaries WHERE paper_id='2501.00001'").fetchone()[0]
+    assert n == 2  # one summary row, one critique row
+
+
+def test_explicit_ids_ignore_retry_cap(conn):
+    from research_pipeline.db import record_failure
+    add_triaged(conn, "2501.00001")
+    for _ in range(3):
+        record_failure(conn, "2501.00001", "boom")
+    counts, _ = run_summarize(conn, two_calls(1), lambda pid: SECTIONS, 32768, today=TODAY, paper_ids=["2501.00001"])
+    assert counts["summarized"] == 1
+    assert get_paper(conn, "2501.00001")["status"] == "summarized"
+
+
+def test_explicit_unknown_id_raises_and_summarizes_nothing(conn):
+    from research_pipeline.db import UnknownPaperError
+    add_triaged(conn, "2501.00001")
+    with pytest.raises(UnknownPaperError, match="9999.99999"):
+        run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, paper_ids=["2501.00001", "9999.99999"])
+    assert get_summary(conn, "2501.00001") is None
+
+
+def test_usage_limit_in_backlog_mode_stops_quietly_and_keeps_status(conn):
+    add_digested(conn, "2501.00001", TODAY - timedelta(days=1))
+    add_digested(conn, "2501.00002", TODAY - timedelta(days=2))
+    llm = FakeLLM([LlmLimitReached("weekly limit")])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, today=TODAY, backlog_limit=10)
+    assert len(llm.calls) == 1 and counts["summary_failed"] == 0
+    for pid in ("2501.00001", "2501.00002"):
+        p = get_paper(conn, pid)
+        assert p["status"] == "in_digest" and p["retry_count"] == 0 and p["error"] is None
+    assert "usage limit reached" in errors[-1]
+
+
+def test_failure_in_backlog_records_and_others_carry_on(conn):
+    add_digested(conn, "2501.00001", TODAY - timedelta(days=1))
+    add_digested(conn, "2501.00002", TODAY - timedelta(days=2))
+    llm = FakeLLM([LlmError("bad json"), summary(), critique()])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, today=TODAY, backlog_limit=10)
+    assert counts["summary_failed"] == 1 and counts["summarized"] == 1
+    assert get_paper(conn, "2501.00001")["retry_count"] == 1

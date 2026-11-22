@@ -764,3 +764,92 @@ def test_seed_fetcher_without_arxiv_enabled_reuses_one_private_client(vault, mon
     pipe = cli.build_pipeline(cfg)
     pipe.seed_fetcher(["a"]); pipe.seed_fetcher(["b"])
     assert made == [1]
+
+
+# ---------------------------------------------------------------- summarize --backlog / ids
+
+def seed_backlog(vault, n=3):
+    from datetime import timedelta
+    from research_pipeline.db import mark_in_digest, open_db, set_status, upsert_paper
+    from research_pipeline.models import Status
+    conn = open_db(vault / "vault.sqlite")
+    for i in range(1, n + 1):
+        pid = f"2501.0000{i}"
+        upsert_paper(conn, PaperMeta(id=pid, title=f"T{i}", abstract="A", source="arxiv", url="u"))
+        set_status(conn, pid, Status.triaged, score=0.5, reasons=["r"])
+        mark_in_digest(conn, [pid], date.today() - timedelta(days=i))
+    conn.close()
+
+
+def count_summaries(vault):
+    import sqlite3
+    return sqlite3.connect(vault / "vault.sqlite").execute(
+        "SELECT COUNT(DISTINCT paper_id) FROM summaries WHERE kind='summary'").fetchone()[0]
+
+
+def test_summarize_backlog_prints_preface_and_respects_limit(vault, monkeypatch):
+    install(monkeypatch)
+    seed_backlog(vault, 3)
+    res = run_cli("summarize", "--backlog", "--limit", "2", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert "Backlog: 2 of 3 papers missing a summary (newest first; raise --limit for more)" in res.output
+    assert "summarized=2" in res.output
+    assert count_summaries(vault) == 2
+
+
+def test_summarize_backlog_default_limit_is_10(vault, monkeypatch):
+    install(monkeypatch)
+    seed_backlog(vault, 12)
+    res = run_cli("summarize", "--backlog", "--vault", str(vault))
+    assert "Backlog: 10 of 12 papers" in res.output
+    assert count_summaries(vault) == 10
+
+
+def test_summarize_backlog_nothing_to_do_message(vault, monkeypatch):
+    install(monkeypatch)
+    res = run_cli("summarize", "--backlog", "--vault", str(vault))
+    assert res.exit_code == 0
+    assert "no papers in past digests are missing a summary" in res.output
+
+
+def test_summarize_limit_needs_backlog_and_must_be_positive(vault, monkeypatch):
+    install(monkeypatch)
+    res = run_cli("summarize", "--limit", "3", "--vault", str(vault))
+    assert res.exit_code == 1 and "--limit only works with --backlog" in res.output
+    for bad in ("0", "-2"):
+        res = run_cli("summarize", "--backlog", "--limit", bad, "--vault", str(vault))
+        assert res.exit_code == 1 and "positive whole number" in res.output
+    res = run_cli("summarize", "--backlog", "--limit", "x", "--vault", str(vault))
+    assert res.exit_code != 0
+
+
+def test_summarize_ids_and_backlog_cannot_combine(vault, monkeypatch):
+    install(monkeypatch)
+    res = run_cli("summarize", "--backlog", "2501.00001", "--vault", str(vault))
+    assert res.exit_code == 1 and "not both" in res.output
+
+
+def test_summarize_explicit_ids_and_unknown_id(vault, monkeypatch):
+    install(monkeypatch)
+    seed_backlog(vault, 2)
+    res = run_cli("summarize", "2501.00001", "nope.123", "--vault", str(vault))
+    assert res.exit_code == 1 and "nope.123" in res.output
+    assert count_summaries(vault) == 0
+    res = run_cli("summarize", "2501.00002", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert "summarized=1" in res.output and count_summaries(vault) == 1
+
+
+def test_summarize_backlog_with_no_backend_refuses(vault, monkeypatch):
+    install(monkeypatch, llm=lambda: None)
+    seed_backlog(vault, 1)
+    res = run_cli("summarize", "--backlog", "--vault", str(vault))
+    assert res.exit_code == 1 and count_summaries(vault) == 0
+
+
+def test_plain_summarize_leaves_past_digest_papers_alone(vault, monkeypatch):
+    install(monkeypatch)
+    seed_backlog(vault, 2)
+    res = run_cli("summarize", "--vault", str(vault))
+    assert res.exit_code == 0 and "nothing to summarize" in res.output.lower()
+    assert count_summaries(vault) == 0

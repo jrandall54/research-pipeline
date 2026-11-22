@@ -96,6 +96,8 @@ def run_summarize(
     fetch: Callable[[str], list[Section]],
     num_ctx: int,
     today: date | None = None,
+    backlog_limit: int | None = None,
+    paper_ids: list[str] | None = None,
 ) -> tuple[dict[str, int], list[str]]:
     """Summarise the papers that need it: full text (stored, else fetched), then the model.
 
@@ -104,13 +106,19 @@ def run_summarize(
     failed 3 times. A paper with no HTML version is summarised from its abstract. A paper
     that fails (model error, network error) keeps its status, gets `error` and
     `retry_count` updated, and the others carry on. Commits per paper.
+    ``backlog_limit=N`` also summarises up to N papers from earlier digests that have no
+    summary (newest first). ``paper_ids`` instead summarises exactly those papers (any status,
+    ignoring the retry cap, replacing an existing summary). `in_digest`, `skipped` and any
+    other status except `triaged`/`fetched` is kept; the summary is just saved.
     See docs/guide/running.md.
     """
     # Imported here because db.py imports the schemas defined above.
     from research_pipeline.db import (
         clear_error,
         get_fulltext,
+        papers_by_ids,
         papers_given_up_on,
+        papers_missing_summary,
         papers_to_summarize,
         record_failure,
         save_fulltext,
@@ -121,14 +129,21 @@ def run_summarize(
     counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "truncated": 0, "summary_failed": 0}
     errors: list[str] = []
     today = today or date.today()
-    for paper in papers_given_up_on(conn, today):
-        errors.append(
-            f"summarize {paper['id']}: gave up after {paper['retry_count']} failed tries"
-            f" (last error: {paper['error']})"
-        )
-    for paper in papers_to_summarize(conn, today):
+    if paper_ids is not None:
+        queue = papers_by_ids(conn, paper_ids)
+    else:
+        for paper in papers_given_up_on(conn, today):
+            errors.append(
+                f"summarize {paper['id']}: gave up after {paper['retry_count']} failed tries"
+                f" (last error: {paper['error']})"
+            )
+        queue = papers_to_summarize(conn, today)
+        if backlog_limit is not None:
+            queue = queue + papers_missing_summary(conn, today, backlog_limit)
+    for paper in queue:
         pid = paper["id"]
-        listed = paper["status"] == Status.in_digest.value  # already in today's digest
+        # Only triaged/fetched papers move on to `summarized`; every other status stays.
+        listed = paper["status"] not in (Status.triaged.value, Status.fetched.value)
         try:
             sections = get_fulltext(conn, pid)
             if sections is None:

@@ -9,7 +9,7 @@ For each kept paper, the local model ([llm.md](llm.md)) writes two things from t
 
 Every point in both (a *claim*) names the paper section(s) it came from. Code then checks that each named section really exists. A claim whose citation cannot be verified is kept but flagged **unverified**, so it is never shown as if it were backed by the paper. The result also records whether it was built from the full text or only the abstract, and whether a long paper had to be cut to fit.
 
-`summarize_paper` in `src/research_pipeline/summarize.py` does one paper. (Running it for every kept paper inside `rpipe run` is the next step of Phase 2.)
+`summarize_paper` in `src/research_pipeline/summarize.py` does one paper. (`rpipe run` summarises every kept paper; `rpipe summarize --backlog` and `rpipe summarize ID` catch up older ones, see `running.md`.)
 
 ## How it works
 
@@ -123,5 +123,5 @@ The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They ch
 
 - `src/research_pipeline/summarize.py`: `Claim`, `Summary`, `Critique`, `PaperSummary`, `unknown_citations`, `summarize_paper`
 - `src/research_pipeline/prompts.py`: `PROMPT_VERSION`, `fit_to_budget`, `build_summary_prompt`, `build_critique_prompt`, `citation_feedback`, `defuse`, the system prompts
-- `src/research_pipeline/db.py`: `save_summary`, `get_summary`, `get_provenance`
+- `src/research_pipeline/db.py`: `save_summary` (replaces an existing summary, which is what makes a re-summary work), `get_summary`, `get_provenance`, `papers_missing_summary`, `papers_by_ids`
 - `tests/test_summarize.py`, `tests/test_db.py`

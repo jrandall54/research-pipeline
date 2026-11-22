@@ -484,6 +484,46 @@ def papers_to_summarize(conn: sqlite3.Connection, today: date) -> list[sqlite3.R
     ).fetchall()
 
 
+_BACKLOG = (
+    "status = 'in_digest' AND (digest_date IS NULL OR digest_date <> ?)"
+    " AND NOT EXISTS (SELECT 1 FROM summaries s"
+    "                 WHERE s.paper_id = papers.id AND s.kind = 'summary')"
+    " AND retry_count < ?"
+)
+
+
+def papers_missing_summary(
+    conn: sqlite3.Connection, today: date, limit: int | None = None
+) -> list[sqlite3.Row]:
+    """The summary backlog: `in_digest` papers from *earlier* digests with no summary.
+
+    Newest first (digest date, then row), skipping papers that already failed
+    MAX_SUMMARY_TRIES times. `limit` caps the list (None means all of them).
+    """
+    sql = f"SELECT * FROM papers WHERE {_BACKLOG} ORDER BY digest_date DESC, rowid DESC"
+    params: list = [today.isoformat(), MAX_SUMMARY_TRIES]
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+def count_missing_summary(conn: sqlite3.Connection, today: date) -> int:
+    """How many papers `papers_missing_summary` would return with no limit."""
+    return conn.execute(
+        f"SELECT COUNT(*) FROM papers WHERE {_BACKLOG}", (today.isoformat(), MAX_SUMMARY_TRIES)
+    ).fetchone()[0]
+
+
+def papers_by_ids(conn: sqlite3.Connection, paper_ids: list[str]) -> list[sqlite3.Row]:
+    """The named papers in the order given; raises UnknownPaperError naming any that do not exist."""
+    rows = {pid: get_paper(conn, pid) for pid in paper_ids}
+    missing = [pid for pid, row in rows.items() if row is None]
+    if missing:
+        raise UnknownPaperError(f"No paper with id {', '.join(missing)} in your vault. Nothing was summarized.")
+    return [rows[pid] for pid in dict.fromkeys(paper_ids)]
+
+
 def papers_given_up_on(conn: sqlite3.Connection, today: date) -> list[sqlite3.Row]:
     """Papers that would be summarized except that they hit MAX_SUMMARY_TRIES failures."""
     return conn.execute(

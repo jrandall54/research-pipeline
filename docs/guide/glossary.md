@@ -197,3 +197,5 @@
 **Pull (a model)** — downloading a model's files into Ollama so it can run locally (`ollama pull NAME`). `rpipe model setup` offers to do it for you, after a yes/no, and shows download progress. See `setup.md`.
 
 **Walkthrough** — the guided, step-by-step prompts of `rpipe model setup` (also the first step of `rpipe init`): look at your computer, recommend a backend, set it up, test it. See `setup.md`.
+
+**Backlog** — papers that were listed in an earlier digest but never got a summary (the model failed that night, or summaries did not exist yet). `rpipe summarize --backlog` works through them newest first, a few at a time. See `running.md`.

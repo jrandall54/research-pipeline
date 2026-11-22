@@ -49,6 +49,17 @@ def test_amd_rocm_json_parsed():
     assert gpu.kind == "amd" and gpu.vram_gb == pytest.approx(8.0)
 
 
+def test_amd_one_bad_card_is_skipped_not_fatal():
+    out = json.dumps({
+        "card0": {"VRAM Total Memory (B)": "not-a-number"},
+        "card1": {"VRAM Total Memory (B)": str(16 * 1024**3)},
+        "system": "driver 6.1",
+        "card2": {},
+    })
+    gpu = detect_gpu(cmds({"rocm-smi": (0, out)}), "Linux", "x86_64")
+    assert gpu.name == "card1" and gpu.vram_gb == pytest.approx(16.0)
+
+
 def test_nvidia_fails_then_amd_used():
     out = json.dumps({"card0": {"VRAM Total Memory (B)": str(8 * 1024**3)}})
     run = cmds({"nvidia-smi": (9, "boom"), "rocm-smi": (0, out)})

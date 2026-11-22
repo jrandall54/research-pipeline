@@ -114,14 +114,18 @@ def _amd(run: CmdRunner) -> Gpu | None:
         return None
     try:
         data = json.loads(out)
-        best: Gpu | None = None
-        for card, vals in data.items():
-            gb = int(vals["VRAM Total Memory (B)"]) / GIB
-            if best is None or gb > best.vram_gb:
-                best = Gpu(card, gb, "amd")
-        return best
-    except (ValueError, KeyError, TypeError, AttributeError):
+        items = list(data.items())
+    except (ValueError, AttributeError):
         return None
+    best: Gpu | None = None
+    for card, vals in items:
+        try:
+            gb = int(vals["VRAM Total Memory (B)"]) / GIB
+        except (ValueError, KeyError, TypeError):
+            continue  # one unreadable card (or a non-card key) must not hide the others
+        if best is None or gb > best.vram_gb:
+            best = Gpu(card, gb, "amd")
+    return best
 
 
 def _apple(run: CmdRunner) -> Gpu | None:

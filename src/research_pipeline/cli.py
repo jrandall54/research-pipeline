@@ -1333,7 +1333,7 @@ def feedback(vault: VaultOption = None) -> None:
         typer.echo(f"  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")
     typer.echo("Review later")
     if waiting:
-        typer.echo(f"  {waiting} papers waiting. Run `rpipe review --later`.")
+        typer.echo(f"  {waiting} {'paper' if waiting == 1 else 'papers'} waiting. Run `rpipe review --later`.")
     else:
         typer.echo("  Nothing waiting.")
 
@@ -1372,29 +1372,35 @@ def review(
             typer.echo("Nothing waiting in review later." if later else "Nothing to review.")
             return
         voted = skipped = 0
-        for i, row in enumerate(queue, start=1):
-            if later:
-                header = f"Review later · {i} of {len(queue)}"
-            else:
-                handled, total = queue_progress(ctx.conn, row["digest_date"])
-                header = f"Digest {row['digest_date']} · paper {handled + 1} of {total}"
-            _show_paper(ctx.conn, row, f"{header} · {voted} voted, {skipped} skipped")
-            while True:
-                answer = typer.prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
-                if answer in _REVIEW_KEYS:
+        aborted = False
+        try:
+            for i, row in enumerate(queue, start=1):
+                if later:
+                    header = f"Review later · {i} of {len(queue)}"
+                else:
+                    handled, total = queue_progress(ctx.conn, row["digest_date"])
+                    header = f"Digest {row['digest_date']} · paper {handled + 1} of {total}"
+                _show_paper(ctx.conn, row, f"{header} · {voted} voted, {skipped} skipped")
+                while True:
+                    answer = typer.prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
+                    if answer in _REVIEW_KEYS:
+                        break
+                    typer.echo("Please answer u, d, s or q.")
+                if answer == "q":
                     break
-                typer.echo("Please answer u, d, s or q.")
-            if answer == "q":
-                break
-            if answer == "s":
-                record_skip(ctx.conn, row["id"])
-                skipped += 1
-            else:
-                record_vote(ctx.conn, row["id"], 1 if answer == "u" else -1)
-                clear_skip(ctx.conn, row["id"])
-                voted += 1
+                if answer == "s":
+                    record_skip(ctx.conn, row["id"])
+                    skipped += 1
+                else:
+                    record_vote(ctx.conn, row["id"], 1 if answer == "u" else -1)
+                    clear_skip(ctx.conn, row["id"])
+                    voted += 1
+        except (typer.Abort, KeyboardInterrupt, EOFError):
+            aborted = True
         left = len(later_queue(ctx.conn) if later else review_queue(ctx.conn))
         typer.echo(f"Voted {voted}, skipped {skipped} this session. {left} left in the queue.")
+        if aborted:
+            raise typer.Abort()
     finally:
         ctx.conn.close()
 

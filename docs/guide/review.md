@@ -30,7 +30,7 @@ Digest 2026-11-21 · paper 1 of 3 · 0 voted, 0 skipped
 
 Fuzzing eBPF Verifiers with Grammar-Based Mutation
 id: 2411.01234
-why: close to seed 2307.15043; keyword "fuzzing"
+why: close to seed 2301.00001; keyword "fuzzing"
 
 We present a grammar-based fuzzer for the Linux eBPF verifier ...
 
@@ -62,6 +62,8 @@ The rules:
 - **Skips are their own list.** A skipped paper leaves the main queue and waits in *review later*, oldest skip first. Skipping it again in `--later` refreshes its time, so it moves to the back. Voting on it (in `review`, `rpipe vote` or the `rpipe serve` forms) takes it out of the later list; `review` also deletes the skip row when you vote.
 - **`digest_date` stays set.** If a paper gets a new version and falls back to status `triaged`, its `digest_date` is kept, so it stays eligible for the queue. This is intended: you still never decided about it.
 - **Input** is a line (type the letter and press Enter). Only the first letter counts and case does not matter, so `U`, `up` and `Down` work. Anything else prints `Please answer u, d, s or q.` and asks again.
+- **The queue is read once**, when the command starts. If you vote on a paper elsewhere during the session (for example through `rpipe serve`), `rpipe review` can still show it. Votes are append-only, so the vote you give in `review` is the later row and wins.
+- **Ctrl-C or end of input** (Ctrl-D) stops the loop like `q` does, with one difference: after printing the same `Voted V, skipped S this session. N left in the queue.` line, the command exits non-zero with typer's usual `Aborted!`, so a script can tell you did not finish by choice. Votes and skips already given are kept, and the database is closed cleanly. Choosing `q` exits 0.
 - **Needs a terminal.** If input is piped or redirected, `rpipe review` refuses (exit 1) with: `rpipe review needs a terminal. Use `rpipe vote ID up|down` instead.` It never guesses answers from a pipe.
 - **Nothing to do** prints `Nothing to review.` (or `Nothing waiting in review later.`) and exits 0. `rpipe feedback` ends with a `Review later` section giving the number of skipped papers waiting.
 

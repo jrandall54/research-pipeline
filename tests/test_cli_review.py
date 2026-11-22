@@ -160,13 +160,31 @@ def test_review_later_skip_again_moves_to_back(vault, tty):
     assert skips(vault) == ["2401.00002", "2401.00001"]
 
 
-def test_review_vote_clears_existing_skip_and_cleared_vote_requeues(vault, tty):
+def test_review_cleared_vote_requeues(vault, tty):
     conn = db(vault)
     record_vote(conn, "2401.00001", 1)
     record_vote(conn, "2401.00001", 0)
     conn.close()
     res = run(vault, "review", input="q\n")
     assert "Old Paper" in res.output  # cleared vote is back in the queue
+
+
+def test_review_later_vote_deletes_skip_row(vault, tty):
+    conn = db(vault)
+    record_skip(conn, "2401.00001")
+    conn.close()
+    assert skips(vault) == ["2401.00001"]
+    res = run(vault, "review", "--later", input="d\n")
+    assert res.exit_code == 0, res.output
+    assert votes(vault) == [("2401.00001", -1)]
+    assert skips(vault) == []
+
+
+def test_review_eof_keeps_votes_and_prints_tally(vault, tty):
+    res = run(vault, "review", input="u\n")  # input ends at the second prompt
+    assert res.exit_code == 1
+    assert votes(vault) == [("2401.00001", 1)]
+    assert "Voted 1, skipped 0 this session. 2 left in the queue." in res.output
 
 
 def test_feedback_shows_review_later_count(vault):
@@ -178,3 +196,11 @@ def test_feedback_shows_review_later_count(vault):
     conn.close()
     res = run(vault, "feedback")
     assert "  2 papers waiting. Run `rpipe review --later`." in res.output
+
+
+def test_feedback_review_later_singular(vault):
+    conn = db(vault)
+    record_skip(conn, "2401.00001")
+    conn.close()
+    res = run(vault, "feedback")
+    assert "  1 paper waiting. Run `rpipe review --later`." in res.output

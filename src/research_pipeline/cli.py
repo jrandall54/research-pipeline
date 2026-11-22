@@ -36,6 +36,7 @@ from research_pipeline.models import Config, PaperMeta, Profile, Section
 from research_pipeline import ollama_fit, onboarding, profile_edit, registry, schedule, serve as serve_mod
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
+from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.summarize import run_summarize
@@ -564,11 +565,6 @@ def digest(
 
 profile_app = typer.Typer(help="View and change your profile without editing files.", no_args_is_help=True)
 app.add_typer(profile_app, name="profile")
-
-
-def make_arxiv(config: Config) -> ArxivSource:
-    """The arXiv client used by `profile add-seed`; tests replace this with a stub."""
-    return ArxivSource(config.arxiv_categories, max_results=config.arxiv_max_results)
 
 
 @contextmanager

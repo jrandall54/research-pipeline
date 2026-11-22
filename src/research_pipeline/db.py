@@ -311,11 +311,19 @@ def get_fulltext(conn: sqlite3.Connection, paper_id: str) -> list[Section] | Non
 
 
 def save_summary(
-    conn: sqlite3.Connection, paper_id: str, result: PaperSummary, model: str
+    conn: sqlite3.Connection,
+    paper_id: str,
+    result: PaperSummary,
+    model: str,
+    *,
+    prompt_version: str | None = None,
+    paper_version: int | None = None,
+    num_ctx: int | None = None,
 ) -> None:
     """Store (or replace) a paper's summary and critique rows. Does not commit.
 
-    The `summary` row's JSON also carries `basis`, `truncated` and `unverified`.
+    The `summary` row's JSON also carries `basis`, `truncated` and `unverified`, and, when
+    `prompt_version` is given, a `provenance` dict (see `get_provenance`).
     """
     now = _now()
     summary_json = {
@@ -324,6 +332,14 @@ def save_summary(
         "truncated": result.truncated,
         "unverified": result.unverified,
     }
+    if prompt_version is not None:
+        summary_json["provenance"] = {
+            "model": model,
+            "prompt_version": prompt_version,
+            "paper_version": paper_version,
+            "num_ctx": num_ctx,
+            "created_at": now,
+        }
     conn.executemany(
         "INSERT OR REPLACE INTO summaries (paper_id, kind, text, model, created_at)"
         " VALUES (?, ?, ?, ?, ?)",
@@ -347,12 +363,21 @@ def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
     if set(rows) != {"summary", "critique"}:
         return None
     s = rows["summary"]
+    s.pop("provenance", None)  # read it with get_provenance; not part of PaperSummary
     meta = {k: s.pop(k) for k in ("basis", "truncated", "unverified")}
     return PaperSummary(
         summary=Summary.model_validate(s),
         critique=Critique.model_validate(rows["critique"]),
         **meta,
     )
+
+
+def get_provenance(conn: sqlite3.Connection, paper_id: str) -> dict | None:
+    """Which model, prompt and paper version made the summary, or None for older rows."""
+    row = conn.execute(
+        "SELECT text FROM summaries WHERE paper_id = ? AND kind = 'summary'", (paper_id,)
+    ).fetchone()
+    return json.loads(row["text"]).get("provenance") if row else None
 
 
 MAX_SUMMARY_TRIES = 3  # a paper that failed this many times is no longer retried

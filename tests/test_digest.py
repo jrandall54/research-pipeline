@@ -193,3 +193,21 @@ def test_digest_item_shows_id_and_saved_marker_and_footer_hint(conn, tmp_path):
 def test_digest_without_items_has_no_hint(conn, tmp_path):
     text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
     assert "rpipe vote" not in text
+
+
+def test_digest_footer_shows_provenance(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    conn.execute("UPDATE summaries SET text = json_set(text, '$.provenance', json(?))"
+                 " WHERE kind = 'summary'",
+                 ('{"model": "qwen3:14b", "prompt_version": "2026-11-p3", "paper_version": 2,'
+                  ' "num_ctx": 32768, "created_at": "2026-11-21T03:00:00+00:00"}',))
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "_qwen3:14b · prompt 2026-11-p3 · paper v2 · 2026-11-21_" in text
+
+
+def test_digest_without_provenance_has_no_footer(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "prompt " not in text

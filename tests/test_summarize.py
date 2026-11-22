@@ -335,3 +335,14 @@ def test_run_summarize_empty_sections_use_abstract_and_are_not_cached(tmp_path):
     counts, errors = run_summarize(conn, AlwaysSummary([]), lambda pid: [], 32768)
     assert counts["abstract_only"] == 1 and counts["fetched"] == 0 and not errors
     assert get_fulltext(conn, "2401.00001") is None
+
+
+def test_run_summarize_records_provenance(conn):
+    from research_pipeline.db import get_provenance
+    from research_pipeline.prompts import PROMPT_VERSION
+
+    add_triaged(conn, "2501.00001")
+    run_summarize(conn, FakeLLM([summary(), critique()]), lambda pid: SECTIONS, 32768)
+    prov = get_provenance(conn, "2501.00001")
+    assert (prov["model"], prov["prompt_version"], prov["paper_version"], prov["num_ctx"]) == (
+        "fake-llm", PROMPT_VERSION, 1, 32768)

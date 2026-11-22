@@ -127,3 +127,7 @@
 **Decay** — old feedback counting for less over time: a vote's weight is `0.5 ** (age / half-life)`. See `triage.md`.
 
 **Half-life** — the number of days after which a vote or save counts half as much (`feedback_halflife_days`, default 60; set with `rpipe profile set-feedback-halflife`). See `triage.md`.
+
+**Provenance** — the record of where a summary came from: which model, prompt version, paper version and context size produced it, and when. Shown as a footer in the digest. See `summaries.md`.
+
+**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts. Bumped whenever those prompts change, so summaries made with different wording can be told apart. See `summaries.md`.

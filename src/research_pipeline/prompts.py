@@ -10,6 +10,10 @@ import re
 
 from research_pipeline.models import Section
 
+# Stamped on every stored summary (its provenance). Bump it whenever SUMMARY_SYSTEM or
+# CRITIQUE_SYSTEM change, so old summaries can be told apart from new ones.
+PROMPT_VERSION = "2026-11-p3"
+
 # Tokens kept free for the instructions and the model's answer.
 RESERVED_TOKENS = 4000
 # A conservative estimate: English text averages about 4 characters per token; 3 leaves room.

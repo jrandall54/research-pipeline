@@ -16,6 +16,7 @@ from research_pipeline.llm import LLM, LlmError
 from research_pipeline.models import Section, Status
 from research_pipeline.sources.base import SourceError
 from research_pipeline.prompts import (
+    PROMPT_VERSION,
     build_critique_prompt,
     build_summary_prompt,
     citation_feedback,
@@ -170,7 +171,10 @@ def run_summarize(
                 set_status(conn, pid, Status.fetched)
             counts["fetched" if sections is not None else "abstract_only"] += 1
             result = summarize_paper(llm, paper["title"], paper["abstract"], sections, num_ctx)
-            save_summary(conn, pid, result, llm.model_name)
+            save_summary(
+                conn, pid, result, llm.model_name,
+                prompt_version=PROMPT_VERSION, paper_version=paper["version"], num_ctx=llm.num_ctx,
+            )
             clear_error(conn, pid)
             if listed:
                 conn.commit()  # keep `in_digest`; the digest rewrite picks the summary up

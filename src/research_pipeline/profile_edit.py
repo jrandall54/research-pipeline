@@ -27,9 +27,17 @@ _NEW_ID_RE = re.compile(r"^\d{4}\.\d{4,5}$")
 _OLD_ID_RE = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}$")
 
 
+# C0/C1 control characters (incl. ESC) become a space; invisible bidi controls (which can
+# make text display in a different order than it is stored) are dropped. Letters of any
+# script, including right-to-left ones, are untouched.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_BIDI = re.compile("[\u202a-\u202e\u2066-\u2069\u200e\u200f\u061c]")
+
+
 def normalise_text(s: str) -> str:
-    """Strip and collapse runs of whitespace to single spaces."""
-    return " ".join(s.split())
+    """Remove control and bidi-control characters, strip, and collapse runs of whitespace
+    to single spaces."""
+    return " ".join(_CONTROL.sub(" ", _BIDI.sub("", s)).split())
 
 
 def _key(s: str) -> str:
@@ -219,6 +227,22 @@ def remove_seed(vault: Path, id_or_index: str) -> bool:
 def set_top_n(vault: Path, n: int) -> None:
     def change(data) -> bool:
         data["top_n"] = n
+        return True
+
+    _edit(_profile_path(vault), Profile, change)
+
+
+def set_feedback_halflife(vault: Path, days: float | str) -> None:
+    """Days after which a vote or save counts half as much (1 to 3650)."""
+    try:
+        value = float(days)
+    except (TypeError, ValueError):
+        raise ValueError(f"{days!r} is not a number of days (give 1 to 3650, for example 60)") from None
+    if not 1 <= value <= 3650:  # also rejects nan
+        raise ValueError(f"{days!r} is out of range: give a number of days from 1 to 3650")
+
+    def change(data) -> bool:
+        data["feedback_halflife_days"] = value
         return True
 
     _edit(_profile_path(vault), Profile, change)

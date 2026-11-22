@@ -2,7 +2,14 @@ import json
 
 import pytest
 
-from research_pipeline.db import get_paper, open_db, papers_with_status, upsert_paper
+from research_pipeline.db import (
+    get_paper,
+    open_db,
+    papers_with_status,
+    record_vote,
+    set_saved,
+    upsert_paper,
+)
 from research_pipeline.models import PaperMeta, Profile, Status
 from research_pipeline.triage import run_triage
 
@@ -97,3 +104,27 @@ def test_skipped_papers_still_in_fts(conn, embedder):
     assert get_paper(conn, "2501.00004")["status"] == "skipped"
     hits = conn.execute("SELECT rowid FROM papers_fts WHERE papers_fts MATCH 'gardening'").fetchall()
     assert len(hits) == 1
+
+
+def test_votes_and_saves_reach_ranking(conn, embedder):
+    fill(conn)
+    profile = Profile(topics=[], seeds=[], top_n=10)
+    run_triage(conn, embedder, profile, {})  # embeds everything
+    base = get_paper(conn, "2501.00003")["triage_score"]
+    record_vote(conn, "2501.00001", 1)
+    set_saved(conn, "2501.00001", True)
+    conn.execute("UPDATE papers SET status = 'new'")
+    conn.commit()
+    run_triage(conn, embedder, profile, {})
+    row = get_paper(conn, "2501.00003")
+    assert row["triage_score"] > base
+    assert "liked similar: 2501.00001" in json.loads(row["triage_reasons"])
+
+
+def test_vote_on_paper_without_embedding_is_ignored(conn, embedder):
+    fill(conn)
+    add(conn, "9999.99999", "Never embedded")
+    conn.execute("UPDATE papers SET status = 'skipped' WHERE id = '9999.99999'")  # triage skips it
+    record_vote(conn, "9999.99999", 1)  # a real paper, but never embedded
+    counts = run_triage(conn, embedder, Profile(topics=[], seeds=[], top_n=10), {})
+    assert counts["triaged"] == 4

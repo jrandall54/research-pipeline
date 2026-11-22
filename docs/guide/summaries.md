@@ -81,7 +81,15 @@ If the sections (titles plus text) fit, they are used unchanged and `truncated` 
 
 Example: Introduction 100,000 characters, Method 100,000, References 60,000, Appendix 34,000. Dropping back matter leaves about 200,000, still too much, so each section keeps about 43% of its text (about 43,000 characters each). `truncated` is `True`. A long paper never causes an error.
 
+### Provenance: which model and prompt wrote this
+
+Every summary saved by `rpipe summarize` / `rpipe run` also records where it came from: `{"model", "prompt_version", "paper_version", "num_ctx", "created_at"}`. Worked example: `{"model": "qwen3:14b", "prompt_version": "2026-11-p3", "paper_version": 2, "num_ctx": 32768, "created_at": "2026-11-21T03:00:00+00:00"}` means qwen3:14b wrote it from version 2 of the paper, with prompt wording `2026-11-p3` and a 32768-token context window. It is stored as an extra `provenance` key in the summary row's JSON (like `basis`) and read with `db.get_provenance()`; `get_summary()` removes it before building `PaperSummary`. Summaries saved before this feature have no such key: they load and render exactly as before, and `get_provenance()` returns `None`.
+
+**When to bump `PROMPT_VERSION`** (in `prompts.py`): whenever `SUMMARY_SYSTEM` or `CRITIQUE_SYSTEM` change in any way that could change the output. Use the form `YYYY-MM-<tag>`. Without the bump, summaries from different wordings look identical and you cannot tell which ones to regenerate or compare.
+
 ## Why it's built this way
+
+- **Provenance is stored, not inferred.** When you change model, prompt or context size, old summaries stay in the vault. Without a record you could not say which model wrote a surprising claim, nor which summaries are stale after a prompt change. It lives in the existing JSON (no schema migration), so old rows need no conversion. Rejected: a new table or columns, which would need a migration for little gain.
 
 - **Citations are checked by code, not trusted.** A language model can write a fluent, confident sentence that the paper never says (a *hallucination*). Asking it to cite a section makes it point at its source, but it can invent the citation too. Checking cited titles against the real headings is cheap, exact and cannot be talked out of. It proves the cited section exists, not that the section says what the claim says; that is what the gold-set evaluation measures.
 - **Flag, do not drop.** A claim with a bad citation may still be true and useful. Deleting it would hide information and make the summary look more certain than it is. Marking it `unverified` lets the digest show it with a warning. The check is per claim, not per citation: a claim that cites one valid and one unknown section is flagged unverified as a whole, because we cannot tell which part the paper backs.
@@ -102,11 +110,11 @@ Rejected alternatives:
 uv run pytest tests/test_summarize.py -q
 ```
 
-The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They check the happy path, that the paper sits inside `<paper>` tags and the system prompt warns about instructions, that injected text (including a fake `</paper>`) stays inside the block, the one-retry rule and its feedback, flagging after a failed retry, abstract-only labelling, the context budget, and that model errors (`LlmError`) are passed on to the caller. `tests/test_db.py` checks that a saved summary loads back unchanged.
+The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They check the happy path, that the paper sits inside `<paper>` tags and the system prompt warns about instructions, that injected text (including a fake `</paper>`) stays inside the block, the one-retry rule and its feedback, flagging after a failed retry, abstract-only labelling, the context budget, and that model errors (`LlmError`) are passed on to the caller. `tests/test_db.py` checks that a saved summary loads back unchanged and that provenance round-trips (and is `None` for old rows).
 
 ## Where the code is
 
 - `src/research_pipeline/summarize.py`: `Claim`, `Summary`, `Critique`, `PaperSummary`, `unknown_citations`, `summarize_paper`
-- `src/research_pipeline/prompts.py`: `fit_to_budget`, `build_summary_prompt`, `build_critique_prompt`, `citation_feedback`, `defuse`, the system prompts
-- `src/research_pipeline/db.py`: `save_summary`, `get_summary`
+- `src/research_pipeline/prompts.py`: `PROMPT_VERSION`, `fit_to_budget`, `build_summary_prompt`, `build_critique_prompt`, `citation_feedback`, `defuse`, the system prompts
+- `src/research_pipeline/db.py`: `save_summary`, `get_summary`, `get_provenance`
 - `tests/test_summarize.py`, `tests/test_db.py`

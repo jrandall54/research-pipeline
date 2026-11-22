@@ -157,7 +157,9 @@ def test_digest_includes_fetched_status_without_summary(conn, tmp_path):
     add(conn, "2501.00001", 0.9, status=Status.fetched)
     text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
     assert "Title 2501.00001" in text and "Abstract 2501.00001" in text
-    assert "Summary" not in text.split("# Research digest")[1]
+    for marker in ("**Summary:**", "**Problem:**", "**Approach:**", "**Results:**",
+                   "**Limitations:**", "**Strengths**", "**Weaknesses**", "**Questions to ask**"):
+        assert marker not in text
     assert get_paper(conn, "2501.00001")["status"] == "in_digest"
 
 
@@ -175,3 +177,58 @@ def test_cited_section_names_cannot_break_digest_structure(tmp_path):
 
     line = _claim(Claim(text="t", sections=["Intro\n## Injected", "2 Method"]), [])
     assert "\n" not in line and line.endswith("[§ Intro ## Injected, 2 Method]")
+
+
+def test_digest_item_shows_id_and_saved_marker_and_footer_hint(conn, tmp_path):
+    from research_pipeline.db import record_vote, set_saved
+
+    add(conn, "2411.00001", 0.9)
+    add(conn, "2411.00002", 0.5)
+    set_saved(conn, "2411.00001", True)
+    record_vote(conn, "2411.00002", -1)
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "id: 2411.00001" in text and "★ saved" in text
+    assert "id: 2411.00002" in text and "👎" in text
+    assert text.count("rpipe vote 2411.00001 up|down · rpipe save 2411.00001") == 1
+
+
+def test_digest_without_items_has_no_hint(conn, tmp_path):
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "rpipe vote" not in text
+
+
+def test_digest_footer_shows_provenance(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    conn.execute("UPDATE summaries SET text = json_set(text, '$.provenance', json(?))"
+                 " WHERE kind = 'summary'",
+                 ('{"model": "qwen3:14b", "prompt_version": "2026-11-p3", "paper_version": 2,'
+                  ' "num_ctx": 32768, "created_at": "2026-11-21T03:00:00+00:00"}',))
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "_qwen3:14b · prompt 2026-11-p3 · paper v2 · 2026-11-21_" in text
+
+
+def test_digest_without_provenance_has_no_footer(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "prompt " not in text
+
+
+def test_provenance_line_tolerates_partial_dict():
+    from research_pipeline.digest import _provenance_line
+
+    assert _provenance_line({"model": "m"}) == ["_m_", ""]
+    assert _provenance_line({"model": "m", "paper_version": 0, "created_at": "2026-11-21T03:00:00"}) == [
+        "_m · paper v0 · 2026-11-21_", ""]
+    assert _provenance_line({}) == [] and _provenance_line(None) == []
+    assert _provenance_line({"created_at": None}) == []
+
+
+def test_digest_renders_with_partial_provenance(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    conn.execute("UPDATE summaries SET text = json_set(text, '$.provenance', json(?))"
+                 " WHERE kind = 'summary'", ('{"model": "qwen3:14b"}',))
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "_qwen3:14b_" in text

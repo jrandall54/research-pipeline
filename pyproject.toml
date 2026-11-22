@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 embed = ["sentence-transformers"]
+serve = ["datasette>=0.65,<1"]
 
 [project.scripts]
 rpipe = "research_pipeline.cli:app"

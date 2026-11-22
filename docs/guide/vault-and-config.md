@@ -13,6 +13,7 @@ research-vault/
   config.yaml      pipeline settings            (Phase 1)
   profile.yaml     what you care about          (Phase 1)
   vault.sqlite     all paper state, runs, search index  (Phase 1)
+  .run.lock        held while `rpipe run` is running so two runs cannot overlap; safe to ignore, never edit
   digests/         one markdown digest per day  (Phase 1)
   cache/           small caches; seeds.json holds the text of your seed papers (Phase 1)
   raw/             downloaded PDFs              (reserved, unused so far)
@@ -64,6 +65,7 @@ Seed ids may be written with or without quotes (`2301.10000` or `"2301.10000"`);
 
 **Part 2, only in a terminal (the wizard):**
 
+0. **Describe your research (optional).** `Describe your research in a few sentences (Enter to skip)`. Enter skips it. Otherwise the local model proposes topics and seed papers and you approve each one (see "Guided suggestions" in `profile.md`). If the model is unavailable it says `Local model unavailable; add topics by hand with `rpipe profile add-topic`` and the steps below run as normal. The steps below always run afterwards, so you can add more by hand. Note: with `llm_model: auto` (the default) a non-empty description runs the full model-fit probe first, which can take several minutes; press Enter to skip, or run `rpipe model fit` beforehand.
 1. **Topics.** On a new vault it explains what a topic is and asks `Topic (blank to finish)` repeatedly. Each topic is saved the moment you press Enter. Once you enter a topic of your own, the template examples you did not type are removed; enter none and the examples stay. A topic you type is never removed, even if it happens to match an example (typing only an example keeps all three examples). On an existing vault it shows your topics and asks `Add more topics? [y/N]`; the default is no, so Enter changes nothing. Whether the topics are still the template examples is decided from their content, not from whether this run created the file: if an earlier run was interrupted before any topic (or `init` first ran outside a terminal), the list is labelled "these are the template examples, not topics of your own", and the first topic of your own replaces them exactly as on a new vault. A profile whose topics differ from the template at all is treated as yours and nothing is removed.
 2. **Categories.** On a new vault it first explains in a few lines what an arXiv category is (with common examples, the taxonomy URL, `all` (every cs.* category) for "not sure", and the command to change it later), then asks for the categories (default shown; Enter keeps it, `all` collects every computer-science category). On an existing vault it shows them and asks `Change categories? [y/N]`.
 3. **Seeds.** It explains in a line what a seed paper is, then asks `Paper link, arXiv id or title (blank to finish)` repeatedly. Each entry goes through the same look-up, confirm and pick flow as `rpipe profile add-seed` and is saved at once. If arXiv cannot be reached, or the seed cannot be saved, that entry is skipped with a one-line message and the wizard carries on. Fewer than 5 seeds prints a tip to add more later.
@@ -76,9 +78,17 @@ Vault ready at /home/you/research-vault
   config.yaml: created
   profile.yaml: created
   vault.sqlite, raw/, markdown/, summaries/, my_work/, gold/, digests/, cache/ ready
-Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.
-Topic (blank to finish): > prompt injection attacks on LLM agents
+Describe your research in a few sentences (Enter to skip): > I work on security of LLM agents, mostly prompt injection.
+Proposed topics:
+  1. prompt injection attacks on LLM agents
+  2. agent sandboxing
+Add topic 'prompt injection attacks on LLM agents'? [Y/n]: > y
 Added topic: prompt injection attacks on LLM agents
+Add topic 'agent sandboxing'? [Y/n]: > n
+Found 1 of 1 proposed papers on arXiv (the rest were dropped).
+Add seed Universal and Transferable Adversarial Attacks on Aligned Language Models (Andy Zou, 2023)? [Y/n]: > y
+Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
+Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.
 Topic (blank to finish): > 
 An arXiv category is the subject tag every paper carries (cs.CR = security). Only papers in your categories are collected.
 Common ones: cs.CR security, cs.LG machine learning, cs.AI AI, cs.CL language/LLMs, cs.OS operating systems, cs.SE software engineering, cs.DC distributed computing, cs.NI networking, stat.ML statistical ML.

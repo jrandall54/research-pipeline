@@ -9,10 +9,11 @@
 ### Install
 
 ```
-uv sync --extra embed
+uv sync --extra embed                          # in the repo
+uv tool install --editable '.[embed]' --force  # for the plain `rpipe` command (and the nightly timer)
 ```
 
-`uv sync` installs the pipeline. The `embed` extra adds `sentence-transformers` (and with it PyTorch), the library that runs the embedding model. It is an **optional extra** because it is large (gigabytes, mostly PyTorch) and the tests, and every part of the pipeline except triage, do not need it. Without it `run` and `triage` stop with a clear message (see Troubleshooting); `collect` and `digest` never load the model and work without it. On a machine with a GPU, PyTorch uses it automatically; a CPU is also fine for a few hundred papers a night. The first run downloads the embedding model (about 130 MB for the default) from Hugging Face and caches it.
+`uv sync` installs the pipeline into the repo's own environment; the plain `rpipe` on your PATH (from `uv tool install`) lives in a separate environment that `uv sync` never touches, so install it with the second command. `uv sync` is an *exact* sync: it removes extras you did not name, so always list them all (for example `uv sync --extra embed --extra serve`). The `embed` extra adds `sentence-transformers` (and with it PyTorch), the library that runs the embedding model. It is an **optional extra** because it is large (gigabytes, mostly PyTorch) and the tests, and every part of the pipeline except triage, do not need it. Without it `run` and `triage` stop with a clear message (see Troubleshooting); `collect` and `digest` never load the model and work without it. On a machine with a GPU, PyTorch uses it automatically; a CPU is also fine for a few hundred papers a night. The first run downloads the embedding model (about 130 MB for the default) from Hugging Face and caches it.
 
 ### The `rpipe` command
 
@@ -38,7 +39,7 @@ It creates the vault (default `~/research-vault`, or `--vault PATH`, or the `RES
 
 ### Set up your profile
 
-The `rpipe init` wizard covers steps 1 and 2 below the first time. You never need to open `profile.yaml`; use the commands any time later (details and sample output in `profile.md`):
+The `rpipe init` wizard covers steps 1 and 2 below the first time, and it can start from a description: answer its first question with a few sentences about your research and the local model proposes topics and seed papers for you to approve (the same thing is available later as `rpipe profile suggest "..."`; it needs Ollama, and without it you just continue by hand). You never need to open `profile.yaml`; use the commands any time later (details and sample output in `profile.md`):
 
 1. Add 10-20 papers you like as seeds. Paste an arXiv link, an id, or a title and confirm: `rpipe profile add-seed https://arxiv.org/abs/2307.15043` (`vault-and-config.md` has advice on choosing them).
 2. Make the topics specific phrases ("prompt injection attacks and defenses for LLM agents" beats "security"): `rpipe profile add-topic "..."`, and drop the examples with `rpipe profile remove-topic 1`.
@@ -51,10 +52,12 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 | Command | What it does | Writes |
 | --- | --- | --- |
-| `run` | `start_run`, then collect, seed lookup, triage, summarize, digest for today, then `finish_run` with the merged counts and errors | the `runs` row, papers, summaries, `digests/<today>.md` |
+| `run` | `start_run`, then collect, seed lookup, triage, summarize, digest for today, then `finish_run` with the merged counts and errors (always, even after a crash; exit code 1 if a stage crashed) | the `runs` row, papers, summaries, `digests/<today>.md` |
 | `collect` | fetch from arXiv and Hugging Face into the database | papers (status `new`) |
 | `triage` | rank the `new` papers, keep the top N | statuses, scores, reasons, embeddings |
 | `summarize` | summarise and critique every paper still waiting (`triaged`, `fetched`, or in today's digest without a summary) with the local model (fetching arXiv HTML full text first; abstract only if there is none) | full texts, summaries, statuses `fetched` then `summarized` |
+| `runs [--limit N]` | list recent runs, newest first | nothing |
+| `serve [--host H] [--port 8001]` | browse the vault and vote/save from a phone with Datasette over Tailscale (needs the `serve` extra: `uv sync --extra embed --extra serve`, or `uv tool install --editable '.[embed,serve]' --force`; see [browsing.md](browsing.md)) | `votes`, `saves` (only when you press a button) |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
 **The summarize stage.** `rpipe run` checks that Ollama is up and the model installed before this stage. If not, it skips the stage, records the cause in the health line and `runs.errors`, and still writes the digest (abstracts only), so a stopped Ollama never costs you the night's digest. A single paper that fails (model error, network error fetching its text) keeps its status, gets its `error` and `retry_count` set, and the rest carry on.
@@ -95,7 +98,15 @@ Ollama is running at http://localhost:11434 and model qwen3:8b is installed.
 
 Illustrative output; your numbers will differ.
 
-Gold-set commands (`rpipe gold add`, `rpipe gold list`, `rpipe gold remove`, `rpipe gold add-fact`) build the answer key of papers and key facts that `rpipe eval` checks summaries against; see `evaluation.md`.
+Feedback commands (`rpipe vote ID up|down|clear`, `rpipe save ID`, `rpipe unsave ID`, `rpipe feedback`) record what you thought of a digest item. `ID` is the `id:` shown under each item (an arXiv id) or part of the title; an ambiguous title shows a numbered list, an unknown one changes nothing. See `digest.md`.
+
+```
+$ uv run rpipe vote 2307.15043 up
+$ uv run rpipe save 2307.15043
+$ uv run rpipe feedback          # lists current votes and saved papers with titles
+```
+
+Gold-set commands (`rpipe gold add`, `rpipe gold list`, `rpipe gold remove`, `rpipe gold add-fact`, `rpipe gold edit-fact`, `rpipe gold remove-fact`) build the answer key of papers and key facts that `rpipe eval` checks summaries against; see `evaluation.md`.
 
 ```
 $ uv run rpipe gold add 2307.15043          # paste a link, id or title; then type key facts, one per line
@@ -118,7 +129,7 @@ Illustrative commands; see `evaluation.md` for a sample report.
 
 Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
-**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, or `--date` is not a date.
+**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `75` when another `rpipe run` already holds the run lock (the lock file is `.run.lock` in the vault; the nightly unit is unchanged). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, `--date` is not a date, or `vault.sqlite` was written by a newer rpipe (it stops and says to upgrade rather than touch it).
 
 ### A real run, step by step
 
@@ -171,16 +182,31 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 | `counts` | `{"inserted": 339, "updated": 11, "unchanged": 0, "source_errors": 0, "triaged": 15, "skipped": 324, "embedded": 339}` |
 | `errors` | `[]` |
 
-`counts` merges the collect counts (`inserted`, `updated`, `unchanged`, `source_errors`) with the triage counts (`triaged`, `skipped`, `embedded`) and, since Phase 2, the summarize counts (`fetched`, `summarized`, `abstract_only`, `truncated`, `summary_failed`); see `sources.md`, `triage.md` and the summarize stage above. The sample row above predates Phase 2 so it has no summarize counts, and the sample health line shows `summarized 0` for the same reason. A row with no `finished_at` means that run crashed before finishing. Look at it with `sqlite3 <vault>/vault.sqlite "select * from runs"`.
+`counts` merges the collect counts (`inserted`, `updated`, `unchanged`, `source_errors`) with the triage counts (`triaged`, `skipped`, `embedded`) and, since Phase 2, the summarize counts (`fetched`, `summarized`, `abstract_only`, `truncated`, `summary_failed`); see `sources.md`, `triage.md` and the summarize stage above. The sample row above predates Phase 2 so it has no summarize counts, and the sample health line shows `summarized 0` for the same reason. Look at the history with `rpipe runs` (below) or `sqlite3 <vault>/vault.sqlite "select * from runs"`.
+
+### Crash-safe runs and `rpipe runs`
+
+**What happens if a stage crashes.** Source failures, a missing model and a failed seed lookup are already handled one by one (see above). Anything *else* unexpected (a bug, a full disk) used to leave the run row with no `finished_at`. Now `run` wraps the stages: the exception is recorded in `runs.errors` as `<stage>: <message>` (the same plain-string shape as `arxiv: arXiv API returned HTTP 500`, with the stage being `collect`, `triage` or `summarize`), the later stages are skipped, `run` still tries to write the digest from whatever is in the database (so the health line shows the error), `finish_run` always executes, and the command exits with code 1 so cron or systemd notices. If even the digest fails, that is recorded as `digest: ...`.
+
+**What is guaranteed.** Both a crash and Ctrl-C finish the run row (`finish_run` sits in a `finally`, so it executes exactly once whichever way the command ends). After Ctrl-C the error is `<stage>: interrupted`, no digest is attempted (you wanted out), and the interrupt then propagates, so the exit code is the usual one for an interrupt. Counts are kept for stages that completed before the failure; the partial counts of the stage that crashed mid-way are lost (stage functions only return counts when they finish). `SIGTERM` (what `systemctl stop` and a plain `kill` send) is treated like Ctrl-C while `run` executes, so it is recorded the same way. An interrupt that lands while the digest is being written is recorded as `digest: interrupted`. Failing to load the embedding model is recorded as `embed: ...` (the run row is created before the model is loaded, so this and every later failure leaves a record). Only a hard kill (power cut, `kill -9`) leaves `finished_at` empty. If `finish_run` itself fails (for example a full disk) while another error is already propagating, the failure is printed as `warning: could not record the run: ...` and the original error still wins; if nothing else went wrong, the `finish_run` failure is raised.
+
+**One run at a time.** `run` first takes a non-blocking lock (`flock` on `<vault>/.run.lock`). If another `rpipe run` holds it (for example a `Persistent=true` catch-up that woke up while you were running by hand), the second command prints `` another `rpipe run` is already using <vault> `` (then "nothing was started. Wait for it to finish (see `rpipe runs`).") and exits at once with code `75` (the standard "try again later" code), without creating a `runs` row. The operating system drops the lock when the process ends for any reason (crash, `kill -9`, SIGTERM), so a stale lock file never blocks a later run; the file itself is harmless and stays in the vault.
+
+**A hung model stops after one timeout.** The first time the model does not answer within its time limit (`LlmTimeout`, 600 s), `run_summarize` records the paper's failure, adds `summarize: stopped calling the model after the first timeout; remaining papers show abstracts only` to the errors, and stops calling the model for the rest of that run. Collecting, triage and the digest carry on; the unsummarized papers keep their status and are retried on the next run. Rejected: continuing, which would make every remaining paper wait out the full timeout (hours for a night's batch).
+
+**`rpipe runs [--limit 10]`** prints one line per run, newest first: start time (UTC), how long it took (or `did not finish`), a counts summary (`new`, `kept`, `summarized`) and the number of errors, for example `2026-11-21T19:11:05+00:00  11s  new 339, kept 15, summarized 15  errors 0`.
+
+**A run that never finished.** If the process was killed outright (power cut, `kill -9`) nothing can record anything, so `finished_at` stays empty. The next `run` notices that the run immediately before it has no `finished_at` and adds `previous run did not finish` to the end of the digest's health line. Only the immediately preceding run is checked (the current run is itself unfinished while it writes the digest, so it is excluded), so the warning appears once and clears after the next healthy run.
 
 ### Running it nightly
 
-The pipeline stops at the command; scheduling it (for example with a systemd timer or cron entry running `rpipe run`) is a later phase. Running twice on the same day is safe: no paper is stored twice and the day's digest is rewritten with everything from both runs (`digest.md`, "Same-day re-runs").
+To run it every night automatically, use `rpipe schedule install` (a systemd user timer; see [scheduling.md](scheduling.md)). Running twice on the same day is safe: no paper is stored twice and the day's digest is rewritten with everything from both runs (`digest.md`, "Same-day re-runs").
 
 ## Why it's built this way
 
 - **One command that records itself**: `run` owns the `runs` row, so counts from every stage and every error end up in one place. The individual stage functions return counts and errors rather than finishing the run.
-- **A failed source does not fail the run**: a nightly job that exits non-zero because one website was down would train you to ignore failures. The error is written to the digest's first line and to `runs.errors` instead; exit code 1 is kept for "nothing could run".
+- **A failed source does not fail the run**: a nightly job that exits non-zero because one website was down would train you to ignore failures. The error is written to the digest's first line and to `runs.errors` instead; exit code 1 is kept for "nothing could run". Exit `75` means only "another run was in progress".
+- **`flock`, not a PID file**: the OS releases a `flock` when its owner dies, so there is no stale-lock cleanup to get wrong. Rejected: a PID file (needs liveness checks and can go stale after a crash) and a blocking lock (the catch-up run would sit waiting for hours).
 - **`build_pipeline` as the single seam**: `cli.py` builds the real sources, a lazy embedder factory, seed lookup, a lazy model-client factory (`make_llm`) and the full-text fetcher in one function. The end-to-end tests replace that one function with fixture-backed stubs, so the *real* CLI, database, ranking and digest code run offline.
 - **Optional `embed` extra**: keeps installs and tests light. Rejected: making PyTorch a hard dependency.
 - **No `feedparser` dependency**: the arXiv response is parsed with the standard library (see `sources.md`); RSS is a later phase and can add the library then.
@@ -201,7 +227,7 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 | --- | --- |
 | `No vault found at ... (no config.yaml). Run rpipe init first.` (exit 1) | The vault does not exist yet, or you pointed `--vault` / `RESEARCH_VAULT` at the wrong folder. Run `init`, or fix the path. |
 | `invalid settings` / `invalid YAML` naming a file (exit 1) | One of the two settings files holds an invalid value (this should not happen if you only use `rpipe profile ...`, which refuses bad input). The message starts with the file path and says which field. Every `rpipe profile` command refuses to change a file that is already broken (and tells you which file), so this is the one case where you correct the named field in the file itself; the file reference in `vault-and-config.md` lists every field and its allowed values. After that the commands work again. |
-| `sentence-transformers is not installed; run uv sync --extra embed` (exit 1) | Install the extra (see Install). |
+| `sentence-transformers is not installed; reinstall with the extra: ...` (exit 1; for `rpipe run` it is also recorded as `embed: ...` in `runs.errors`, so `rpipe runs` and the digest health line show it) | The `rpipe` that ran has no embed extra. Reinstall: `uv tool install --editable '.[embed]' --force` (plain `rpipe`, and the nightly timer), or `uv sync --extra embed` (repo use). `rpipe schedule install` refuses to run from an environment without it. |
 | Health line says `errors: arxiv: arXiv API returned HTTP 5xx` (or a timeout) | arXiv (or Hugging Face) was down. The digest was built from the other source. Re-run later: `run` is safe to repeat. |
 | Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, for example a mistyped id. Remove it with `rpipe profile remove-seed` and add the right one with `rpipe profile add-seed` (`rpipe profile show` numbers the seeds). Ranking continues using your topics and any seeds that did resolve. |
 | Health line says `seeds: could not fetch ...: <reason>` | The seed lookup failed (network). Ranking used the seeds it already had; it retries next run. |
@@ -218,9 +244,11 @@ uv run pytest tests/test_e2e.py -q                    # the end-to-end tests
 
 ## Where the code is
 
-- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `summarize`, `digest`, `model`, `gold` and `eval` commands, `build_pipeline`, `health_line` (the `profile` commands are in `profile.md`)
+- `src/research_pipeline/cli.py`: `run`, `collect`, `triage`, `summarize`, `digest`, `model`, `gold` and `eval` commands, `build_pipeline`, `health_line`, `runs` (the `profile` commands are in `profile.md`)
 - `src/research_pipeline/seeds.py`: seed text lookup and cache
 - `src/research_pipeline/summarize.py`: `run_summarize` (the per-paper loop)
 - `src/research_pipeline/llm.py`, `fulltext.py`, `prompts.py`: model client, full-text fetching, prompts (see `llm.md`, `fulltext.md`, `summaries.md`)
 - `src/research_pipeline/gold.py`, `evaluate.py`: `rpipe gold` and `rpipe eval` (see `evaluation.md`)
-- `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`
+- `src/research_pipeline/run_lock.py`: `run_lock`, `RunLocked`
+- `src/research_pipeline/db.py`: `start_run`, `finish_run`, `list_runs`, `previous_run_unfinished`
+- `tests/test_runs.py`, `tests/test_run_lock.py`, `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`

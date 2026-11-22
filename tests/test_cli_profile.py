@@ -3,37 +3,12 @@ import json
 import pytest
 from typer.testing import CliRunner
 
+from fakes import StubArxiv, paper
 from research_pipeline import cli
-from research_pipeline.models import PaperMeta
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import init_vault, load_config, load_profile
 
 runner = CliRunner()
-
-
-def paper(pid="2307.15043", title="Universal and Transferable Adversarial Attacks"):
-    return PaperMeta(
-        id=pid, title=title, abstract="An abstract.", authors=["Andy Zou", "Zifan Wang"],
-        source="arxiv", url=f"https://arxiv.org/abs/{pid}", published="2023-07-27",
-    )
-
-
-class StubArxiv:
-    def __init__(self, by_id=None, by_title=None, error=None):
-        self.by_id, self.by_title, self.error = by_id or [], by_title or [], error
-        self.calls = []
-
-    def fetch_by_ids(self, ids):
-        self.calls.append(("id", ids))
-        if self.error:
-            raise self.error
-        return self.by_id
-
-    def search_title(self, query, max_results=5):
-        self.calls.append(("title", query))
-        if self.error:
-            raise self.error
-        return self.by_title
 
 
 @pytest.fixture
@@ -200,6 +175,16 @@ def test_set_top_n(vault):
     assert load_profile(vault / "profile.yaml").top_n == 7
     res = run(vault, "set-top-n", "0")
     assert res.exit_code == 1 and "Traceback" not in res.output
+
+
+def test_set_feedback_halflife_validates(vault):
+    for bad in ("0", "abc", "5000"):
+        res = run(vault, "set-feedback-halflife", bad)
+        assert res.exit_code != 0 and "Traceback" not in res.output
+    assert load_profile(vault / "profile.yaml").feedback_halflife_days == 60.0
+    res = run(vault, "set-feedback-halflife", "30")
+    assert res.exit_code == 0 and "30" in res.output
+    assert load_profile(vault / "profile.yaml").feedback_halflife_days == 30.0
 
 
 def test_set_categories_and_invalid_exit_1(vault):

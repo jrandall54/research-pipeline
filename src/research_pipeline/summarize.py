@@ -9,47 +9,18 @@ from collections.abc import Callable
 from datetime import date
 from typing import Literal, TypeVar
 
-from pydantic import BaseModel, Field
-
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
-from research_pipeline.llm import LLM, LlmError
+from research_pipeline.llm import LLM, LlmError, LlmTimeout
 from research_pipeline.models import Section, Status
+from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
 from research_pipeline.sources.base import SourceError
 from research_pipeline.prompts import (
+    PROMPT_VERSION,
     build_critique_prompt,
     build_summary_prompt,
     citation_feedback,
     fit_to_budget,
 )
-
-
-class Claim(BaseModel):
-    """One statement about the paper and the section titles it comes from."""
-
-    text: str
-    sections: list[str] = Field(min_length=1)
-
-
-class Summary(BaseModel):
-    one_line: str
-    problem: Claim
-    approach: Claim
-    results: Claim
-    limitations: Claim
-
-
-class Critique(BaseModel):
-    strengths: list[Claim]
-    weaknesses: list[Claim]
-    questions: list[str]
-
-
-class PaperSummary(BaseModel):
-    summary: Summary
-    critique: Critique
-    basis: Literal["full_text", "abstract"]
-    truncated: bool
-    unverified: list[str]  # claim texts whose citations could not be verified
 
 
 T = TypeVar("T", Summary, Critique)
@@ -170,7 +141,10 @@ def run_summarize(
                 set_status(conn, pid, Status.fetched)
             counts["fetched" if sections is not None else "abstract_only"] += 1
             result = summarize_paper(llm, paper["title"], paper["abstract"], sections, num_ctx)
-            save_summary(conn, pid, result, llm.model_name)
+            save_summary(
+                conn, pid, result, llm.model_name,
+                prompt_version=PROMPT_VERSION, paper_version=paper["version"], num_ctx=llm.num_ctx,
+            )
             clear_error(conn, pid)
             if listed:
                 conn.commit()  # keep `in_digest`; the digest rewrite picks the summary up
@@ -183,4 +157,11 @@ def run_summarize(
             message = f"{type(exc).__name__}: {exc}" if not isinstance(exc, (LlmError, SourceError)) else str(exc)
             record_failure(conn, pid, message)
             errors.append(f"summarize {pid}: {' '.join(message.split())}")
+            if isinstance(exc, LlmTimeout):
+                # A hung model would make every remaining paper wait out the full timeout.
+                errors.append(
+                    "summarize: stopped calling the model after the first timeout;"
+                    " remaining papers show abstracts only"
+                )
+                break
     return counts, errors

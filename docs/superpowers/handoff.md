@@ -1,37 +1,64 @@
-# Handoff — state after Phase 2 and auto-model (2026-11-21)
+# Handoff — state after Phase 3 (2026-11-21)
 
-Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") says what Phase 3 is.
+Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next.
 
-## Done and on `main`
-- **Phase 2** (plan: `plans/2026-11-21-phase2-summaries-you-can-trust.md`): full-text fetch from arXiv HTML, cited summaries, gold set, eval.
-- **Auto model and context** (plan: `plans/2026-11-21-auto-model-and-context.md`): `llm_model` and `llm_num_ctx` default to `auto`; `ollama_fit.py` probes Ollama; `rpipe model fit|show|check|set|set-url|set-context`.
-- Tests: `uv run pytest -q` (407 passing at merge). Docs: `docs/guide/` (llm, fulltext, summaries, evaluation, glossary updated).
+## Done
+- **Phase 3, the daily habit**, is complete and on branch `phase-3-daily-habit`. It is **NOT merged to main; the owner merges.** Plan: `plans/2026-11-21-phase3-daily-habit.md`.
+  - Votes and saves (`rpipe vote|save|unsave|feedback`), stored in `votes` and `saves`; schema versioning with `user_version` and a migration ladder (`db.py`).
+  - Implicit profile in triage: votes and saves nudge scores, with a half-life decay (`rpipe profile set-feedback-halflife`).
+  - Run history and crash-safe runs (`rpipe runs`); digest provenance line; summaries record which model and context made them.
+  - `rpipe schedule install|status|remove|show` (systemd user timer).
+  - `rpipe serve` (Datasette over Tailscale; vote and save forms where you type the paper id).
+  - `rpipe profile suggest` and a guided `rpipe init` that propose topics and seeds from a description.
+- Earlier, on `main`: Phase 2 (full text, cited summaries, gold set, eval) and auto model and context (`rpipe model fit|show|check|set|set-url|set-context`).
+- Parked-list cleanup (the parked-fixes segment of this branch) is done: `uv run pytest -q` gives 623 passing.
+- Earlier Phase 3 count: 563 passing. Docs: `docs/guide/` (new `scheduling.md` and `browsing.md`; `triage`, `data-model`, `digest`, `profile`, `running`, `glossary` updated).
 
 ## Owner actions not yet done
-- Run `rpipe model fit` once (loads and unloads models for a few minutes), then check `rpipe model show`.
-- "Best model" = most parameters that fits, so `ds2-16b-20k` may beat `q3-14b-22k`. Pin with `rpipe model set q3-14b-22k` if wanted.
-- Gold set is empty. Optional: `rpipe gold add`, then `rpipe eval run|grade|report`. The eval is the proper way to compare models.
+- Merge `phase-3-daily-habit` into `main` when happy.
+- Reinstall the tool WITH the extras: `cd` into the repo and run `uv tool install --editable '.[embed,serve]' --force` (the plain `rpipe` on PATH was installed without `embed`, so the nightly run would fail). Then `rpipe schedule install` (it refuses if embed is missing), then `loginctl enable-linger $USER` (so the timer runs with nobody logged in). Check with `rpipe schedule status`.
+- `rpipe serve` (the metadata shape was verified against a real Datasette 0.65 in a smoke run; see `.superpowers/sdd/2026-11-21-phase3-daily-habit/final-fix-report.md`). In the repo use `uv sync --extra embed --extra serve`; plain `uv sync` removes extras.
+- Start voting, so the implicit profile has something to learn from.
+- `rpipe profile suggest "<describe your research>"` to get topic and seed proposals. Seed papers are still empty.
+- From the previous handoff, if not done: `rpipe model fit` (a few minutes), then `rpipe model show`. "Best model" = most parameters that fits, so `ds2-16b-20k` may beat `q3-14b-22k`; pin with `rpipe model set q3-14b-22k` if wanted. The gold set is still empty (optional: `rpipe gold add`, then `rpipe eval run|grade|report`).
 - The user's `o` script (`~/.local/bin/o`) is NOT a dependency. Never call it from the program.
 
 ## Rulings worth remembering
-- A pinned model needs to fit at 8192 only; an auto-chosen one at 16384 or more.
-- `llm_num_ctx` floor is 8192 (the prompt budget is zero at 2048).
-- Summary retries: same-day recovery, cap 3 (`MAX_SUMMARY_TRIES`). A failure left to a later day is not retried (documented limitation).
-- Hidden-text stripping against prompt injection has documented gaps (see `docs/guide/fulltext.md`).
+Phase 3:
+- The 1024-token margin is kept even at the full trained context: it guards memory fluctuation, not just overflow (llm.md).
+- Executed without a separate plan-review pause, on a branch in place (no worktree); merge is the owner's call.
+- Digest: id shown per item, the vote hint once in the footer (`digest.md`).
+- Implicit profile uses the NEAREST liked/disliked paper (max of weight x cosine), not an average, which dilutes with history (`triage.md`). Weights 0.20 liked, 0.15 disliked; a reason shows only at raw cosine >= 0.70.
+- Timestamps parsed tolerantly (ISO `T`/`Z` and `YYYY-MM-DD HH:MM:SS`); SQL inserts use `db.py`'s timestamp format.
+- `runs.errors` keeps its shape, a list of `<stage>: <message>` strings (`running.md`).
+- Migration ladder keyed on `user_version`, no migrations framework (`data-model.md`).
+- `rpipe serve` allows only localhost, loopback and Tailscale hosts (allowlist, not blocklist); `datasette` pinned `>=0.65,<1` because 1.0 moved canned queries to `datasette.yaml` (unverified) (`browsing.md`).
+- Votes are append-only; a down vote beats a save of the same paper.
+
+Parked-fixes branch segment:
+- Run lock covers only `rpipe run`; `summarize`, `collect`, `triage`, `eval run`, `model fit` can still overlap a nightly run (parked, see below).
+- `save_summary` provenance stays optional; the digest footer tolerates missing fields.
+- Locked run exits 75; unit file unchanged.
+- Probing deadlines: fit/run/check 900 s, `model show` 10 s, fixed constants.
+- Pinned num_ctx is cached as given; the 8192 floor applies to auto-chosen values only.
+
+From before:
+- A pinned model needs to fit at 8192 only; an auto-chosen one at 16384 or more. `llm_num_ctx` floor is 8192.
+- Summary retries: same-day recovery, cap 3 (`MAX_SUMMARY_TRIES`); a failure left to a later day is not retried.
+- Hidden-text stripping has documented gaps (`fulltext.md`).
 
 ## Parked (not fixed, no owner decision needed yet)
-- Cached `num_ctx` is not re-checked against bounds.
-- A failed unload after a probe is swallowed silently.
-- No overall time limit on probing (a hung Ollama could stall a run about 30 minutes).
-- The 1024-token margin is also applied when a model fits at its full trained context.
-- `rpipe model show` can take about 30 s if Ollama hangs.
-- Layering inversion: `db.py` imports `summarize`.
-- Tests: duplicate `AlwaysSummary`, and test-to-test imports.
-- No command to edit a single gold fact.
-- No stop after the first LLM timeout in a run.
+Fixed, or closed by a ruling (see Rulings), apart from these new ones:
+- Only `rpipe run` takes the run lock; other writers (`summarize`, `collect`, `triage`, `eval run`, `model fit`) can overlap a nightly run.
+- `ollama_fit._request`/`fits`: after an HTTP error, `session.check()` decides deadline-vs-does-not-fit by clock comparison; timer precision could misclassify (theoretical).
+
+Dropped as resolved in Phase 3: no way to add a gold fact (`rpipe gold add-fact` exists).
+
+## Next: Phase 4
+Not fully known here: see the master plan in Claude Docs. The repo docs hint at it: `my_work/` similarity in the triage score (currently a 0.0 stub, `TODO(phase4)` in `rank.py`/`triage.md`) and the `links` table for relating papers to your notes (`data-model.md`). RSS collection is also marked as a later phase.
 
 ## Process notes
-- Plans were executed subagent-driven (implementer, per-task review, final opus review, one fix wave). The T6 implementer wrote code before tests, and the Phase 2 fix wave was not strictly test-first; both were disclosed.
+- Plans are executed subagent-driven (implementer, per-task review, fix rounds). Phase 3 used 1 to 2 fix rounds on tasks 3, 5, 6, 7, 8. The T6 implementer in Phase 2 wrote code before tests; disclosed.
 - Project rules are in `CLAUDE.md`: docs in the same commit as code, and every user setting needs an `rpipe` command.
 
 ## Watching: truncation

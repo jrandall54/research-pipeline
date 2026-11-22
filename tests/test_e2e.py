@@ -6,7 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from conftest import FakeEmbedder, FakeLLM
-from conftest import SECTIONS, critique, summary
+from conftest import SECTIONS, AlwaysSummary, critique, summary
 from research_pipeline.llm import LlmError
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
@@ -50,14 +50,6 @@ def vault(tmp_path):
 
 def fetch_text(pid):
     return SECTIONS
-
-
-class AlwaysSummary(FakeLLM):
-    """Answers every request with a valid summary or critique, whatever the order."""
-
-    def generate(self, system, user, schema):
-        self.calls.append((system, user))
-        return summary() if schema.__name__ == "Summary" else critique()
 
 
 def make_llm():
@@ -161,7 +153,7 @@ def test_seed_fetch_failure_does_not_stop_the_run(vault, monkeypatch):
 
 def _no_extra_pipeline(monkeypatch):
     def make_embedder():
-        raise RuntimeError("sentence-transformers is not installed; run `uv sync --extra embed`")
+        raise RuntimeError("sentence-transformers is not installed; reinstall with the extra: `uv tool install --editable '.[embed]' --force`")
 
     hf = parse_hf_daily(json.loads((FIXTURES / "hf_daily.json").read_text()))
     monkeypatch.setattr(
@@ -175,7 +167,18 @@ def test_missing_embed_extra_is_a_clear_error_for_run_and_triage(vault, monkeypa
     _no_extra_pipeline(monkeypatch)
     res = run_cli(cmd, "--vault", str(vault))
     assert res.exit_code == 1
-    assert "uv sync --extra embed" in res.output
+    assert "uv tool install --editable '.[embed]' --force" in res.output
+
+
+def test_run_records_embedder_load_failure_in_runs(vault, monkeypatch):
+    _no_extra_pipeline(monkeypatch)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 1
+    finished, _, errors = _last_run(vault)
+    assert finished is not None
+    assert len(errors) == 1 and errors[0].startswith("embed: sentence-transformers is not installed")
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert "sentence-transformers is not installed" in first
 
 
 def test_collect_and_digest_work_without_the_embed_extra(vault, monkeypatch):
@@ -204,7 +207,7 @@ def test_digest_rejects_bad_date(vault):
 
 def test_real_build_pipeline_does_not_load_the_embedder_until_asked(vault, monkeypatch):
     def boom(model_name):
-        raise RuntimeError("sentence-transformers is not installed; run `uv sync --extra embed`")
+        raise RuntimeError("sentence-transformers is not installed; reinstall with the extra: `uv tool install --editable '.[embed]' --force`")
 
     monkeypatch.setattr(cli, "SentenceTransformerEmbedder", boom)
     pipeline = cli.build_pipeline(cli.load_config(vault / "config.yaml"))
@@ -384,7 +387,7 @@ def test_e2e_version_bump_resummarises_from_new_text(vault, monkeypatch):
 import httpx
 import respx
 
-from test_ollama_fit import GB, URL as OLLAMA, FakeOllama
+from fakes import GB, URL as OLLAMA, FakeOllama
 
 
 def install_real_llm(monkeypatch, vault):
@@ -591,3 +594,122 @@ def test_health_line_counts_truncated_summaries():
     line = cli.health_line(date(2026, 11, 21), {"summarized": 3, "truncated": 2}, [])
     assert "truncated 2" in line
     assert "truncated" not in cli.health_line(date(2026, 11, 21), {"summarized": 3}, [])
+
+
+def test_crash_in_collect_still_finishes_run(vault, monkeypatch):
+    install(monkeypatch)  # a single failing source is isolated by run_collect, so crash the stage itself
+    monkeypatch.setattr(cli, "run_collect", lambda *a, **k: (_ for _ in ()).throw(KeyError("kaboom")))
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 1, res.output
+    import sqlite3
+    finished, errors = sqlite3.connect(vault / "vault.sqlite").execute(
+        "SELECT finished_at, errors FROM runs"
+    ).fetchone()
+    assert finished is not None
+    assert any("collect:" in e and "kaboom" in e for e in json.loads(errors))
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert "kaboom" in first
+
+
+def _last_run(vault):
+    import sqlite3
+    finished, counts, errors = sqlite3.connect(vault / "vault.sqlite").execute(
+        "SELECT finished_at, counts, errors FROM runs ORDER BY id DESC"
+    ).fetchone()
+    return finished, json.loads(counts), json.loads(errors)
+
+
+def test_keyboard_interrupt_finishes_run_records_it_and_propagates(vault, monkeypatch):
+    install(monkeypatch)
+
+    def interrupt(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "run_triage", interrupt)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 130  # typer turns the propagated KeyboardInterrupt into the interrupt exit
+    finished, _, errors = _last_run(vault)
+    assert finished is not None
+    assert errors == ["triage: interrupted"]
+    assert next((vault / "digests").glob("*.md"), None) is None  # no digest after Ctrl-C
+
+
+def test_sigterm_is_handled_like_ctrl_c_and_restored(vault, monkeypatch):
+    import signal
+    install(monkeypatch)
+    before = signal.getsignal(signal.SIGTERM)
+
+    def term(*a, **k):
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)  # what the kernel signal would do
+
+    monkeypatch.setattr(cli, "run_triage", term)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 130
+    finished, _, errors = _last_run(vault)
+    assert finished is not None and errors == ["triage: interrupted"]
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+def test_interrupt_during_digest_is_recorded(vault, monkeypatch):
+    install(monkeypatch)
+
+    def interrupt(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "write_digest", interrupt)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 130
+    finished, _, errors = _last_run(vault)
+    assert finished is not None and errors[-1] == "digest: interrupted"
+
+
+def test_digest_failure_finishes_run_and_exits_1(vault, monkeypatch):
+    install(monkeypatch)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cli, "write_digest", boom)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 1, res.output
+    finished, _, errors = _last_run(vault)
+    assert finished is not None
+    assert errors == ["digest: disk full"]
+
+
+@pytest.mark.parametrize("stage,patched", [("triage", "run_triage"), ("summarize", "run_summarize")])
+def test_crash_in_later_stage_keeps_earlier_counts(vault, monkeypatch, stage, patched):
+    install(monkeypatch)
+
+    def boom(*a, **k):
+        raise RuntimeError("bad stage")
+
+    monkeypatch.setattr(cli, patched, boom)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 1, res.output
+    finished, counts, errors = _last_run(vault)
+    assert finished is not None
+    assert counts["inserted"] > 0
+    assert errors == [f"{stage}: bad stage"]
+    assert next((vault / "digests").glob("*.md")).exists()
+
+
+def test_run_after_llm_timeout_still_writes_digest_and_records_error(vault, monkeypatch):
+    import sqlite3
+    from research_pipeline.llm import LlmTimeout
+
+    class HangingLLM(AlwaysSummary):
+        def generate(self, system, user, schema):
+            self.calls.append((system, user))
+            raise LlmTimeout("Ollama at http://x timed out after 600s")
+
+    llm = HangingLLM([])
+    install(monkeypatch, llm=lambda: llm)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert len(llm.calls) == 1  # only the first summary attempt reached the model
+    assert len(list((vault / "digests").glob("*.md"))) == 1
+    errors = json.loads(
+        sqlite3.connect(vault / "vault.sqlite").execute("SELECT errors FROM runs").fetchone()[0]
+    )
+    assert any(e.startswith("summarize: stopped calling the model after the first timeout") for e in errors)

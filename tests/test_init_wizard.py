@@ -5,7 +5,7 @@ from research_pipeline import cli
 from research_pipeline.sources.base import SourceError
 from research_pipeline.vault import init_vault, load_config, load_profile
 
-from test_cli_profile import StubArxiv, paper
+from fakes import StubArxiv, paper
 
 runner = CliRunner()
 ABORT = "Saved what you entered so far. Re-run rpipe init to continue."
@@ -16,7 +16,11 @@ def tty(monkeypatch):
     monkeypatch.setattr(cli, "_is_tty", lambda: True)
 
 
-def init(tmp_path, input):
+def init(tmp_path, input, describe=False):
+    """Run `rpipe init`. The wizard's first question is the optional description: Enter skips
+    it, so unless `describe` is set a blank line is prepended to the scripted answers."""
+    if input is not None and not describe:
+        input = "\n" + input
     return runner.invoke(cli.app, ["init", "--vault", str(tmp_path / "v")], input=input)
 
 
@@ -248,3 +252,75 @@ def test_wizard_all_stores_all(tmp_path, tty, monkeypatch):
     assert result.exit_code == 0, result.output
     assert load_config(tmp_path / "v" / "config.yaml").arxiv_categories == ["all"]
     assert "all computer science (cs.*)" in result.output
+
+
+def _llm(monkeypatch, responses):
+    from conftest import FakeLLM
+
+    llm = FakeLLM(responses)
+    monkeypatch.setattr(cli, "_onboarding_llm", lambda config: llm)
+    return llm
+
+
+def test_wizard_skip_description_goes_manual(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    llm = _llm(monkeypatch, [])
+    result = init(tmp_path, "my topic\n\n\n\n")
+    assert result.exit_code == 0, result.output
+    assert "Describe your research in a few sentences" in result.output
+    assert llm.calls == []
+    assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["my topic"]
+
+
+def test_wizard_description_then_manual_steps_still_run(tmp_path, tty, monkeypatch):
+    from research_pipeline.onboarding import ProposedProfile
+
+    use(monkeypatch, StubArxiv())
+    _llm(monkeypatch, [ProposedProfile(topics=["proposed one", "proposed two"], seed_queries=[])])
+    desc = "I study security of LLM agents and prompt injection."
+    # description, approve y/n, then topic prompt (fresh vault), blank, categories default, seed blank
+    result = init(tmp_path, f"{desc}\ny\nn\nextra\n\n\n\n", describe=True)
+    assert result.exit_code == 0, result.output
+    topics = load_profile(tmp_path / "v" / "profile.yaml").topics
+    assert topics == ["proposed one", "extra"]  # template examples replaced; manual step ran
+
+
+def test_wizard_llm_down_falls_through_to_manual(tmp_path, tty, monkeypatch):
+    from research_pipeline.llm import LlmError
+
+    use(monkeypatch, StubArxiv())
+    _llm(monkeypatch, [LlmError("down")])
+    result = init(tmp_path, "I study security of LLM agents and prompt injection.\nhand topic\n\n\n\n", describe=True)
+    assert result.exit_code == 0, result.output
+    assert "Local model unavailable" in result.output
+    assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["hand topic"]
+
+
+def test_wizard_ctrl_c_at_description_prompt(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+
+    def boom(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.typer, "prompt", boom)
+    result = init(tmp_path, "", describe=True)
+    assert result.exit_code == 130 and ABORT in result.output
+
+
+def test_wizard_eof_at_description_prompt(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    result = init(tmp_path, "", describe=True)
+    assert result.exit_code == 130 and ABORT in result.output
+
+
+def test_wizard_short_description_skipped_without_model_call(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+
+    def boom(config):
+        raise AssertionError("model must not be resolved")
+
+    monkeypatch.setattr(cli, "_onboarding_llm", boom)
+    result = init(tmp_path, "too short\nhand topic\n\n\n\n", describe=True)
+    assert result.exit_code == 0, result.output
+    assert "at least 20 characters" in result.output
+    assert load_profile(tmp_path / "v" / "profile.yaml").topics == ["hand topic"]

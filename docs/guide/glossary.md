@@ -113,3 +113,53 @@
 **Probe** — a test load: we load a model at a given context with an empty prompt and check whether it sits fully on the GPU, then unload it. See `llm.md`.
 
 **Safety margin** — the 1024 tokens (one search step) subtracted from the largest context a probe measured, so the nightly run still fits if slightly less GPU memory is free than during the probe. Never applied to a context you pinned. See `llm.md`.
+
+**Probe deadline** — the overall time limit on a probing session: 15 minutes for `rpipe model fit`, `run` and `check`, 10 seconds for `rpipe model show`. When it runs out the session stops with a message and nothing is cached. See `llm.md`.
+
+**`user_version`** — a spare integer SQLite stores in the database file header (`PRAGMA user_version`). We use it as the schema version so `open_db()` knows whether an older vault needs upgrading. See `data-model.md`.
+
+**Foreign key** — a column that must hold an id existing in another table (`votes.paper_id` must be a real `papers.id`). SQLite only enforces this when `PRAGMA foreign_keys=ON` is set on the connection, which `open_db()` does. See `data-model.md`.
+
+**Migration** — a small step that upgrades an existing database from an older schema to the current one, run automatically on open. See `data-model.md`.
+
+**Vote** — your thumbs up or down on a digest paper, recorded with `rpipe vote`. Votes are appended, never overwritten: the latest one counts and `clear` records a neutral vote. See `digest.md`.
+
+**Save** — a bookmark on a paper (`rpipe save`), shown as `★ saved` in later digests and listed by `rpipe feedback`. See `digest.md`.
+
+**Implicit profile** — what your behaviour says you like (papers you up-voted or saved), as opposed to the explicit profile you wrote (seeds, topics). Triage nudges scores toward papers similar to your likes and away from your dislikes. See `triage.md`.
+
+**Decay** — old feedback counting for less over time: a vote's weight is `0.5 ** (age / half-life)`. See `triage.md`.
+
+**Half-life** — the number of days after which a vote or save counts half as much (`feedback_halflife_days`, default 60; set with `rpipe profile set-feedback-halflife`). See `triage.md`.
+
+**Provenance** — the record of where a summary came from: which model, prompt version, paper version and context size produced it, and when. Shown as a footer in the digest. See `summaries.md`.
+
+**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts. Bumped whenever those prompts change, so summaries made with different wording can be told apart. See `summaries.md`.
+
+**Unfinished run** — a `runs` row whose `finished_at` is empty: the process was killed before it could record its end. The next digest's health line says `previous run did not finish`. See `running.md`.
+
+**systemd** — the service manager on most Linux systems: it starts, stops and schedules programs. `rpipe schedule` uses its *user* instance (no root). See `scheduling.md`.
+
+**Unit file** — a small text file telling systemd about one thing to manage (a `.service` says what to run, a `.timer` says when). See `scheduling.md`.
+
+**Timer** — a systemd unit that starts a service on a schedule; with `Persistent=true` it also catches up a run missed while the machine was off. See `scheduling.md`.
+
+**Linger** — `loginctl enable-linger $USER`: keeps your user services running while you are logged out, so the nightly timer fires with nobody logged in. `rpipe schedule install` prints it but never runs it. See `scheduling.md`.
+
+**`Type=oneshot`** — a service that runs to completion and exits; systemd treats it as finished when the process ends. See `scheduling.md`.
+
+**Datasette** — an open-source tool that serves a SQLite file as a website you can browse and query. `rpipe serve` runs it (optional extra `serve`). See `browsing.md`.
+
+**Tailscale** — a private network between your own devices; each gets a stable address (the `100.x.y.z` one `tailscale ip -4` prints), reachable only by devices on your tailnet. `rpipe serve` listens only on that address. See `browsing.md`.
+
+**Canned query** — a named SQL statement stored in Datasette's metadata and shown as a page or button; with `write: true` it can change data (our vote and save buttons). See `browsing.md`.
+
+**Onboarding (guided suggestions)** — asking the local model to propose topics and seed-paper titles from a short description of your research, so a new user does not start from a blank profile. Every proposal needs your approval, and a proposed paper title is kept only if it resolves to a real paper on arXiv. See `profile.md`.
+
+**Content words** — the words of a title left after dropping filler words (the, of, on, in ...). Onboarding compares titles on content words only, so filler cannot make an invented title look real. See `profile.md`.
+
+**Hallucinated title** — a paper title a language model makes up that sounds real but does not exist. Onboarding drops any proposed title that arXiv search cannot match. See `profile.md`.
+
+**DNS rebinding.** A trick where a web page makes your browser treat a private address (such as a Tailscale IP) as if it belonged to the page's own site, so the page can read a server that has no login. Servers defend by checking the `Host` header; Datasette does not (see `browsing.md`).
+
+**flock (file lock)** — an operating-system lock on an open file. `rpipe run` takes one on `.run.lock` in the vault so two runs cannot overlap; the system releases it automatically when the process ends, however it ends.

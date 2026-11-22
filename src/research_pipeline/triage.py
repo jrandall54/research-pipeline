@@ -1,13 +1,14 @@
 """Triage stage: embed new papers, rank them, keep the top N. See docs/guide/triage.md."""
 
 import sqlite3
+from datetime import UTC, datetime
 
 import numpy as np
 
-from research_pipeline.db import papers_with_status, set_status
+from research_pipeline.db import current_votes, list_saved, papers_with_status, set_status
 from research_pipeline.embed import Embedder
 from research_pipeline.models import Profile, Status
-from research_pipeline.rank import build_profile_vectors, score_papers
+from research_pipeline.rank import build_feedback_vectors, build_profile_vectors, score_papers
 
 
 def _text(row: sqlite3.Row) -> str:
@@ -45,7 +46,13 @@ def run_triage(
 
     paper_vecs = np.stack([stored[p["id"]] for p in papers])
     pv = build_profile_vectors(embedder, profile, seed_texts)
-    ranked = score_papers(papers, paper_vecs, profile, pv)
+    votes, saves = current_votes(conn), list_saved(conn)
+    wanted = {r["paper_id"] for r in votes} | {r["paper_id"] for r in saves}
+    feedback = build_feedback_vectors(
+        votes, saves, {k: v for k, v in stored.items() if k in wanted},
+        profile.feedback_halflife_days, datetime.now(UTC),
+    )
+    ranked = score_papers(papers, paper_vecs, profile, pv, feedback)
 
     for i, s in enumerate(ranked):
         if i < profile.top_n:

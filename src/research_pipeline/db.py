@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from research_pipeline.models import PaperMeta, Section, Status
-from research_pipeline.summarize import Critique, PaperSummary, Summary
+from research_pipeline.summary_models import Critique, PaperSummary, Summary
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS votes (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS saves (
+    paper_id   TEXT PRIMARY KEY REFERENCES papers(id),
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS embeddings (
     item_id         TEXT NOT NULL,
     embedding_model TEXT NOT NULL,
@@ -91,14 +96,100 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+SCHEMA_VERSION = 1
+
+
+class SchemaTooNewError(RuntimeError):
+    """The database was written by a newer rpipe than the one running."""
+
+
+class UnknownPaperError(ValueError):
+    """A vote or save named a paper id that is not in the database."""
+
+
+def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
+    """Bring an older database up to SCHEMA_VERSION (one ``if`` step per version)."""
+    if from_version < 1:
+        pass  # v0 -> v1: the `saves` table is added by CREATE TABLE IF NOT EXISTS
+
+
 def open_db(path: Path) -> sqlite3.Connection:
     """Open (creating if needed) the database with all tables, WAL and Row access."""
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    # Check the version before anything that could write to the file (WAL, tables, migration).
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version > SCHEMA_VERSION:
+        conn.close()
+        raise SchemaTooNewError(
+            f"{path} has database version {version}, but this rpipe only understands up to"
+            f" {SCHEMA_VERSION}. It was written by a newer rpipe. Please upgrade rpipe;"
+            " the file was not changed."
+        )
+    conn.execute("PRAGMA foreign_keys=ON")  # per connection, so set on every open
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    if version < SCHEMA_VERSION:
+        _migrate(conn, version)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
     return conn
+
+
+def _require_paper(conn: sqlite3.Connection, paper_id: str) -> None:
+    if get_paper(conn, paper_id) is None:
+        raise UnknownPaperError(f"No paper with id {paper_id!r} in the database.")
+
+
+def record_vote(
+    conn: sqlite3.Connection, paper_id: str, vote: int, now: str | None = None
+) -> None:
+    """Append a vote (+1, -1, or 0 to clear). Commits. Raises UnknownPaperError for a bad id."""
+    if vote not in (-1, 0, 1):
+        raise ValueError(f"vote must be -1, 0 or 1, got {vote!r}")
+    _require_paper(conn, paper_id)
+    conn.execute(
+        "INSERT INTO votes (paper_id, vote, created_at) VALUES (?, ?, ?)",
+        (paper_id, vote, now or _now()),
+    )
+    conn.commit()
+
+
+def current_votes(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Latest vote per paper, leaving out papers whose latest vote is 0."""
+    return conn.execute(
+        "SELECT paper_id, vote, created_at FROM votes WHERE id IN"
+        " (SELECT MAX(id) FROM votes GROUP BY paper_id) AND vote != 0"
+        " ORDER BY id"
+    ).fetchall()
+
+
+def set_saved(
+    conn: sqlite3.Connection, paper_id: str, saved: bool, now: str | None = None
+) -> None:
+    """Save or unsave a paper (idempotent). Commits. Saving an unknown id raises UnknownPaperError."""
+    if saved:
+        _require_paper(conn, paper_id)
+        conn.execute(
+            "INSERT OR IGNORE INTO saves (paper_id, created_at) VALUES (?, ?)",
+            (paper_id, now or _now()),
+        )
+    else:
+        conn.execute("DELETE FROM saves WHERE paper_id = ?", (paper_id,))
+    conn.commit()
+
+
+def is_saved(conn: sqlite3.Connection, paper_id: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM saves WHERE paper_id = ?", (paper_id,)
+    ).fetchone() is not None
+
+
+def list_saved(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Saved papers, newest save first; columns paper_id, created_at."""
+    return conn.execute(
+        "SELECT paper_id, created_at FROM saves ORDER BY created_at DESC, rowid DESC"
+    ).fetchall()
 
 
 def _index(conn: sqlite3.Connection, rowid: int, title: str, abstract: str) -> None:
@@ -224,6 +315,21 @@ def finish_run(
     conn.commit()
 
 
+def list_runs(conn: sqlite3.Connection, limit: int = 10) -> list[sqlite3.Row]:
+    """The most recent runs, newest first."""
+    return conn.execute(
+        "SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,)
+    ).fetchall()
+
+
+def previous_run_unfinished(conn: sqlite3.Connection, run_id: int) -> bool:
+    """True if the run just before `run_id` exists and never finished (it crashed or was killed)."""
+    row = conn.execute(
+        "SELECT finished_at FROM runs WHERE id < ? ORDER BY id DESC LIMIT 1", (run_id,)
+    ).fetchone()
+    return row is not None and row[0] is None
+
+
 def save_fulltext(conn: sqlite3.Connection, paper_id: str, sections: list[Section]) -> None:
     """Store (or replace) a paper's full text as a JSON list of sections."""
     conn.execute(
@@ -244,11 +350,19 @@ def get_fulltext(conn: sqlite3.Connection, paper_id: str) -> list[Section] | Non
 
 
 def save_summary(
-    conn: sqlite3.Connection, paper_id: str, result: PaperSummary, model: str
+    conn: sqlite3.Connection,
+    paper_id: str,
+    result: PaperSummary,
+    model: str,
+    *,
+    prompt_version: str | None = None,
+    paper_version: int | None = None,
+    num_ctx: int | None = None,
 ) -> None:
     """Store (or replace) a paper's summary and critique rows. Does not commit.
 
-    The `summary` row's JSON also carries `basis`, `truncated` and `unverified`.
+    The `summary` row's JSON also carries `basis`, `truncated` and `unverified`, and, when
+    `prompt_version` is given, a `provenance` dict (see `get_provenance`).
     """
     now = _now()
     summary_json = {
@@ -257,6 +371,14 @@ def save_summary(
         "truncated": result.truncated,
         "unverified": result.unverified,
     }
+    if prompt_version is not None:
+        summary_json["provenance"] = {
+            "model": model,
+            "prompt_version": prompt_version,
+            "paper_version": paper_version,
+            "num_ctx": num_ctx,
+            "created_at": now,
+        }
     conn.executemany(
         "INSERT OR REPLACE INTO summaries (paper_id, kind, text, model, created_at)"
         " VALUES (?, ?, ?, ?, ?)",
@@ -280,12 +402,21 @@ def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
     if set(rows) != {"summary", "critique"}:
         return None
     s = rows["summary"]
+    s.pop("provenance", None)  # read it with get_provenance; not part of PaperSummary
     meta = {k: s.pop(k) for k in ("basis", "truncated", "unverified")}
     return PaperSummary(
         summary=Summary.model_validate(s),
         critique=Critique.model_validate(rows["critique"]),
         **meta,
     )
+
+
+def get_provenance(conn: sqlite3.Connection, paper_id: str) -> dict | None:
+    """Which model, prompt and paper version made the summary, or None for older rows."""
+    row = conn.execute(
+        "SELECT text FROM summaries WHERE paper_id = ? AND kind = 'summary'", (paper_id,)
+    ).fetchone()
+    return json.loads(row["text"]).get("provenance") if row else None
 
 
 MAX_SUMMARY_TRIES = 3  # a paper that failed this many times is no longer retried

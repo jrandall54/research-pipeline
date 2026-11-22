@@ -49,6 +49,7 @@ class Profile(BaseModel):
     followed_authors: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
     top_n: int = Field(default=15, ge=1)
+    feedback_halflife_days: float = Field(default=60.0, ge=1, le=3650)
 
 
 class Config(BaseModel):

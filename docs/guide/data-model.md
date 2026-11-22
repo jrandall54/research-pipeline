@@ -113,17 +113,32 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 
 ### Other tables
 
-Created now so later phases need no migration. Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`.
+Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; Phase 3 uses `votes` and `saves`.
 
 | Table | Columns | Purpose |
 | --- | --- | --- |
 | `embeddings` | `item_id`, `embedding_model`, `vector` (BLOB), `dim`; primary key (`item_id`, `embedding_model`) | Cached vectors, one per item per model, so changing the model never mixes vectors. |
-| `summaries` | `paper_id`, `kind`, `text`, `model`, `created_at`; primary key (`paper_id`, `kind`) | A paper's model-written summary and critique ([summaries.md](summaries.md)): one row with `kind = summary` and one with `kind = critique`, `text` holding JSON and `model` the model name. The summary row's JSON also carries `basis` (`full_text` or `abstract`), `truncated` and `unverified`. `save_summary()` replaces both rows (no commit; the caller commits); `get_summary()` returns a `PaperSummary`, or `None` unless both rows exist. |
+| `summaries` | `paper_id`, `kind`, `text`, `model`, `created_at`; primary key (`paper_id`, `kind`) | A paper's model-written summary and critique ([summaries.md](summaries.md)): one row with `kind = summary` and one with `kind = critique`, `text` holding JSON and `model` the model name. The summary row's JSON also carries `basis` (`full_text` or `abstract`), `truncated`, `unverified` and (since Phase 3) `provenance` (`model`, `prompt_version`, `paper_version`, `num_ctx`, `created_at`; absent on older rows). `save_summary()` replaces both rows (no commit; the caller commits); `get_summary()` returns a `PaperSummary`, or `None` unless both rows exist; `get_provenance()` returns the provenance dict or `None`. |
 | `fulltexts` | `paper_id` (primary key, references `papers`), `sections` (JSON list of `{title, text}`), `fetched_at` | A paper's arXiv HTML full text, hidden text already removed, split into titled sections (`fulltext.md`). `save_fulltext()` replaces any earlier copy; `get_fulltext()` returns `Section` objects or `None`. |
-| `votes` | `id`, `paper_id`, `vote` (+1/-1), `created_at` | Your thumbs up/down (later phase). |
+| `votes` | `id`, `paper_id`, `vote` (+1, -1 or 0), `created_at` | Your thumbs up/down. Append-only history: each click adds a row, nothing is edited. `0` means "cleared". `record_vote()` validates the value (else `ValueError`) and that the paper exists (else `UnknownPaperError`), then commits. `current_votes()` returns the latest vote per paper (highest `id`), leaving out papers whose latest vote is 0, so you can change your mind and the newest click wins. |
+| `saves` | `paper_id` (primary key, references `papers`), `created_at` | Papers you bookmarked to keep. One row per saved paper; unsaving deletes the row. `set_saved()` (idempotent; saving an id that is not in `papers` raises `UnknownPaperError`), `is_saved()` and `list_saved()` (newest first). |
 | `links` | `src_id`, `dst_id`, `kind`, `created_at`; primary key (all three) | Relations between items, e.g. a paper and a note (later phase). |
 | `runs` | `id`, `started_at`, `finished_at`, `counts` (JSON object), `errors` (JSON list) | One row per pipeline run: `start_run()` opens it, `finish_run()` fills in counts per stage and error messages. |
 | `papers_fts` | `title`, `abstract` | Full-text search index (below). |
+
+### Timestamps and schema version
+
+Every `created_at` / `updated_at` is UTC ISO 8601 to the second with an explicit offset, e.g. `2026-11-21T09:30:00+00:00` (made by `_now()` in `db.py`: `datetime.now(UTC).isoformat(timespec="seconds")`). Anything that writes rows directly, such as a Datasette SQL insert into `votes` or `saves`, must use the same format so rows sort correctly; in SQL: `strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now')`.
+
+The database carries a version number in SQLite's built-in `PRAGMA user_version` (a spare integer stored in the file header; new files start at 0). `open_db()` compares it with `SCHEMA_VERSION` (now 1) and, if the file is older, runs `_migrate()` and stamps the new number. Tables are created with `CREATE TABLE IF NOT EXISTS`, so adding a table (as `saves` was) needs no work beyond bumping the version; changes to existing tables (new column, data fix) get an `if from_version < N:` step in `_migrate()`. An existing vault therefore upgrades itself the next time it is opened.
+
+The reverse case is refused: if the file's `user_version` is *greater* than `SCHEMA_VERSION` (a vault last used by a newer `rpipe`), `open_db()` raises `SchemaTooNewError` and the CLI prints a message telling you to upgrade `rpipe`. The check runs before anything else touches the file (before the WAL setting, table creation or migration), so the file is left byte-for-byte unchanged. Code never downgrades a database.
+
+### Foreign keys and paper ids
+
+`votes`, `saves`, `summaries` and `fulltexts` have a `paper_id` that *references* `papers(id)` (a foreign key: a promise that the id exists in the other table). SQLite ignores that promise unless you ask it to enforce it, separately on every connection. `open_db()` now runs `PRAGMA foreign_keys=ON`, so a row pointing at a missing paper is rejected with `sqlite3.IntegrityError`. On top of that, `record_vote()` and `set_saved(..., True)` check the id first and raise `UnknownPaperError` with a readable message (`rpipe vote`/`rpipe save` print it and exit 1). Unsaving an unknown id is harmless and stays silent. Only `papers` itself is never deleted from, so nothing in the code relies on cascading deletes.
+
+Where the summary shapes live: `Summary`, `Critique`, `PaperSummary` and `Claim` are defined in `summary_models.py`, a small module with no imports from the pipeline, so `db.py` (storage) does not depend on `summarize.py` (the stage that uses the storage). `summarize.py` re-imports them, so `from research_pipeline.summarize import Claim` still works.
 
 ### Upsert, dedupe and version rules
 
@@ -166,12 +181,17 @@ Note that the query string itself is FTS5 syntax (quotes, `*`, `AND`/`OR`), so u
 - **WAL mode**: readers do not block the writer, and a crash mid-write does not corrupt the file.
 - **JSON text for lists**: avoids extra join tables for data we only ever read whole.
 - **`skipped` stays skipped**: see the worked example.
-- **All tables now**: later phases need no migration.
+- **Version number + migration ladder**: tables used to be created up front on the assumption that no migration would ever be needed. Phase 3 proved that wrong (`saves`), so `user_version` records which schema a file has and `_migrate()` upgrades old vaults in place. Rejected: a migrations framework (Alembic), far too heavy for one file with a handful of tables.
+- **Foreign keys on, plus explicit checks**: the `REFERENCES` clauses were decoration while enforcement was off, so a typo'd id could be stored silently. The pragma is the safety net for every writer that goes through `rpipe` (the Datasette connection behind `rpipe serve` does not set it, see `browsing.md`, which is why the web forms check ids themselves); the explicit check in `record_vote`/`set_saved` gives a clear message instead of a raw `IntegrityError`. Rejected: relying on the pragma alone (cryptic error), or checks alone (a future writer could forget).
+- **Refuse a newer database, never downgrade**: an old `rpipe` cannot know what a newer schema changed, so touching the file could corrupt it. It stops and says to upgrade.
+- **Votes are append-only**: keeping the history lets later ranking use how your taste changed, and an undo is just another row.
 
 ## How to run / check the database
 
-`uv run pytest tests/test_db.py -v`
+`uv run pytest tests/test_db.py tests/test_feedback_db.py -v`
+
+To see a vault's schema version: `sqlite3 <vault>/vault.sqlite 'PRAGMA user_version'`.
 
 ## Where the database code is
 
-`src/research_pipeline/db.py`, `tests/test_db.py`
+`src/research_pipeline/db.py`, `src/research_pipeline/summary_models.py`, `tests/test_db.py`, `tests/test_feedback_db.py`

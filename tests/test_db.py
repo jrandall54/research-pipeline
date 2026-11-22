@@ -27,7 +27,7 @@ def test_open_db_creates_all_tables(tmp_path):
         for r in conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table')")
     }
     assert {
-        "papers", "summaries", "votes", "embeddings", "links", "runs", "papers_fts",
+        "papers", "summaries", "votes", "saves", "embeddings", "links", "runs", "papers_fts",
     } <= names
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
@@ -208,3 +208,78 @@ def test_version_bump_drops_stale_fulltext_summary_and_retries(tmp_path):
     assert get_summary(conn, "2401.00001") is None
     row = get_paper(conn, "2401.00001")
     assert (row["retry_count"], row["error"]) == (0, None)
+
+
+def _result():
+    from research_pipeline.summarize import Claim, Critique, PaperSummary, Summary
+
+    c = Claim(text="t", sections=["1 Intro"])
+    return PaperSummary(
+        summary=Summary(one_line="o", problem=c, approach=c, results=c, limitations=c),
+        critique=Critique(strengths=[c], weaknesses=[], questions=["q?"]),
+        basis="full_text", truncated=False, unverified=[],
+    )
+
+
+def test_provenance_saved_and_read(tmp_path):
+    from research_pipeline.db import get_provenance, get_summary, save_summary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    result = _result()
+    save_summary(conn, "2401.00001", result, "qwen3:14b",
+                 prompt_version="2026-11-p3", paper_version=2, num_ctx=32768)
+    prov = get_provenance(conn, "2401.00001")
+    assert {k: prov[k] for k in ("model", "prompt_version", "paper_version", "num_ctx")} == {
+        "model": "qwen3:14b", "prompt_version": "2026-11-p3", "paper_version": 2, "num_ctx": 32768}
+    assert prov["created_at"]
+    assert get_summary(conn, "2401.00001") == result  # provenance does not leak into the model
+    assert get_provenance(conn, "nope") is None
+
+
+def test_old_summary_without_provenance_loads(tmp_path):
+    from research_pipeline.db import get_provenance, get_summary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    result = _result()
+    old = {**result.summary.model_dump(), "basis": "full_text", "truncated": False, "unverified": []}
+    conn.executemany(
+        "INSERT INTO summaries (paper_id, kind, text, model, created_at) VALUES (?, ?, ?, ?, ?)",
+        [("2401.00001", "summary", json.dumps(old), "m", "2026-01-01"),
+         ("2401.00001", "critique", result.critique.model_dump_json(), "m", "2026-01-01")],
+    )
+    assert get_summary(conn, "2401.00001") == result
+    assert get_provenance(conn, "2401.00001") is None
+
+
+def test_newer_database_is_refused_and_left_untouched(tmp_path):
+    import sqlite3
+
+    import pytest
+
+    from research_pipeline.db import SCHEMA_VERSION, SchemaTooNewError
+
+    path = tmp_path / "p.db"
+    raw = sqlite3.connect(path)
+    raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    raw.execute("CREATE TABLE marker (x)")
+    raw.commit()
+    raw.close()
+    before = path.read_bytes()
+    with pytest.raises(SchemaTooNewError, match="upgrade rpipe"):
+        open_db(path)
+    assert path.read_bytes() == before
+    check = sqlite3.connect(path)
+    assert check.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION + 1
+    assert [r[0] for r in check.execute("SELECT name FROM sqlite_master")] == ["marker"]
+    check.close()
+
+
+def test_db_does_not_import_summarize():
+    import subprocess
+    import sys
+
+    code = "import sys, research_pipeline.db; print('research_pipeline.summarize' in sys.modules)"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == "False"

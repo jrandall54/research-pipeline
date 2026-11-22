@@ -1,13 +1,23 @@
 import builtins
 import logging
+from datetime import UTC, datetime
 
 import numpy as np
 import pytest
 
-from research_pipeline.db import get_paper, open_db, upsert_paper
+from research_pipeline.db import current_votes, get_paper, open_db, record_vote, upsert_paper
 from research_pipeline.embed import SentenceTransformerEmbedder
 from research_pipeline.models import PaperMeta, Profile
-from research_pipeline.rank import ProfileVectors, build_profile_vectors, score_papers
+from research_pipeline.rank import (
+    FEEDBACK_BOOST,
+    FEEDBACK_PENALTY,
+    FEEDBACK_REASON_FLOOR,
+    FeedbackVectors,
+    ProfileVectors,
+    build_feedback_vectors,
+    build_profile_vectors,
+    score_papers,
+)
 
 
 def make_rows(tmp_path, papers):
@@ -158,3 +168,159 @@ def test_popular_paper_cannot_beat_a_clearly_closer_one_at_realistic_similarity_
     rows = make_rows(tmp_path, [meta("2501.00001", "close"), meta("2501.00002", "viral", hf_upvotes=42)])
     ranked = score_papers(rows, np.stack([vec(0.85), vec(0.75)]), profile, pv)
     assert ranked[0].id == "2501.00001"
+
+
+# ---------------------------------------------------------------- implicit profile (feedback)
+
+NOW = datetime(2026, 11, 21, 12, 0, 0, tzinfo=UTC)
+EMPTY_PV = ProfileVectors([], np.zeros((0, 0)), [], np.zeros((0, 0)))
+E1, E2 = np.array([1.0, 0.0]), np.array([0.0, 1.0])
+
+
+def fb_score(tmp_path, feedback, vecs=(E1, E2)):
+    sub = tmp_path / f"db{len(list(tmp_path.iterdir()))}"
+    sub.mkdir()
+    rows = make_rows(sub, [meta("2501.00001", "Alpha"), meta("2501.00002", "Beta")])
+    return {s.id: s for s in score_papers(rows, np.array(vecs), Profile(topics=[], seeds=[]),
+                                          EMPTY_PV, feedback)}
+
+
+def row(pid, vote, created="2026-11-21T12:00:00+00:00"):
+    return {"paper_id": pid, "vote": vote, "created_at": created}
+
+
+def test_liked_neighbour_scores_higher(tmp_path):
+    fv = build_feedback_vectors([row("L", 1)], [], {"L": E1}, 60.0, NOW)
+    got = fb_score(tmp_path, fv)
+    assert got["2501.00001"].score > got["2501.00002"].score
+    assert "liked similar: L" in got["2501.00001"].reasons
+
+
+def test_disliked_neighbour_scores_lower(tmp_path):
+    fv = build_feedback_vectors([row("D", -1)], [], {"D": E1}, 60.0, NOW)
+    got = fb_score(tmp_path, fv)
+    assert got["2501.00001"].score < got["2501.00002"].score
+    assert "disliked similar: D" in got["2501.00001"].reasons
+
+
+def test_old_vote_decays(tmp_path):
+    base = fb_score(tmp_path, None)["2501.00001"].score
+    fresh = build_feedback_vectors([row("L", 1)], [], {"L": E1}, 60.0, NOW)
+    old = build_feedback_vectors([row("L", 1, "2026-09-22T12:00:00+00:00")], [], {"L": E1}, 60.0, NOW)
+    assert old.liked[0][2] == pytest.approx(0.5 ** (60 / 60.0))  # 60 days = 1 half-life
+    gain_fresh = fb_score(tmp_path, fresh)["2501.00001"].score - base
+    gain_old = fb_score(tmp_path, old)["2501.00001"].score - base
+    assert gain_fresh == pytest.approx(FEEDBACK_BOOST * 1.0, abs=1e-9)
+    assert abs(gain_old / gain_fresh - 0.5) < 1e-9
+
+
+@pytest.mark.parametrize("stamp", ["2026-11-21 12:00:00", "2026-11-21T12:00:00Z", "2026-11-21T12:00:00+00:00"])
+def test_timestamp_forms_tolerated(stamp):
+    fv = build_feedback_vectors([row("L", 1, stamp)], [], {"L": E1}, 60.0, NOW)
+    assert fv.liked[0][2] == pytest.approx(1.0)
+
+
+def test_vote_without_embedding_ignored(tmp_path):
+    fv = build_feedback_vectors([row("X", 1), row("Y", -1)], [row("X", 1)], {}, 60.0, NOW)
+    assert fv.liked == [] and fv.disliked == []
+    assert fb_score(tmp_path, fv)["2501.00001"].reasons == []
+
+
+def test_upvote_and_save_count_once_with_max_weight():
+    saves = [{"paper_id": "L", "created_at": "2026-11-21T12:00:00+00:00"}]
+    fv = build_feedback_vectors([row("L", 1, "2026-09-22T12:00:00+00:00")], saves, {"L": E1}, 60.0, NOW)
+    assert len(fv.liked) == 1 and fv.liked[0][2] == pytest.approx(1.0)
+
+
+def test_save_alone_is_liked():
+    saves = [{"paper_id": "S", "created_at": "2026-11-21T12:00:00+00:00"}]
+    fv = build_feedback_vectors([], saves, {"S": E1}, 60.0, NOW)
+    assert [x[0] for x in fv.liked] == ["S"]
+
+
+def test_no_feedback_scores_unchanged(tmp_path):
+    a = fb_score(tmp_path, None)
+    b = fb_score(tmp_path, FeedbackVectors([], []))
+    assert {k: v.score for k, v in a.items()} == {k: v.score for k, v in b.items()}
+    assert all(v.reasons == [] for v in a.values())
+
+
+def test_up_then_clear_contributes_nothing(tmp_path):
+    conn = open_db(tmp_path / "v.db")
+    upsert_paper(conn, meta("L", "Liked"))
+    record_vote(conn, "L", 1)
+    record_vote(conn, "L", 0)
+    fv = build_feedback_vectors(current_votes(conn), [], {"L": E1}, 60.0, NOW)
+    assert fv.liked == [] and fv.disliked == []
+
+
+def test_down_vote_beats_save_of_same_paper():
+    saves = [{"paper_id": "P", "created_at": "2026-11-21T12:00:00+00:00"}]
+    fv = build_feedback_vectors([row("P", -1)], saves, {"P": E1}, 60.0, NOW)
+    assert fv.liked == [] and [x[0] for x in fv.disliked] == ["P"]
+
+
+def test_many_diverse_likes_do_not_dilute(tmp_path):
+    rng = np.random.default_rng(0)
+    others = []
+    for _ in range(19):
+        v = rng.normal(size=8)
+        v[0] = 0.0
+        others.append(v / np.linalg.norm(v))
+    dim = lambda v: np.concatenate([v, np.zeros(8 - len(v))])  # noqa: E731
+    near = dim(E1)
+    one = build_feedback_vectors([row("L", 1)], [], {"L": near}, 60.0, NOW)
+    emb = {"L": near} | {f"o{i}": v for i, v in enumerate(others)}
+    votes = [row("L", 1)] + [row(f"o{i}", 1) for i in range(19)]
+    many = build_feedback_vectors(votes, [], emb, 60.0, NOW)
+    rows = make_rows(tmp_path, [meta("2501.00001", "Alpha")])
+    args = (rows, np.array([near]), Profile(topics=[], seeds=[]), EMPTY_PV)
+    base = score_papers(*args)[0].score
+    g1 = score_papers(*args, one)[0].score - base
+    g20 = score_papers(*args, many)[0].score - base
+    assert g20 == pytest.approx(g1, abs=1e-9) and g20 == pytest.approx(FEEDBACK_BOOST)
+
+
+def test_reason_floor_both_sides(tmp_path):
+    def reasons(cos):
+        v = np.array([cos, (1 - cos**2) ** 0.5])
+        fv = build_feedback_vectors([row("L", 1)], [], {"L": v}, 60.0, NOW)
+        return fb_score(tmp_path, fv, vecs=(E1, E2))["2501.00001"].reasons
+
+    assert reasons(FEEDBACK_REASON_FLOOR + 0.01) == ["liked similar: L"]
+    assert reasons(FEEDBACK_REASON_FLOOR - 0.01) == []
+
+
+def test_old_dislike_still_gets_reason_and_decayed_penalty(tmp_path):
+    v = np.array([0.9, (1 - 0.81) ** 0.5])
+    old = build_feedback_vectors([row("D", -1, "2026-07-24T12:00:00+00:00")], [], {"D": v}, 60.0, NOW)
+    base = fb_score(tmp_path, None)["2501.00001"].score
+    got = fb_score(tmp_path, old)["2501.00001"]
+    assert old.disliked[0][2] == pytest.approx(0.25, abs=1e-3)  # 120 days = 2 half-lives
+    assert "disliked similar: D" in got.reasons  # raw 0.9 is above the floor, however old
+    assert got.score - base == pytest.approx(-FEEDBACK_PENALTY * old.disliked[0][2] * 0.9, abs=1e-9)
+    # Below the floor the reason is hidden even though the (small) penalty still applies.
+    far = np.array([0.6, 0.8])
+    weak = build_feedback_vectors([row("D", -1, "2026-07-24T12:00:00+00:00")], [], {"D": far}, 60.0, NOW)
+    assert fb_score(tmp_path, weak)["2501.00001"].reasons == []
+
+
+def test_old_like_still_gets_reason_and_decayed_score(tmp_path):
+    v = np.array([0.9, (1 - 0.81) ** 0.5])
+    old = build_feedback_vectors([row("L", 1, "2026-07-24T12:00:00+00:00")], [], {"L": v}, 60.0, NOW)
+    base = fb_score(tmp_path, None)["2501.00001"].score
+    got = fb_score(tmp_path, old)["2501.00001"]
+    assert old.liked[0][2] == pytest.approx(0.25, abs=1e-3)  # 120 days = 2 half-lives
+    assert "liked similar: L" in got.reasons
+    assert got.score - base == pytest.approx(0.2 * old.liked[0][2] * 0.9, abs=1e-9)
+
+
+def test_negative_cosine_never_flips_the_feedback_sign(tmp_path):
+    opposite = np.array([-1.0, 0.0])
+    liked = fb_score(tmp_path, build_feedback_vectors([row("L", 1)], [], {"L": E1}, 60.0, NOW),
+                     vecs=(opposite, E2))
+    disliked = fb_score(tmp_path, build_feedback_vectors([row("D", -1)], [], {"D": E1}, 60.0, NOW),
+                        vecs=(opposite, E2))
+    # Opposite to a liked paper: no penalty. Opposite to a disliked paper: no boost.
+    assert liked["2501.00001"].score == liked["2501.00002"].score
+    assert disliked["2501.00001"].score == disliked["2501.00002"].score

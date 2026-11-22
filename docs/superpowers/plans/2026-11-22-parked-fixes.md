@@ -80,3 +80,9 @@ No production code changes except where a tightened test exposes a real bug (fix
 
 - `vault.py:67` (`rpipe init` path) calls `open_db` without catching `SchemaTooNewError`; convert it to the same clean error `cli._open` gives.
 - Add CLI-level tests: `rpipe vote`/`rpipe save` on an unknown paper id exits 1 with the message; `_open` exits cleanly on a too-new database.
+
+### Task 7 addendum (carried from Task 3 review, Minor)
+
+- `tests/test_cli_feedback.py::test_init_exits_cleanly_on_too_new_database`: replace the weak final assertion (`res.exception is None or SystemExit`) with a precise one.
+- `schedule.py` `status`: handle a missing `systemctl` binary the way `install` does (clean message, no traceback); add a test.
+- `docs/guide/scheduling.md` usage section (~line 68): mention that `rpipe schedule status` exits 1 with a clear message when the systemd user manager is unreachable (a change from the old exit 0 "not installed").

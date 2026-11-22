@@ -8,15 +8,15 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
   - Implicit profile in triage: votes and saves nudge scores, with a half-life decay (`rpipe profile set-feedback-halflife`).
   - Run history and crash-safe runs (`rpipe runs`); digest provenance line; summaries record which model and context made them.
   - `rpipe schedule install|status|remove|show` (systemd user timer).
-  - `rpipe serve` (Datasette over Tailscale, vote and save buttons).
+  - `rpipe serve` (Datasette over Tailscale; vote and save forms where you type the paper id).
   - `rpipe profile suggest` and a guided `rpipe init` that propose topics and seeds from a description.
 - Earlier, on `main`: Phase 2 (full text, cited summaries, gold set, eval) and auto model and context (`rpipe model fit|show|check|set|set-url|set-context`).
-- Tests: `uv run pytest -q` gives 555 passing. Docs: `docs/guide/` (new `scheduling.md` and `browsing.md`; `triage`, `data-model`, `digest`, `profile`, `running`, `glossary` updated).
+- Tests: `uv run pytest -q` gives 563 passing. Docs: `docs/guide/` (new `scheduling.md` and `browsing.md`; `triage`, `data-model`, `digest`, `profile`, `running`, `glossary` updated).
 
 ## Owner actions not yet done
 - Merge `phase-3-daily-habit` into `main` when happy.
-- `rpipe schedule install`, then `loginctl enable-linger $USER` (so the timer runs with nobody logged in). Check with `rpipe schedule status`.
-- `uv sync --extra serve`, then `rpipe serve` (never run against a real Datasette yet; see parked).
+- Reinstall the tool WITH the extras: `cd` into the repo and run `uv tool install --editable '.[embed,serve]' --force` (the plain `rpipe` on PATH was installed without `embed`, so the nightly run would fail). Then `rpipe schedule install` (it refuses if embed is missing), then `loginctl enable-linger $USER` (so the timer runs with nobody logged in). Check with `rpipe schedule status`.
+- `rpipe serve` (the metadata shape was verified against a real Datasette 0.65 in a smoke run; see `.superpowers/sdd/2026-11-21-phase3-daily-habit/final-fix-report.md`). In the repo use `uv sync --extra embed --extra serve`; plain `uv sync` removes extras.
 - Start voting, so the implicit profile has something to learn from.
 - `rpipe profile suggest "<describe your research>"` to get topic and seed proposals. Seed papers are still empty.
 - From the previous handoff, if not done: `rpipe model fit` (a few minutes), then `rpipe model show`. "Best model" = most parameters that fits, so `ds2-16b-20k` may beat `q3-14b-22k`; pin with `rpipe model set q3-14b-22k` if wanted. The gold set is still empty (optional: `rpipe gold add`, then `rpipe eval run|grade|report`).
@@ -42,10 +42,11 @@ From before:
 Phase 3:
 - `db.py`: no foreign-key enforcement, so callers must validate paper ids.
 - `cli.py`: `_resolve_paper` picker duplicates `_choose` (about 8 lines).
-- `digest.py`: `_provenance_line` hard-indexes provenance keys (KeyError on a partial dict); `save_summary` provenance is optional; it records `run_summarize` num_ctx rather than `llm.num_ctx`.
-- `cli.py` run: `docs/guide/running.md` says after Ctrl-C the error is `<stage>: interrupted`, but Ctrl-C during the digest step records no such error; `finish_run` itself could raise and mask the original error.
+- `digest.py`: `_provenance_line` hard-indexes provenance keys (KeyError on a partial dict); `save_summary` provenance is optional.
+- `cli.py` run: `finish_run` itself could raise and mask the original error.
+- No run lock: `Persistent=true` catch-up can overlap a manual `rpipe run`.
+- No guard when the database's `user_version` is greater than `SCHEMA_VERSION` (a newer vault opened by older code).
 - `schedule.py`: `status` hint is misleading if the user manager is unreachable.
-- `serve.py`: `getsignal` None guard missing; Datasette metadata shape verified from docs only, never run against a real Datasette (do a real run).
 - `profile_edit`/onboarding: C1 and bidi control characters are not stripped from topics; `seed_queries` are not cleaned (never shown raw).
 - Tests: weak assertions on some messages and exit codes; weak negative digest test; no test for the disliked-side old-vote floor.
 

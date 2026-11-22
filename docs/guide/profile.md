@@ -160,6 +160,8 @@ Other messages: adding something already there prints "already in your profile" 
 
 **What it does.** You write a few sentences about your research ("I work on security of LLM agents, mostly prompt injection and sandboxing"). The local model (see `llm.md`) proposes 3 to 8 topic phrases and up to 10 titles of well-known papers. You approve each one; nothing is added without a yes (or `--yes`).
 
+**Heads-up:** if `llm_model` is still `auto` (the default) and the model has not been fitted yet, this command first runs the full model-fit probe, which can take several minutes. `rpipe model fit` runs it ahead of time.
+
 **How it works.**
 
 1. A description under 20 characters is refused first (`Describe your research in at least 20 characters.`, exit 1; in the `init` wizard it is skipped with that message), before the model is even looked up. Then `propose` sends one request to the model. The description sits inside `<description>...</description>` and the system prompt (`ONBOARDING_SYSTEM`) says it is data, not instructions; any `<description>` tag typed inside it is defused so it cannot close the block (same idea as the `<paper>` block in `summaries.md`).
@@ -167,7 +169,7 @@ Other messages: adding something already there prints "already in your profile" 
 3. Paper titles go through `resolve_seeds`: each is searched on arXiv and kept only if a result shares at least 60% of the proposed title's *content words* (lower-cased; punctuation and hyphens split words; filler words such as on/the/of/in are ignored, so "On the Security of the Agents in the Wild" cannot match an unrelated title on filler alone). Queries with fewer than 2 content words are dropped, and arXiv's results are tried in order until one passes. A title with no such result is dropped. Language models invent plausible-looking titles, and arXiv search is fuzzy (the top hit for an invented title is often an unrelated paper), so the check is "does a real paper with this title exist", not "did the search return something". The survivors are shown (`Found 3 of 5 proposed papers on arXiv`) and each asked `Add seed ...? [Y/n]`; an accepted one is saved by the same `_add_seed` helper as `rpipe profile add-seed`.
 4. `--yes` accepts every proposal without asking. Without a description argument the command asks for one.
 
-Worked example: you type the sentence above; the model proposes "prompt injection attacks on LLM agents", "agent sandboxing" and the title "Universal and Transferable Adversarial Attacks on Aligned Language Models". You answer `y`, `n`, `y`. Two topics are added, the paper resolves to arXiv 2307.15043 and, after another `y`, becomes a seed.
+Worked example: you type the sentence above; the model proposes "prompt injection attacks on LLM agents", "agent sandboxing" and the title "Universal and Transferable Adversarial Attacks on Aligned Language Models". Topics are asked first, then seeds, so the three answers go in that order: `y` adds the first topic, `n` skips the second, and `y` accepts the paper (which resolves to arXiv 2307.15043) as a seed. The result is one topic added, one skipped and one seed added.
 
 If the model is unreachable, not installed, or returns unusable output, the command prints `Local model unavailable; add topics by hand with `rpipe profile add-topic`` (plus the reason), changes nothing and exits 0: onboarding is a convenience, never a requirement. If arXiv cannot be reached the accepted topics are kept and no seeds are added.
 

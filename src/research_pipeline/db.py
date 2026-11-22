@@ -89,6 +89,19 @@ CREATE TABLE IF NOT EXISTS runs (
     errors      TEXT
 );
 
+CREATE TABLE IF NOT EXISTS shelf_items (
+    name         TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL,
+    added_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shelf_chunks (
+    item_name TEXT NOT NULL REFERENCES shelf_items(name) ON DELETE CASCADE,
+    chunk_idx INTEGER NOT NULL,
+    text      TEXT NOT NULL,
+    PRIMARY KEY (item_name, chunk_idx)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts
     USING fts5(title, abstract, tokenize = 'unicode61');
 """
@@ -101,7 +114,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class SchemaTooNewError(RuntimeError):
@@ -118,6 +131,8 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         pass  # v0 -> v1: the `saves` table is added by CREATE TABLE IF NOT EXISTS
     if from_version < 2:
         pass  # v1 -> v2: the `skips` table is added by CREATE TABLE IF NOT EXISTS
+    if from_version < 3:
+        pass  # v2 -> v3: `shelf_items` and `shelf_chunks` are added by CREATE TABLE IF NOT EXISTS
 
 
 def open_db(path: Path) -> sqlite3.Connection:
@@ -491,3 +506,57 @@ def record_failure(conn: sqlite3.Connection, paper_id: str, error: str) -> None:
 def clear_error(conn: sqlite3.Connection, paper_id: str) -> None:
     """Forget an earlier failure message once the paper gets through. Does not commit."""
     conn.execute("UPDATE papers SET error = NULL WHERE id = ?", (paper_id,))
+
+
+def shelf_embedding_id(name: str, idx: int) -> str:
+    """The ``embeddings.item_id`` for chunk ``idx`` of shelf item ``name``."""
+    return f"shelf:{name}#{idx}"
+
+
+def _delete_shelf_embeddings(conn: sqlite3.Connection, name: str) -> None:
+    # Escape LIKE wildcards in the name so "a_b" cannot match "axb" and "a" cannot match "ab".
+    escaped = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    conn.execute(
+        "DELETE FROM embeddings WHERE item_id LIKE ? ESCAPE '\\'",
+        (f"shelf:{escaped}#%",),
+    )
+
+
+def upsert_shelf_item(
+    conn: sqlite3.Connection, name: str, content_hash: str, chunks: list[str]
+) -> None:
+    """Store a shelf item, replacing any earlier chunks and their embeddings. Commits."""
+    delete_shelf_item(conn, name, commit=False)
+    conn.execute(
+        "INSERT INTO shelf_items (name, content_hash, added_at) VALUES (?, ?, ?)",
+        (name, content_hash, _now()),
+    )
+    conn.executemany(
+        "INSERT INTO shelf_chunks (item_name, chunk_idx, text) VALUES (?, ?, ?)",
+        [(name, i, text) for i, text in enumerate(chunks)],
+    )
+    conn.commit()
+
+
+def delete_shelf_item(conn: sqlite3.Connection, name: str, *, commit: bool = True) -> None:
+    """Remove a shelf item, its chunks (cascade) and its embeddings. Idempotent."""
+    _delete_shelf_embeddings(conn, name)
+    conn.execute("DELETE FROM shelf_items WHERE name = ?", (name,))
+    if commit:
+        conn.commit()
+
+
+def list_shelf_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Shelf items by name, with their chunk counts."""
+    return conn.execute(
+        "SELECT i.name, i.content_hash, i.added_at, COUNT(c.chunk_idx) AS n_chunks"
+        " FROM shelf_items i LEFT JOIN shelf_chunks c ON c.item_name = i.name"
+        " GROUP BY i.name ORDER BY i.name"
+    ).fetchall()
+
+
+def shelf_chunk_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every shelf chunk, ordered by item then position."""
+    return conn.execute(
+        "SELECT item_name, chunk_idx, text FROM shelf_chunks ORDER BY item_name, chunk_idx"
+    ).fetchall()

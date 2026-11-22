@@ -2,6 +2,7 @@ import json
 from datetime import date
 
 from research_pipeline.db import (
+    SCHEMA_VERSION,
     finish_run,
     get_paper,
     mark_in_digest,
@@ -299,17 +300,17 @@ def test_open_db_upgrades_v1_to_v2(tmp_path):
     raw.close()
     conn = open_db(path)
     assert "skips" in {r["name"] for r in conn.execute("SELECT name FROM sqlite_master")}
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
-def test_open_db_still_refuses_version_3(tmp_path):
+def test_open_db_still_refuses_newer_version(tmp_path):
     import pytest
 
     from research_pipeline.db import SchemaTooNewError
 
-    path = tmp_path / "v3.db"
+    path = tmp_path / "too_new.db"
     conn = open_db(path)
-    conn.execute("PRAGMA user_version = 3")
+    conn.execute("PRAGMA user_version = 4")
     conn.commit()
     conn.close()
     with pytest.raises(SchemaTooNewError):

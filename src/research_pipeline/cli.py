@@ -1425,7 +1425,9 @@ def model_set_embedding(
     typer.echo(f"embedding model is now {name.strip()}.")
     typer.echo(
         "The next run downloads the model (the first download can take a while; progress is shown) "
-        "and re-embeds everything, because vectors from different models cannot be compared."
+        "and re-embeds your shelf, seed papers and the papers still waiting to be ranked, because "
+        "vectors from different models cannot be compared. Papers ranked earlier are not re-embedded, "
+        "so your past votes and saves stop boosting rankings until you switch back."
     )
     typer.echo("To go back: rpipe model set-embedding BAAI/bge-small-en-v1.5")
 

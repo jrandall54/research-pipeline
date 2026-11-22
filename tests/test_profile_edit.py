@@ -311,3 +311,13 @@ def test_set_embedding_model_rejects_empty(vault, bad):
     with pytest.raises(ValueError, match="empty"):
         pe.set_embedding_model(vault, bad)
     assert (vault / "config.yaml").read_bytes() == before
+
+
+def test_setter_on_old_config_with_rss_feeds_and_no_max_results(vault):
+    path = vault / "config.yaml"
+    path.write_text(f"# my note\nvault_path: {vault}\nembedding_model: x/y\nrss_feeds: []\n")
+    pe.set_arxiv_max_results(vault, 200)
+    text = path.read_text()
+    assert "# my note" in text and "embedding_model: x/y" in text and "rss_feeds: []" in text
+    c = cfg(vault)
+    assert c.arxiv_max_results == 200 and c.embedding_model == "x/y"

@@ -395,7 +395,8 @@ def test_set_embedding_saves_and_explains_consequences(vault):
     assert res.exit_code == 0, res.output
     assert load_config(vault / "config.yaml").embedding_model == "all-MiniLM-L6-v2"
     out = " ".join(res.output.split())
-    assert "downloads the model" in out and "re-embeds everything" in out
+    assert "downloads the model" in out and "re-embeds your shelf" in out
+    assert "stop boosting rankings until you switch back" in out
     assert "rpipe model set-embedding BAAI/bge-small-en-v1.5" in out
 
 

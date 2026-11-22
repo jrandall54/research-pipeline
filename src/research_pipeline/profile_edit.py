@@ -262,6 +262,7 @@ def set_embedding_model(vault: Path, name: str) -> None:
 
     _edit(_config_path(vault), Config, change)
 
+
 def set_feedback_halflife(vault: Path, days: float | str) -> None:
     """Days after which a vote or save counts half as much (1 to 3650)."""
     try:

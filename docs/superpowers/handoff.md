@@ -1,57 +1,74 @@
-# Handoff — after the full project audit (2026-11-22)
+# Handoff — after Phase 6 parts A and C (2026-11-22)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
 
 ## State
-- **`main` holds Phases 1–5, the review loop, the shelf, summarize-backlog, and the pipeline/app split design and plan.** All feature branches are merged and deleted except `pipeline-app-split` (same as `main` for now). `main` is pushed; CI runs on GitHub (first Phase 5 run 2026-11-22). `uv run pytest -q`: 897 passing.
-- **A full audit ran 2026-11-22** (roadmap vs code, loose ends, docs, Phase 7 readiness). Its fixes: this note rewritten, stale guide pages and glossary fixed, the master plan's roadmap given a home for every open item, and factual errors in the Phase 7 plan corrected.
+- **`main` holds Phases 1-5, the review loop, the shelf, summarize-backlog, and the pipeline/app split design and plan.** `main` is pushed; CI runs on GitHub.
+- **Phase 6 Parts A (progress feedback) and C (setting commands, category check, `rpipe show`, `my_work` boundary) are built on branch `phase-6-hardening`, not merged; the merge is the owner's call.** `uv run pytest -q`: 987 passing; `ruff check .` clean. Part B (long papers) is not started; Part D is a proposal only.
 - **Direction (owner, 2026-11-22):** a **pipeline** (gets material, unattended) plus an **app** (read, vote, notes, study, later research and thesis) over **one database**, split by function in code. Design `specs/2026-11-22-backend-frontend-split-design.md`, plan `plans/2026-11-22-pipeline-app-split.md` (not started). `library_api` returns data objects, not terminal text; the app's look is undecided.
 - **Owner context:** philosophy BA finishing CS prerequisites, applying for a master's starting fall 2027. "Research" today means articles, repos and project ideas.
 
 ## Phase status (checked against the code 2026-11-22)
 | Phase | Status |
 |---|---|
-| 1, 1.5 | Done. Follow-ups moved to Phase 6 (missing setting commands, category check). |
+| 1, 1.5 | Done. Their follow-ups (setting commands, category check) were closed by Phase 6 Part C. |
 | 2 | Code built (`fulltext`, `llm`, `prompts`, `summarize`, `gold`, `evaluate`). Exit not met: the gold set is empty and no `rpipe eval` has run. |
 | 3 | Code complete (votes/saves, Datasette, timer, run log, versioning, onboarding). "A week unattended" not yet observed. |
 | 4 | Shelf built. Overlap alerts, archive connections, feasibility tag, weekly synthesis not built; `links` table unused. |
-| 5 | Built and merged; Claude Code smoke test passed (canary did not leak; canary line since removed). AI club pilot not started. |
-| 6 | Next. Brainstorm first. |
-| 7 | Planned; plan corrected after the audit but must be refreshed after Phase 6 (see the note at its top). |
+| 5 | Built and merged; Claude Code smoke test passed. AI club pilot not started. |
+| 6 | Parts A and C built on `phase-6-hardening` (not merged). Part B waits on the owner's model verdict; Part D awaits confirmation. |
+| 7 | Planned; plan must be refreshed (see Next, item 4). |
 
-## Next (updated 2026-11-22, end of session)
-1. **Execute `plans/2026-11-22-phase6-hardening.md`** (Phase 6 Parts A and C, 11 tasks) on branch `phase-6-hardening`, subagent-driven (implementer + reviewer per task, whole-branch review at the end). Design: `specs/2026-11-22-phase6-pipeline-hardening-design.md`, approved by the owner. Task 2 Step 7 asks the owner before editing CLAUDE.md.
-2. **Part B (long papers) waits on the owner's verdict** on `~/research-vault/model-comparison-2026-11-22.md`: the same 3 long papers summarised by `q3.8-27b-34k` (fits 33,792 tokens; truncated 2 of 3; 54–83 s/paper; 0 unverified citations) and `q3f-14b-143k` (fits 130,048 tokens; whole papers; 28–56 s/paper; 7 unverified citations). 14B wins → long context becomes the default path, tighten its citation retry. 27B wins → section-priority trimming. Then write Part B's own plan. Comparison vault copies: the session scratchpad (may be cleared; re-runnable).
-3. **Part D** (decision only): overlap alerts, archive connections and weekly synthesis → app Phase 9; feasibility tag → Ongoing. Record in the master plan once the owner confirms.
-4. After Phase 6: refresh and execute `plans/2026-11-22-pipeline-app-split.md` (Phase 7).
+## Next
+1. **Owner: merge decision** for `phase-6-hardening`.
+2. **Part B (long papers) waits on the owner's verdict** on `~/research-vault/model-comparison-2026-11-22.md`: the same 3 long papers summarised by `q3.8-27b-34k` (fits 33,792 tokens; truncated 2 of 3; 54-83 s/paper; 0 unverified citations) and `q3f-14b-143k` (fits 130,048 tokens; whole papers; 28-56 s/paper; 7 unverified citations). 14B wins: long context becomes the default path, tighten its citation retry. 27B wins: section-priority trimming. Then write Part B's own plan. Comparison vault copies: the session scratchpad (may be cleared; re-runnable).
+3. **Awaiting owner approval:** (a) Part D proposal (overlap alerts, archive connections and weekly synthesis to app Phase 9; feasibility tag to Ongoing), which is NOT yet recorded in the master plan; (b) a line in `CLAUDE.md` for the progress convention (progress goes to stderr through the shared reporter, every waiting step shows it).
+4. **Refresh `plans/2026-11-22-pipeline-app-split.md` (Phase 7), then execute it.** What changed: `progress.py` is classified *shared*; `run_summarize`'s `on_progress` is gone (stages take a keyword-only `reporter`); per-paper summarize lines now go to stderr.
 
-Done this session: full audit; master plan cleaned (51 accepted edits); repo public (history rewritten to the GitHub noreply email); simple known issues fixed (ruff lint in CI, plug-in duplicate names, rocm-smi, tests); 905 tests passing.
+## Phase 6 check (real run, 2026-11-22, copy of the owner vault, ollama backend)
+`rpipe run --vault <copy> | cat` (stderr merged): plain lines, 0 escape codes, 0 carriage returns.
+```
+embedding model: BAAI/bge-small-en-v1.5...
+embedding model done (2s)
+collect...
+  arxiv: fetching
+  arXiv page 1 (0 papers so far)
+  arxiv ok: 100 papers
+  hf_daily: fetching
+  hf_daily ok: 50 papers
+collect done (0s)
+shelf...
+shelf done (0s)
+triage...
+triage done (0s)
+summarize...
+summarize done (0s)
+Digest written to <copy>/digests/2026-11-22.md
+  inserted=0, updated=7, unchanged=143, source_errors=0, triaged=0, skipped=0, embedded=0, fetched=0, summarized=0, abstract_only=0, truncated=0, summary_failed=0
+```
+One-paper summarize (also plain):
+```
+summarize...
+  writing the summary for 2611.25005
+  writing the critique for 2611.25005
+  retrying citations for 2611.25005
+[1/1] 2611.25005 done (summary + critique, 80s)
+summarize done (1m20s)
+```
+The first real run found the Hugging Face "Loading weights" bar and an HF_TOKEN warning; fixed in 9686858.
 
 ## Phase 6 inputs
-### Progress feedback (owner requirement: no step may look frozen)
-Today only `rpipe summarize` prints `[i/N] id done (Ns)` after each paper, plus `model fit` log lines and `model pull` percent. Silent today:
-- Embedder load/download (`cli.py` `_embedder`/`_load_embedder`, `embed.py`) in run, triage, shelf add.
-- `run_collect` (`collect.py`) over arXiv pages, 3 s apart, up to `arxiv_max_results`; `rpipe collect` prints only final counts.
-- Triage embedding of hundreds of papers; `shelf.sync_shelf`; seed fetches for triage.
-- Inside summarize, per paper: `fetch_fulltext`, then each `generate` call (Ollama or Claude Code, up to 600 s each) — no per-stage lines.
-- `rpipe eval run` (prints only "this can take a while"), `profile suggest` / `onboarding.propose` and its arXiv lookups, `profile add-seed` and the `init` loop, `model check` probes.
-Design sketch: one shared module; spinner/bar with elapsed time on a TTY, one plain line per event when stderr is not a TTY (systemd journal); progress on stderr. **Progress events should be data objects, not strings** (the app will consume them; split design SPEC "progress"), and the module is classified *shared* for Phase 7. Tests: helper unit-tested offline; each stage reports through its callback. Docs: a progress section in `running.md`; add the convention to CLAUDE.md (ask the owner first).
+Done in Part C (branch `phase-6-hardening`): the progress-feedback list (every waiting step reports; shared reporter, spinner on a terminal, plain lines otherwise), the setting commands for `arxiv_max_results`, `embedding_model` and `rss_feeds`, the arXiv category check with did-you-mean, `rpipe show`, and the `my_work` boundary (shelf text never reaches a model; tested).
 
-### Long papers (owner, 2026-11-22)
-Real Ollama summary of 2611.25005 was fast and "decent" but **truncated**. Order to try: (1) a longer context window (`rpipe model fit` / `rpipe model set-context`; a long-context local model), (2) chunked summarize-and-critique (map-reduce by section, merge overlapping claims, keep section citations; measure with `rpipe eval`). Watch the health line's `truncated N` over several runs before building (2).
+### Long papers (Part B, owner, 2026-11-22)
+Real Ollama summary of 2611.25005 was fast and "decent" but **truncated**. Order to try: (1) a longer context window (`rpipe model fit` / `rpipe model set-context`; a long-context local model), (2) chunked summarize-and-critique (map-reduce by section, merge overlapping claims, keep section citations; measure with `rpipe eval`). Watch the health line's `truncated N` before building (2). See Next, item 2.
 
-### Verify the Ollama path for real
-Everything run for real used **claude-code**. Test: `rpipe model set-backend ollama`, `rpipe model check`, `rpipe summarize 2611.25005`; judge prompts (`PROMPT_VERSION` 2026-11-p4), time per paper, quality. The nightly timer uses the configured backend (claude-code spends plan quota).
-
-### Open items the audit gave a phase (see master plan)
-- **CLAUDE.md rule gap:** `arxiv_max_results`, `embedding_model`, `rss_feeds` have no `rpipe` command (`models.py`). `rss_feeds` is dead config (no RSS source): add the command with the source, or remove the key.
-- **Category check is format-only:** `cs.ML` accepted (`models.py` `CATEGORY_RE`). Validate against the real arXiv list.
-- **`require_local` is not wired** (`llm.py`). Wire it before any feature sends shelf (`my_work/`) text to a model.
-- `rpipe show <id>...` and `rpipe show --recent` (owner asked: print summary and critique, no voting).
-- Owner setup: reinstall with extras (`uv tool install --editable '.[embed,serve]' --force`), `rpipe schedule status`, `loginctl enable-linger $USER`, add seed papers (`rpipe profile suggest "..."` or `rpipe profile add-seed`), start voting, fill the gold set (`rpipe gold add`, `rpipe eval run|grade|report`), run `rpipe summarize --backlog` for the 12 unsummarized 2026-11-21 papers then `rpipe digest --date 2026-11-21`.
-- **Repo is private**, but the README's install line is a GitHub URL: make it public (or give club members access) before the AI club pilot.
+### Open items
+- **Owner setup:** the repo's own dev env needs `uv sync --extra embed` (or `uv run --extra embed`) for real runs from the checkout. Reinstall the tool with extras (`uv tool install --editable '.[embed,serve]' --force`), `rpipe schedule status`, `loginctl enable-linger $USER`, add seed papers (`rpipe profile suggest "..."` or `rpipe profile add-seed`), start voting, fill the gold set (`rpipe gold add`, `rpipe eval run|grade|report`), run `rpipe summarize --backlog` for the 12 unsummarized 2026-11-21 papers then `rpipe digest --date 2026-11-21`.
+- **Switching `embedding_model`** drops the feedback boost of earlier votes/saves until switched back (documented, not fixed).
+- **Repo is private**, but the README's install line is a GitHub URL: make it public (or give club members access) before the AI club pilot. (Owner note elsewhere says the repo went public; confirm.)
 - Check `SHELF_REASON_FLOOR` against real bge-small scores.
-- Deferred minors: no config-to-digest e2e test for plug-in sources; `ollama_fit._request`/`fits` decides deadline vs does-not-fit by clock comparison (theoretical). (Fixed on branch `known-issues`: duplicate `make_arxiv`, duplicate entry-point names, rocm-smi per-card parsing, missing timeout/`ollama_tags`/"Stopped." tests, set-backend wording; the model staying `auto` after a pull is intended and now documented; ruff is installed, configured and in CI.)
+- Deferred minors from Phase 6 reviews: triage stage shows a bar with a total but no steps; fit/check failure printed twice; `show ID --recent` may print a paper twice, no ambiguous-title test; `test_categories` imports fixtures from `test_e2e`; `shelf.md` says the boundary test "catches every import form" (soften: attribute access and dynamic imports are not caught); stale comment in `progress_render.py` naming a deleted helper; LiveRenderer total fixed at start. Older: no config-to-digest e2e test for plug-in sources; `ollama_fit` deadline-vs-does-not-fit decided by clock comparison.
 
 ## Separate projects (not scheduled)
 - Optimised CPU pipeline (own brainstorm first). Antigravity (`agy`) backend investigation. Codex adapter (needs a real-install check; cannot switch tools off). Copilot / Cursor / Kiro adapters (`specs/2026-11-21-cli-backends-research.md`). Schedulers other than systemd (macOS launchd, Windows).
@@ -80,6 +97,16 @@ From before:
 - A pinned model needs to fit at 8192 only; an auto-chosen one at 16384 or more. `llm_num_ctx` floor is 8192.
 - Summary retries: same-day recovery, cap 3 (`MAX_SUMMARY_TRIES`); a failure left to a later day is not retried.
 - Hidden-text stripping has documented gaps (`fulltext.md`).
+
+Phase 6:
+- Per-paper summarize lines (`[2/3] id done (41s)`) now go to stderr with all other progress; "stdout unchanged" means the non-progress output. Cost if wrong: a script grepping stdout for those lines (none known).
+- Notes (model-fit warnings) stay as permanent lines on a terminal as well as in the spinner text, so they never vanish.
+- Category check: a small hand-kept table of common mistakes (`cs.ML` means `cs.LG`) runs before difflib, because difflib alone cannot make that suggestion.
+- The category list was written from knowledge/arXiv's taxonomy page; it could miss a code.
+- Commit trailers on this branch keep the Opus 5.5 line with this session's URL.
+- Switching `embedding_model` drops the feedback boost of earlier votes and saves until you switch back (`rank.py` skips papers without current-model vectors). Documented, not fixed.
+
+
 
 ## Process notes
 - Plans are executed subagent-driven (implementer, per-task review, fix rounds). Plan checkboxes were never ticked in executed plans; git history is the record.

@@ -336,3 +336,22 @@ def test_cli_eval_run_judge_unavailable_exits_before_summarizing(vault, monkeypa
     assert res.exit_code == 1
     assert "judge is not available" in res.output
     assert not (vault / "eval").exists() or not list((vault / "eval").glob("*.json"))
+
+
+def test_eval_judge_unexpected_error_does_not_duplicate_entry(vault):
+    add_papers(vault, 2)
+    jrun(vault, ScriptedJudge([RuntimeError("odd"), judge_ok()]))
+    e = load_eval(vault, DAY).entries
+    assert len(e) == 2
+    assert e[0].summary is not None and e[0].judge_error == "odd" and e[0].verdicts is None
+    assert e[1].verdicts is not None
+
+
+def test_eval_judge_progress_says_judging(vault):
+    from research_pipeline.progress import ListReporter
+
+    add_papers(vault, 1)
+    rep = ListReporter()
+    run_eval(vault, AlwaysSummary([]), fetch, 32768, DAY, reporter=rep, judge=ScriptedJudge([judge_ok()]))
+    assert any(ev.kind == "note" and "judging" in ev.label for ev in rep.events)
+    assert [ev.current for ev in rep.events if ev.kind == "step"] == [1]

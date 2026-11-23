@@ -15,7 +15,7 @@ from pydantic import BaseModel, ValidationError
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.gold import GoldPaper, load_gold
 from research_pipeline.judge import FactVerdict, is_self_graded, judge_summary
-from research_pipeline.llm import LLM, LlmError, LlmLimitReached
+from research_pipeline.llm import LLM, LlmLimitReached
 from research_pipeline.models import Section
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import PROMPT_VERSION
@@ -209,7 +209,7 @@ def run_eval(
                     if limit_hit:
                         entry.judge_error = "usage limit reached"
                     else:
-                        handle.step(g.paper_id, current=n - 1, outcome="ok", detail="judging")
+                        handle.note(f"{g.paper_id}: judging")
                         try:
                             entry.verdicts = judge_summary(
                                 judge, g.title, sections_by_id[g.paper_id], g.key_facts, result
@@ -217,7 +217,7 @@ def run_eval(
                         except LlmLimitReached:
                             limit_hit = True
                             entry.judge_error = "usage limit reached"
-                        except LlmError as exc:
+                        except Exception as exc:  # noqa: BLE001 - a judge failure must not duplicate the entry
                             entry.judge_error = " ".join(str(exc).split()) or type(exc).__name__
             except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
                 msg = " ".join(str(exc).split()) or type(exc).__name__

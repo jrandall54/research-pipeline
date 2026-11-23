@@ -21,7 +21,7 @@ from research_pipeline.fulltext import FullTextUnavailable
 from research_pipeline.gold import GoldPaper, add_gold
 from research_pipeline.judge import FactVerdict, JudgeAnswer
 from research_pipeline.llm import LlmError, LlmLimitReached
-from research_pipeline.models import PaperMeta
+from research_pipeline.models import PaperMeta, Section
 from research_pipeline.prompts import PROMPT_VERSION
 from research_pipeline.summarize import PaperSummary
 from research_pipeline.vault import init_vault
@@ -442,3 +442,11 @@ def test_report_lists_not_judged_reasons(vault):
     add_papers(vault, 1)
     jrun(vault, ScriptedJudge([LlmError("boom")]))
     assert "not judged 2401.00000 Paper 0: boom" in report(vault, DAY)
+
+
+def test_eval_markdown_lists_what_was_left_out_and_cleans_titles(vault):
+    add_papers(vault, 1)
+    secs = [*SECTIONS, Section(title="References", text="[1] x"), Section(title="Funding\x1b[31m", text="grant")]
+    md = run(vault, fetcher=lambda pid: secs).read_text()
+    left = next(line for line in md.splitlines() if line.startswith("Left out:"))
+    assert "References (" in left and "Funding" in left and "\x1b" not in left

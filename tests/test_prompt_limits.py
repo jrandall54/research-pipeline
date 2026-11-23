@@ -12,8 +12,8 @@ def test_summary_prompt_states_length_limits():
     assert "one_line" in SUMMARY_SYSTEM and "one sentence" in SUMMARY_SYSTEM
 
 
-def test_prompt_version_bumped_for_length_limits():
-    assert PROMPT_VERSION == "2026-11-p4"
+def test_prompt_version_bumped_for_pruning():
+    assert PROMPT_VERSION == "2026-11-p5"
 
 
 def test_limits_are_prompt_only_old_long_lists_still_load():

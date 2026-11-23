@@ -65,7 +65,7 @@ Choose a mix, because each kind breaks summarizers differently:
 2. It measures each one: the characters in all sections except back matter (references, acknowledgements, appendices), divided by 3 (the pipeline's rough characters-per-token ratio). This is the approximate length of the text the summarizer actually reads.
 3. It sorts by that length and picks `--count` papers (default 10) evenly along the list. The shortest and the longest are always included. With 9 candidates and `--count 3` you get the 1st, 5th and 9th. Fewer candidates than `--count` means you get all of them.
 
-**Why a spread of lengths.** Short papers fit the model's context window whole, so they are the easy case. Long papers are where the pipeline cuts text (truncation, and dropping back matter first; see `summaries.md`), which is exactly where a summary can silently lose facts. An answer key made only of short papers would never notice that failure.
+**Why a spread of lengths.** Short papers fit the model's context window whole, so they are the easy case. Long papers are where the pipeline cuts text (body cut, and dropping non-paper text and appendices first; see `summaries.md`), which is exactly where a summary can silently lose facts. An answer key made only of short papers would never notice that failure.
 
 **How to run it.**
 
@@ -212,7 +212,7 @@ rpipe eval report            counts, PASS or FAIL, and which papers failed and w
    eval done (6m12s)
    ```
 
-2. It writes two files in `<vault>/eval/`, named by date: `2026-11-21.json` (entries and your grades) and `2026-11-21.md`, a report you can read in any editor. Per paper the markdown has the key facts as a checklist, the summary, and, under each claim, the text of the section it cites, so you can judge a claim without opening the PDF. It ends with the automatic result: how many papers have every citation verified (`citations_ok`).
+2. It writes two files in `<vault>/eval/`, named by date: `2026-11-21.json` (entries and your grades) and `2026-11-21.md`, a report you can read in any editor. Per paper the markdown has the key facts as a checklist, a `Basis:` line (with "body cut" when core text was trimmed) and a `Left out:` line (the sections dropped, with sizes), the summary, and, under each claim, the text of the section it cites, so you can judge a claim without opening the PDF. It ends with the automatic result: how many papers have every citation verified (`citations_ok`).
 3. **`rpipe eval grade`** works on the latest eval (the newest file in `eval/`). For each paper not yet graded it shows the title, your key facts and the summary, then asks `Is this summary accurate? [y/n]` and an optional note. Each grade is written to disk (atomically) the moment you give it. Ctrl-C or end of input stops cleanly: grades already given are kept, and running `rpipe eval grade` again continues with the next ungraded paper.
 4. **`rpipe eval report`** prints the counts: graded, accurate, citation-clean, PASS or FAIL against the pass mark, then the failed papers with your notes and the papers not graded yet. Ungraded papers count as **not** accurate, so a PASS is never claimed early. If you have graded nothing by hand, these human lines are replaced by one line, `Human grades: none yet (optional: rpipe eval grade)`, and no human PASS/FAIL is shown; a judged run still shows its own score (see "Automatic grading"). A paper whose summary failed to generate counts as failed.
 
@@ -237,7 +237,7 @@ Failed:
 Open the `.md` for that day and find the paper. Compare each unticked key fact with the claim that should cover it and the cited section text beside it. Three typical causes:
 
 - the claim is **wrong** (a number or direction changed): the model invented or misread;
-- the claim is **missing** (a key fact never appears): the summary is too thin, or the context was truncated (look for "truncated" in the paper's basis line);
+- the claim is **missing** (a key fact never appears): the summary is too thin, or the body was cut to fit the context (look for "body cut" in the paper's basis line; the `Left out:` line lists the sections dropped, such as References or an appendix);
 - the paper was **abstract only**: the abstract simply did not contain the fact; this is a data limit, not a model fault.
 
 ### If the pass mark is not reached
@@ -246,7 +246,7 @@ Change one thing at a time, then run `rpipe eval run` again and grade again:
 
 - **Model**: try a bigger one with `rpipe model set NAME` (see `llm.md`).
 - **Prompt**: the instructions live in `src/research_pipeline/prompts.py`; failures that repeat across papers (for example always dropping numbers) point to a prompt change.
-- **`llm_num_ctx`**: if failures say "truncated", the paper did not fit; raise the context window with `rpipe model set-context N` (see `llm.md`) if your memory allows.
+- **`llm_num_ctx`**: if failures say "body cut", the paper did not fit; raise the context window with `rpipe model set-context N` (see `llm.md`) if your memory allows.
 
 ## Why it's built this way
 

@@ -589,10 +589,10 @@ def test_model_check_help_mentions_probing():
     assert "probe" in res.output.lower()
 
 
-def test_health_line_counts_truncated_summaries():
-    line = cli.health_line(date(2026, 11, 21), {"summarized": 3, "truncated": 2}, [])
-    assert "truncated 2" in line
-    assert "truncated" not in cli.health_line(date(2026, 11, 21), {"summarized": 3}, [])
+def test_health_line_counts_body_cut_summaries():
+    line = cli.health_line(date(2026, 11, 21), {"summarized": 3, "body_cut": 2}, [])
+    assert "body cut 2" in line
+    assert "body cut" not in cli.health_line(date(2026, 11, 21), {"summarized": 3}, [])
 
 
 def test_crash_in_collect_still_finishes_run(vault, monkeypatch):

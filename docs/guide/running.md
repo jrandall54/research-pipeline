@@ -78,7 +78,7 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 ```
 $ uv run rpipe summarize
 Summarized:
-  fetched=3, summarized=3, abstract_only=0, truncated=0, summary_failed=0
+  fetched=3, summarized=3, abstract_only=0, body_cut=0, summary_failed=0
 ```
 
 Illustrative output; your numbers will differ. The candidates are tried in order of parameter count, so an older but larger model (here `ds2-16b-20k`, 15.7B) can win over newer 14B ones; pin the one you prefer with `rpipe model set NAME`. The progress lines go to stderr, the final line to stdout. The context is the measured maximum (20480 here) less a 1024-token safety margin.
@@ -221,7 +221,7 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 | `counts` | `{"inserted": 339, "updated": 11, "unchanged": 0, "source_errors": 0, "triaged": 15, "skipped": 324, "embedded": 339}` |
 | `errors` | `[]` |
 
-`counts` merges the collect counts (`inserted`, `updated`, `unchanged`, `source_errors`) with the triage counts (`triaged`, `skipped`, `embedded`) and, since Phase 2, the summarize counts (`fetched`, `summarized`, `abstract_only`, `truncated`, `summary_failed`); see `sources.md`, `triage.md` and the summarize stage above. The sample row above predates Phase 2 so it has no summarize counts, and the sample health line shows `summarized 0` for the same reason. Look at the history with `rpipe runs` (below) or `sqlite3 <vault>/vault.sqlite "select * from runs"`.
+`counts` merges the collect counts (`inserted`, `updated`, `unchanged`, `source_errors`) with the triage counts (`triaged`, `skipped`, `embedded`) and, since Phase 2, the summarize counts (`fetched`, `summarized`, `abstract_only`, `body_cut`, `summary_failed`); see `sources.md`, `triage.md` and the summarize stage above. The sample row above predates Phase 2 so it has no summarize counts, and the sample health line shows `summarized 0` for the same reason. Look at the history with `rpipe runs` (below) or `sqlite3 <vault>/vault.sqlite "select * from runs"`.
 
 ### Crash-safe runs and `rpipe runs`
 

@@ -401,14 +401,15 @@ def save_summary(
 ) -> None:
     """Store (or replace) a paper's summary and critique rows. Does not commit.
 
-    The `summary` row's JSON also carries `basis`, `truncated` and `unverified`, and, when
+    The `summary` row's JSON also carries `basis`, `body_cut`, `dropped` and `unverified`, and, when
     `prompt_version` is given, a `provenance` dict (see `get_provenance`).
     """
     now = _now()
     summary_json = {
         **result.summary.model_dump(),
         "basis": result.basis,
-        "truncated": result.truncated,
+        "body_cut": result.body_cut,
+        "dropped": [d.model_dump() for d in result.dropped],
         "unverified": result.unverified,
     }
     if prompt_version is not None:
@@ -444,7 +445,9 @@ def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
         return None
     s = rows["summary"]
     s.pop("provenance", None)  # read it with get_provenance; not part of PaperSummary
-    meta = {k: s.pop(k) for k in ("basis", "truncated", "unverified")}
+    meta = {k: s.pop(k) for k in ("basis", "unverified")}
+    meta["body_cut"] = s.pop("body_cut", s.pop("truncated", False))  # old rows say `truncated`
+    meta["dropped"] = s.pop("dropped", [])
     return PaperSummary(
         summary=Summary.model_validate(s),
         critique=Critique.model_validate(rows["critique"]),

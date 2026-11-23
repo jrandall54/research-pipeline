@@ -349,3 +349,19 @@ def test_clear_skip_is_idempotent(tmp_path):
     clear_skip(conn, "2401.00001")
     clear_skip(conn, "2401.00001")
     assert conn.execute("SELECT COUNT(*) FROM skips").fetchone()[0] == 0
+
+
+def test_dropped_round_trips_and_old_truncated_loads_as_body_cut(tmp_path):
+    from research_pipeline.db import get_summary, save_summary
+    from research_pipeline.summary_models import Dropped
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    result = _result().model_copy(update={"dropped": [Dropped(title="References", chars=10, reason="non_paper")]})
+    save_summary(conn, "2401.00001", result, "m")
+    got = get_summary(conn, "2401.00001")
+    assert got.dropped == result.dropped and got.body_cut is False
+    old = {**result.summary.model_dump(), "basis": "full_text", "truncated": True, "unverified": []}
+    conn.execute("UPDATE summaries SET text = ? WHERE paper_id = '2401.00001' AND kind = 'summary'", (json.dumps(old),))
+    got = get_summary(conn, "2401.00001")
+    assert got.body_cut is True and got.dropped == []

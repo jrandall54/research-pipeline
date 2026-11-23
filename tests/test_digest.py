@@ -116,12 +116,13 @@ from research_pipeline.db import save_summary  # noqa: E402
 from research_pipeline.summarize import PaperSummary  # noqa: E402
 
 
-def with_summary(conn, pid, basis="full_text", unverified=(), status=Status.summarized):
+def with_summary(conn, pid, basis="full_text", unverified=(), status=Status.summarized, body_cut=False, dropped=()):
     s = summary()
     s = s.model_copy(update={"approach": s.approach.model_copy(
         update={"sections": ["2 Method", "3 Results"]})})
     save_summary(conn, pid, PaperSummary(summary=s, critique=critique(), basis=basis,
-                                         truncated=False, unverified=list(unverified)), "fake")
+                                         body_cut=body_cut, dropped=list(dropped),
+                                         unverified=list(unverified)), "fake")
     set_status(conn, pid, status)
 
 
@@ -242,3 +243,15 @@ def test_footer_shows_backend_before_model():
 
 def test_footer_without_backend_unchanged():
     assert _provenance_line({"model": "qwen3:14b"})[0] == "_qwen3:14b_"
+
+
+def test_digest_notes_a_real_cut_but_not_dropped_back_matter(conn, tmp_path):
+    from research_pipeline.summary_models import Dropped
+
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001", dropped=[Dropped(title="References", chars=9, reason="non_paper")])
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "left out" not in text
+    with_summary(conn, "2501.00001", body_cut=True)
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "part of it was left out" in text

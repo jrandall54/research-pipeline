@@ -81,7 +81,7 @@ def summarize_paper(
     if sections is None:
         sections, basis = [Section(title="Abstract", text=abstract)], "abstract"
     fit = fit_to_budget(sections, num_ctx)
-    fitted, truncated = fit.sections, fit.body_cut
+    fitted = fit.sections
     titles = [s.title for s in fitted]
 
     def phase(name: str) -> Callable[[], None] | None:
@@ -101,7 +101,8 @@ def summarize_paper(
         summary=summary,
         critique=critique,
         basis=basis,
-        truncated=truncated,
+        body_cut=fit.body_cut,
+        dropped=fit.dropped,
         unverified=bad_s + bad_c,
     )
 
@@ -155,7 +156,7 @@ def run_summarize(
         set_status,
     )
 
-    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "truncated": 0, "summary_failed": 0}
+    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "body_cut": 0, "summary_failed": 0}
     errors: list[str] = []
     today = today or date.today()
     if paper_ids is not None:
@@ -224,7 +225,7 @@ def run_summarize(
                 else:
                     set_status(conn, pid, Status.summarized)  # commits the summary rows too
                 counts["summarized"] += 1
-                counts["truncated"] += int(result.truncated)
+                counts["body_cut"] += int(result.body_cut)
                 report("done")
             except LlmLimitReached:
                 # Not the paper's fault: no retry is burned, it stays queued for the next run.

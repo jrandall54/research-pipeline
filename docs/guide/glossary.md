@@ -88,7 +88,11 @@
 
 **Citation check** — code comparing every section title a summary claim cites with the paper's real section titles. A title that matches none triggers one retry; if it is still wrong the claim is flagged "unverified". It proves the section exists, not that it says what the claim says. See `summaries.md`.
 
-**Truncation** — cutting text so it fits the model's context window. We drop references and appendices first, then trim every section by the same fraction, and mark the summary `truncated`. See `summaries.md`.
+**Body cut** — trimming core paper text (not just references or appendices) so it fits the model's context window. It happens only as a last resort: non-paper text is always dropped, appendices go first when space is short, then the long method and related-work sections are shortened, then everything proportionally. The summary is marked `body_cut`; old stored rows said `truncated`, which is read as `body_cut`. See `summaries.md`.
+
+**Non-paper text** — the parts of a paper page that are not the paper's argument: references, acknowledgements, funding, author contributions, competing interests, ethics statements, short availability statements and the like. Always dropped before the model reads, and listed on the summary as `dropped`. See `summaries.md`.
+
+**Appendix class** — appendices and supplementary material. Kept when the paper fits (a critique should not call an ablation missing when it sits there) and dropped first when space is short. See `summaries.md`.
 
 **abstract-only summary** — a summary written from the abstract because the paper has no arXiv HTML full text. The digest says so under the summary and the health line counts them as `abstract-only N`. See `digest.md`.
 

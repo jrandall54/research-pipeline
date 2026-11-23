@@ -6,7 +6,7 @@ them), so the database layer never has to import the summarize stage.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Claim(BaseModel):
@@ -42,5 +42,15 @@ class PaperSummary(BaseModel):
     summary: Summary
     critique: Critique
     basis: Literal["full_text", "abstract"]
-    truncated: bool
+    body_cut: bool = False  # core paper text was trimmed to fit (not just non-paper text dropped)
+    dropped: list[Dropped] = []  # sections left out, with sizes (see pruning.py)
     unverified: list[str]  # claim texts whose citations could not be verified
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_old_truncated(cls, data):
+        """Old rows and callers say `truncated` (it meant "cut", back matter or body): read it as `body_cut`."""
+        if isinstance(data, dict) and "truncated" in data:
+            data = dict(data)
+            data.setdefault("body_cut", data.pop("truncated"))
+        return data

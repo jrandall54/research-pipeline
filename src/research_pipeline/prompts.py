@@ -12,7 +12,7 @@ from research_pipeline.models import Section
 
 # Stamped on every stored summary (its provenance). Bump it whenever SUMMARY_SYSTEM or
 # CRITIQUE_SYSTEM change, so old summaries can be told apart from new ones.
-PROMPT_VERSION = "2026-11-p4"
+PROMPT_VERSION = "2026-11-p5"
 
 _PAPER_TAG = re.compile(r"<(/?)(paper)", re.IGNORECASE)
 

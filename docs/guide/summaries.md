@@ -16,19 +16,19 @@ Every point in both (a *claim*) names the paper section(s) it came from. Code th
 ```
  sections (or abstract only) --> fit_to_budget --> summary prompt --> model --> citation check
                                       |                                             | bad title?
-                                      | truncated?                                  v
+                                      | body cut?                                   v
                                       |                                  one retry listing bad
                                       |                                  and valid titles --> check
                                       |                                             |
                                       |            critique prompt --> model --> same check
                                       v                                             v
-                                PaperSummary(summary, critique, basis, truncated, unverified)
+                                PaperSummary(summary, critique, basis, body_cut, dropped, unverified)
 ```
 
 Step by step:
 
 1. **Pick the text.** With full text, the input is the stored sections and `basis` is `full_text`. Without it (`sections=None`, which also happens when a page had less than 50 characters of section text, see `fulltext.md`), the abstract becomes one pseudo-section titled `Abstract` and `basis` is `abstract`.
-2. **Fit the budget** (`fit_to_budget` in `pruning.py`, below). Non-paper text is always dropped; if the paper is still too long, appendices go, then core text is trimmed (`truncated` becomes `True` only for that last case).
+2. **Fit the budget** (`fit_to_budget` in `pruning.py`, below). Non-paper text is always dropped; if the paper is still too long, appendices go, then core text is trimmed (`body_cut` becomes `True` only for that last case).
 3. **Build the prompt** (`build_summary_prompt`). The *system* prompt holds the rules. The *user* prompt holds a one-line task, a note on the basis, and the paper inside a single `<paper> ... </paper>` block, with each section introduced by a `## <title>` heading.
 4. **Ask the model** for JSON in the `Summary` schema ([llm.md](llm.md) handles invalid JSON with its own single retry).
 5. **Check citations** (`unknown_citations`). Every title a claim cites is compared with the real section titles, ignoring case and surrounding spaces (`"3 results "` matches `3 Results`).
@@ -46,7 +46,7 @@ Step by step:
 | `Claim` | `text`, `sections` (list of cited section titles, at least one) |
 | `Summary` | `one_line` (plain text), `problem`, `approach`, `results`, `limitations` (each a `Claim`) |
 | `Critique` | `strengths`, `weaknesses` (lists of `Claim`), `questions` (plain text list) |
-| `PaperSummary` | `summary`, `critique`, `basis` (`full_text` or `abstract`), `truncated`, `unverified` (claim texts) |
+| `PaperSummary` | `summary`, `critique`, `basis` (`full_text` or `abstract`), `body_cut`, `dropped` (what was left out, with sizes), `unverified` (claim texts) |
 
 A paper has sections `Abstract`, `1 Introduction`, `2 Method`, `3 Results`. The model answers:
 
@@ -131,6 +131,7 @@ The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They ch
 ## Where the code is
 
 - `src/research_pipeline/summarize.py`: `Claim`, `Summary`, `Critique`, `PaperSummary`, `unknown_citations`, `summarize_paper`
-- `src/research_pipeline/prompts.py`: `PROMPT_VERSION`, `fit_to_budget`, `build_summary_prompt`, `build_critique_prompt`, `citation_feedback`, `defuse`, the system prompts
+- `src/research_pipeline/pruning.py`: `classify`, `fit_to_budget`, `Fit`
+- `src/research_pipeline/prompts.py`: `PROMPT_VERSION`, `build_summary_prompt`, `build_critique_prompt`, `citation_feedback`, `defuse`, the system prompts
 - `src/research_pipeline/db.py`: `save_summary` (replaces an existing summary, which is what makes a re-summary work), `get_summary`, `get_provenance`, `papers_missing_summary`, `papers_by_ids`
 - `tests/test_summarize.py`, `tests/test_db.py`

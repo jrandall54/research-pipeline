@@ -61,7 +61,7 @@ Choose a mix, because each kind breaks summarizers differently:
 
 **How it works.**
 
-1. It takes every paper that has both a stored summary and stored full text and is not already in the gold set.
+1. It takes every paper that has both a stored summary and stored full text, has an arXiv id (`rpipe gold draft` fetches from arXiv, so papers from other sources are never suggested) and is not already in the gold set.
 2. It measures each one: the characters in all sections except back matter (references, acknowledgements, appendices), divided by 3 (the pipeline's rough characters-per-token ratio). This is the approximate length of the text the summarizer actually reads.
 3. It sorts by that length and picks `--count` papers (default 10) evenly along the list. The shortest and the longest are always included. With 9 candidates and `--count 3` you get the 1st, 5th and 9th. Fewer candidates than `--count` means you get all of them.
 
@@ -80,7 +80,7 @@ It prints each id with `~N tokens` and the title, then reminds you of the next s
 
 ### Drafting key facts
 
-**What it does.** `rpipe gold draft ID [ID ...]` asks the judge (Claude, see "The judge" below) to draft 3 to 5 key facts for each paper, then walks you through them so that you keep, edit or drop each one. You stay the author of the answer key; the model only saves you typing.
+**What it does.** `rpipe gold draft ID [ID ...]` asks the judge (Claude, see "The judge" below) to draft up to 5 key facts (usually 3 to 5; it can return fewer) for each paper, then walks you through them so that you keep, edit or drop each one. You stay the author of the answer key; the model only saves you typing.
 
 **How it works.** For each id, in order:
 
@@ -160,7 +160,7 @@ uv run pytest tests/test_gold.py -q
 
 ## What it does
 
-`rpipe eval` answers one question: **are the model's summaries accurate?** It summarizes every paper in your gold set, shows you each summary next to the key facts you wrote, and records your yes or no. The result is a **pass mark** check: the model passes when at least 90% of the papers are graded accurate (`PASS_MARK = 0.9`; with 10 gold papers, 9 must be accurate).
+`rpipe eval` answers one question: **are the model's summaries accurate?** It summarizes every paper in your gold set, shows you each summary next to the key facts you wrote, and records your yes or no. Your grades give the **human score**: the model passes when at least 90% of the papers are graded accurate (`PASS_MARK = 0.9`; with 10 gold papers, 9 must be accurate). The optional judge (see "Automatic grading") gives a separate **judge score** and a `Change: PASS|FAIL` against the last run. The report shows the two separately; they can disagree. Until you have graded at least one paper the report says `Human grades: none yet (optional: rpipe eval grade)` and prints no human PASS or FAIL.
 
 ## How it works
 
@@ -187,7 +187,7 @@ rpipe eval report            counts, PASS or FAIL, and which papers failed and w
 3. **`rpipe eval grade`** works on the latest eval (the newest file in `eval/`). For each paper not yet graded it shows the title, your key facts and the summary, then asks `Is this summary accurate? [y/n]` and an optional note. Each grade is written to disk (atomically) the moment you give it. Ctrl-C or end of input stops cleanly: grades already given are kept, and running `rpipe eval grade` again continues with the next ungraded paper.
 4. **`rpipe eval report`** prints the counts: graded, accurate, citation-clean, PASS or FAIL against the pass mark, then the failed papers with your notes and the papers not graded yet. Ungraded papers count as **not** accurate, so a PASS is never claimed early. A paper whose summary failed to generate counts as failed.
 
-Re-running `rpipe eval run` on the same day replaces that day's file and **clears that day's grades** (the summaries changed, so the old grades no longer apply). The command says so. A run on a later day makes a new file and keeps the old ones.
+Re-running `rpipe eval run` on the same day replaces that day's file and **clears that day's grades** (the summaries changed, so the old grades no longer apply). The command says so. If the file being replaced had judge verdicts it is first kept as `YYYY-MM-DD.previous.json` (see "Comparing runs"). A run on a later day makes a new file and keeps the old ones.
 
 Sample report (illustrative output; your numbers will differ):
 
@@ -221,7 +221,8 @@ Change one thing at a time, then run `rpipe eval run` again and grade again:
 
 ## Why it's built this way
 
-- **Grading is human.** An LLM judge shares the generator's blind spots: a model that misreads a paper may well misread it the same way when asked to check. The gold set exists to catch exactly that, by comparing against facts a person who knows the paper wrote down. The automatic judge (see "Automatic grading") is a second opinion that scales to more papers, not a replacement: where you have graded a paper, your grade wins and the "Accurate" line counts human grades only.
+- **Grading is human.** An LLM judge shares the generator's blind spots: a model that misreads a paper may well misread it the same way when asked to check. The gold set exists to catch exactly that, by comparing against facts a person who knows the paper wrote down. The automatic judge (see "Automatic grading") is a second opinion that scales to more papers, not a replacement: the human score (your grades, the "Accurate" line) and the judge score (the facts-covered lines and `Change:`) are separate scores, shown separately, and the judge never changes the human one.
+- **Eval and draft fetch the full text fresh from arXiv.** They do not reuse the full text the nightly run stored, so a paper never collected can still be tested and a gold paper is always read the way arXiv serves it today.
 - **The report carries the evidence.** Showing the cited section text beside each claim means grading takes a minute per paper, not a trip to the PDF. Rejected: grading from the summary alone.
 - **Dates as keys, one file per day.** Easy to compare runs after a model change. Rejected: a single results file that each run overwrites, which would lose the history.
 - **Grades saved one at a time.** Ten papers is a long sitting; an interrupt must not lose work.
@@ -240,7 +241,7 @@ uv run rpipe eval grade                    # optional: your own yes/no (your gra
 uv run pytest tests/test_eval.py -q
 ```
 
-Without `--judge`, `rpipe eval run` works as before and needs no Claude.
+Without `--judge`, `rpipe eval run` works as before and needs no Claude; it ends with `Next: rpipe eval grade, then rpipe eval report (or re-run with --judge to have Claude grade)`.
 
 ## Where the code is
 
@@ -284,17 +285,19 @@ Setup: ollama/some-model, context 32768, prompts 2026-11-p4
 
 ### What it does
 
-After a judged run, `rpipe eval report` compares it with the latest earlier eval that also has verdicts, and ends with `Change: PASS` or `Change: FAIL (reason)`. This is the yardstick for any change to the model, the prompts or the context size.
+After a judged run, `rpipe eval report` compares it with a baseline: the earlier judged run of the same day if there is one (see below), else the latest earlier day that also has verdicts, and ends with `Change: PASS` or `Change: FAIL (reason)`. This is the yardstick for any change to the model, the prompts or the context size.
 
 ### How it works
 
-Only papers judged in both runs count, and for each paper only the facts judged in both. The change passes when all three hold:
+The block first shows both setups (`Earlier:` and `Now:`: backend, model, context, prompts and judge model), so you can see what changed. Only papers judged in both runs count, and for each paper only the facts judged in both. Facts are matched by their **text** (whitespace and case ignored), not by position, because each run stores a snapshot of the key facts it used (`key_facts` on the entry). If you edited, added or removed a fact between the runs, the report says `facts changed for ID since the earlier run; compared only the unchanged ones` and compares just the facts present in both. Eval files from before the snapshot existed fall back to matching by position. The change passes when all three hold:
 
 - facts covered dropped by **at most 1**;
 - contradicted facts did **not rise**;
 - unverified citations (claims citing a section that does not exist) did **not rise**.
 
 With no paper in common, or no earlier judged run, the report says "No earlier judged run to compare."
+
+**Same-day re-runs.** "Change one thing, run again" often happens within one day. When `rpipe eval run` is about to replace today's file and that file has at least one verdict, it first copies it to `eval/YYYY-MM-DD.previous.json` (overwriting an older `.previous` for the day) and prints `Kept today's earlier judged run as the baseline for the comparison.` The report for that day then compares against this file; with none, against the latest earlier day with verdicts. `.previous` files are not days: `rpipe eval grade` and `report` ignore them when finding the latest eval.
 
 ### Why it's built this way
 
@@ -308,12 +311,12 @@ One run is enough because the summaries are made at temperature 0 (the model alw
 
 ### What it does
 
-The judge is a second model that does two jobs for the answer key (the gold set): it drafts 3 to 5 key facts for a paper, which you then review and edit, and it grades a summary fact by fact, saying for each one whether the summary **covered** it, **missed** it or **contradicted** it, with a one-line reason.
+The judge is a second model that does two jobs for the answer key (the gold set): it drafts up to 5 key facts (usually 3 to 5) for a paper, which you then review and edit, and it grades a summary fact by fact, saying for each one whether the summary **covered** it, **missed** it or **contradicted** it, with a one-line reason.
 
 ### How it works
 
 1. `make_judge` finds Claude Code (the `claude` program) and checks you are logged in. It makes no model call, so it is quick and costs nothing.
-2. `draft_facts` sends the paper (fitted to the model's size limit, with any text that imitates our `<paper>` tag defused) and asks for the facts a correct summary must get right: main claim, method, a key number, the main limitation. Replies are cleaned (whitespace tidied, empties and duplicates dropped) and capped at 5. If nothing usable is left it raises an error instead of saving an empty key.
+2. `draft_facts` sends the paper (fitted to the model's size limit, with any text that imitates our `<paper>` tag defused) and asks for the facts a correct summary must get right: main claim, method, a key number, the main limitation. Replies are cleaned (whitespace tidied, empties and duplicates dropped) and capped at 5; fewer than 3 can come back, since cleaning may drop some. If nothing usable is left it raises an error instead of saving an empty key.
 3. `judge_summary` sends the numbered facts, the paper and the summary rendered as plain text, and gets one verdict per fact. Each verdict names its fact by number. The result has one slot per fact, in order; a fact the judge did not rule on, or a verdict with a number that matches no fact, leaves that slot as `None` ("not judged"), which callers show as unknown rather than guessing.
 
 Worked example: facts `["f1","f2","f3"]` and the judge answers for numbers 2, 2, 1, 9. The result is `[verdict 1, first verdict 2, None]`: the repeat and the stray 9 are ignored and fact 3 is shown as not judged.
@@ -322,6 +325,7 @@ Worked example: facts `["f1","f2","f3"]` and the judge answers for numbers 2, 2,
 
 - **Always Claude Code, whichever backend summarizes.** A small local model is a weak judge. This means the paper text is sent to Anthropic when you draft or grade, even if your summaries are made locally; use the judge only for papers you are happy to share.
 - **It may grade its own work.** If Claude Code also wrote the summary, the judge is the same model and shares its blind spots. `is_self_graded` detects this so the report can say so. The human review of the facts stays the real check.
+- **The summary is fenced like the paper.** Both go to the judge in tags (`<paper>`, `<summary>`); text inside that imitates the closing tag is defused (its `<` becomes `&lt;`) so a claim cannot close the block and add instructions.
 - **Verdicts are matched by number, not position**, so a judge that skips or reorders facts cannot shift a verdict onto the wrong fact.
 - Rejected: asking for a pass/fail score only. Per-fact verdicts show what was missed.
 

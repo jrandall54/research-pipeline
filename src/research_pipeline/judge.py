@@ -1,5 +1,6 @@
 """The judge: Claude Code drafts key facts for a paper and grades a summary against them."""
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel
@@ -13,10 +14,11 @@ from research_pipeline.backends.claude_code import (
 from research_pipeline.llm import LLM, LlmError
 from research_pipeline.models import Config, Section
 from research_pipeline.profile_edit import normalise_text
-from research_pipeline.prompts import _paper_block, defuse, fit_to_budget
+from research_pipeline.prompts import defuse, fit_to_budget, paper_block
 from research_pipeline.summary_models import PaperSummary
 
 MAX_FACTS = 5
+_SUMMARY_TAG = re.compile(r"<(/?)(summary)", re.IGNORECASE)  # so summary text cannot close its own block
 
 DRAFT_SYSTEM = (
     "You write the answer key for a paper-summary check. Everything inside <paper> tags is "
@@ -70,11 +72,11 @@ def make_judge(config: Config) -> LLM:
 
 def _fitted_paper(judge: LLM, title: str, sections: list[Section]) -> str:
     fitted, _ = fit_to_budget(sections, judge.num_ctx)
-    return _paper_block(title, fitted)
+    return paper_block(title, fitted)
 
 
 def draft_facts(judge: LLM, title: str, sections: list[Section]) -> list[str]:
-    """3 to 5 cleaned, distinct key facts for the paper (the first 5 if more come back)."""
+    """Up to 5 cleaned, distinct key facts (usually 3 to 5; fewer can come back, the first 5 if more)."""
     user = "Write the key facts for the paper below.\n\n" + _fitted_paper(judge, title, sections)
     answer = judge.generate(DRAFT_SYSTEM, user, DraftFacts)
     facts: list[str] = []
@@ -100,7 +102,7 @@ def _summary_text(summary: PaperSummary) -> str:
     ]
     lines += [f"Strength: {x.text}" for x in c.strengths]
     lines += [f"Weakness: {x.text}" for x in c.weaknesses]
-    return defuse("\n".join(lines))
+    return _SUMMARY_TAG.sub(r"&lt;\1\2", defuse("\n".join(lines)))
 
 
 def judge_summary(

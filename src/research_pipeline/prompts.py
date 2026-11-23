@@ -98,7 +98,7 @@ def defuse(text: str) -> str:
     return _PAPER_TAG.sub(r"&lt;\1\2", text)
 
 
-def _paper_block(title: str, sections: list[Section]) -> str:
+def paper_block(title: str, sections: list[Section]) -> str:
     parts = [f"Title: {defuse(title)}"]
     for s in sections:
         parts.append(f"## {defuse(s.title)}\n{defuse(s.text)}")
@@ -116,7 +116,7 @@ def _basis_note(basis: str) -> str:
 
 
 def _user(task: str, title: str, sections: list[Section], basis: str) -> str:
-    return f"{task} {_basis_note(basis)}\n\n{_paper_block(title, sections)}"
+    return f"{task} {_basis_note(basis)}\n\n{paper_block(title, sections)}"
 
 
 def build_summary_prompt(title: str, sections: list[Section], basis: str) -> tuple[str, str]:

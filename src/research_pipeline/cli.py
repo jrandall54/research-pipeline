@@ -48,7 +48,16 @@ from research_pipeline.db import (
 )
 from research_pipeline.digest import render_summary, write_digest
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
-from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, run_eval, save_grade, ungraded
+from research_pipeline.evaluate import (
+    Grade,
+    eval_exists,
+    has_judged_run,
+    latest_day,
+    load_eval,
+    run_eval,
+    save_grade,
+    ungraded,
+)
 from research_pipeline.evaluate import report as eval_report
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable, fetch_fulltext
 from research_pipeline.gold import (
@@ -158,7 +167,7 @@ class Pipeline:
     make_llm: Callable[[], LLM | None]  # called only by run and summarize (may raise LlmError); None = no model
     fulltext_fetcher: Callable[[str], list[Section]]
     startup_errors: list[str] = field(default_factory=list)  # sources/plug-ins that failed to start
-    make_judge: Callable[[], LLM] = field(default=lambda: _no_judge())  # called only by gold draft (may raise JudgeUnavailable)
+    make_judge: Callable[[], LLM] = field(default=lambda: _no_judge())  # used by gold draft and eval run --judge (may raise JudgeUnavailable)
 
 
 def build_pipeline(config: Config) -> Pipeline:
@@ -1424,13 +1433,18 @@ def eval_run(
     today = date.today()
     if eval_exists(ctx.vault, today):
         typer.echo(f"Replacing today's earlier eval ({today.isoformat()}); its grades are cleared.")
+        if has_judged_run(ctx.vault, today):
+            typer.echo("Kept today's earlier judged run as the baseline for the comparison.")
     typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
     with _clean_errors():
         with _reporter() as reporter:
             md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
                           reporter=reporter, judge=eval_judge)
     typer.echo(f"Report written: {md}")
-    typer.echo("Next: rpipe eval report" + ("" if eval_judge else " (add --judge for automatic grading), then rpipe eval grade"))
+    if eval_judge:
+        typer.echo("Next: rpipe eval report")
+    else:
+        typer.echo("Next: rpipe eval grade, then rpipe eval report (or re-run with --judge to have Claude grade)")
 
 
 @eval_app.command("grade")

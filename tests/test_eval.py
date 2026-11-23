@@ -310,7 +310,7 @@ def test_report_compares_with_earlier_judged_run(vault):
     jrun(vault, ScriptedJudge([judge_ok()]), day=DAY)
     jrun(vault, ScriptedJudge([judge_ok()]), day=date(2026, 11, 22))
     out = report(vault, date(2026, 11, 22))
-    assert "Compared with 2026-11-21" in out and "Change: PASS" in out
+    assert "Compared with the earlier run on 2026-11-21" in out and "Change: PASS" in out
     assert "No earlier judged run to compare." in report(vault, DAY)
 
 
@@ -326,7 +326,7 @@ def test_old_eval_file_still_loads(vault):
         e.pop("verdicts"), e.pop("judge_error")
     path.write_text(json.dumps(d))
     out = report(vault, DAY)
-    assert "Graded: 0 of 1" in out and "Judged" not in out
+    assert "Human grades: none yet" in out and "Judged" not in out
 
 
 def test_cli_eval_run_judge_unavailable_exits_before_summarizing(vault, monkeypatch):
@@ -355,3 +355,90 @@ def test_eval_judge_progress_says_judging(vault):
     run_eval(vault, AlwaysSummary([]), fetch, 32768, DAY, reporter=rep, judge=ScriptedJudge([judge_ok()]))
     assert any(ev.kind == "note" and "judging" in ev.label for ev in rep.events)
     assert [ev.current for ev in rep.events if ev.kind == "step"] == [1]
+
+
+# ---- review fixes ----
+
+def facts_file(day, facts, verdicts, pid="p1", setup=None):
+    s = PaperSummary.model_validate(run_summary_dict())
+    return EvalFile(
+        day=day, setup=setup,
+        entries=[EvalEntry(paper_id=pid, title="T", summary=s, verdicts=verdicts, key_facts=facts)],
+    )
+
+
+def test_same_day_rerun_keeps_baseline(vault):
+    add_papers(vault, 1)
+    jrun(vault, ScriptedJudge([judge_ok()]))
+    jrun(vault, ScriptedJudge([judge_ok()]))
+    assert (vault / "eval" / "2026-11-21.previous.json").exists()
+    assert latest_day(vault) == DAY  # .previous is not a day
+    out = report(vault, DAY)
+    assert "the earlier run today" in out and "Change: PASS" in out
+    assert "No earlier judged run" not in out
+
+
+def test_unjudged_rerun_keeps_older_previous(vault):
+    add_papers(vault, 1)
+    jrun(vault, ScriptedJudge([judge_ok()]))
+    jrun(vault, ScriptedJudge([judge_ok()]))  # first judged run kept as .previous
+    run(vault)  # replaces a judged file: it becomes .previous
+    run(vault)  # replaces an unjudged file: .previous is left alone
+    prev = load_eval(vault, DAY).__class__.model_validate_json((vault / "eval" / "2026-11-21.previous.json").read_text())
+    assert prev.entries[0].verdicts is not None
+
+
+def test_cli_says_baseline_kept(vault, monkeypatch):
+    install(monkeypatch)
+    add_papers(vault, 1)
+    jrun(vault, ScriptedJudge([judge_ok()]), day=date.today())
+    res = erun(vault, "run")
+    assert "Kept today's earlier judged run as the baseline" in res.output
+    assert "rpipe eval grade, then rpipe eval report (or re-run with --judge" in res.output
+
+
+def test_compare_matches_facts_by_text_when_one_is_edited():
+    a = facts_file(DAY, ["f1", "f2", "f3"], [covered(1), covered(2), covered(3)])
+    b = facts_file(
+        date(2026, 11, 22), ["f1", "edited", "F3"],
+        [covered(1), FactVerdict(number=2, verdict="missed", reason="r"), covered(3)],
+    )
+    out = compare(a, b)
+    assert "facts changed for p1 since the earlier run; compared only the unchanged ones" in out
+    assert "Facts covered: 2 -> 2" in out and out.endswith("Change: PASS")
+
+
+def test_compare_fact_judged_in_only_one_run_is_skipped():
+    a = facts_file(DAY, ["f1", "f2"], [covered(1), covered(2)])
+    b = facts_file(DAY, ["f1", "f2"], [covered(1), None])
+    out = compare(a, b)
+    assert "Facts covered: 1 -> 1" in out
+
+
+def test_compare_shows_both_setups():
+    from research_pipeline.evaluate import EvalSetup
+
+    def su(model, judge):
+        return EvalSetup(backend="ollama", model=model, num_ctx=8192, prompt_version="v1", judge_model=judge)
+
+    a = facts_file(DAY, ["f1"], [covered(1)], setup=su("m-old", "j1"))
+    b = facts_file(date(2026, 11, 22), ["f1"], [covered(1)], setup=su("m-new", "j2"))
+    out = compare(a, b)
+    assert "Earlier: ollama/m-old" in out and "judge j1" in out
+    assert "Now: ollama/m-new" in out and "judge j2" in out
+
+
+def test_report_no_human_grades_has_no_human_result(vault):
+    add_papers(vault, 1)
+    jrun(vault, ScriptedJudge([judge_ok()]))
+    out = report(vault, DAY)
+    assert "Human grades: none yet (optional: rpipe eval grade)" in out
+    assert "Result:" not in out and "Accurate:" not in out
+    save_grade(vault, DAY, Grade(paper_id="2401.00000", accurate=True))
+    assert "Result: PASS" in report(vault, DAY)
+
+
+def test_report_lists_not_judged_reasons(vault):
+    add_papers(vault, 1)
+    jrun(vault, ScriptedJudge([LlmError("boom")]))
+    assert "not judged 2401.00000 Paper 0: boom" in report(vault, DAY)

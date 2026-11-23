@@ -311,7 +311,26 @@ def test_suggest_spreads_lengths(vault):
     for n in range(1, 10):
         _add_candidate(conn, f"2401.0000{n}", n * 3000)
     picks = suggest_papers(conn, [], count=3)
+    conn.close()
     assert [s.tokens for s in picks] == [1000, 5000, 9000]
+
+
+def test_suggest_count_one_returns_median(vault):
+    conn = open_db(vault / "vault.sqlite")
+    for n in range(1, 6):
+        _add_candidate(conn, f"2401.0000{n}", n * 3000)
+    picks = suggest_papers(conn, [], count=1)
+    conn.close()
+    assert [s.tokens for s in picks] == [3000]
+
+
+def test_suggest_skips_non_arxiv_ids(vault):
+    conn = open_db(vault / "vault.sqlite")
+    _add_candidate(conn, "2401.00001", 3000)
+    _add_candidate(conn, "hf:some-model", 6000)
+    picks = suggest_papers(conn, [])
+    conn.close()
+    assert [s.paper_id for s in picks] == ["2401.00001"]
 
 
 def test_suggest_skips_gold_and_unsummarized(vault):
@@ -320,6 +339,7 @@ def test_suggest_skips_gold_and_unsummarized(vault):
     _add_candidate(conn, "2401.00002", 6000)
     _add_candidate(conn, "2401.00003", 9000, summarized=False)
     picks = suggest_papers(conn, [gp("2401.00001")])
+    conn.close()
     assert [s.paper_id for s in picks] == ["2401.00002"]
 
 
@@ -327,7 +347,9 @@ def test_suggest_fewer_than_count_returns_all(vault):
     conn = open_db(vault / "vault.sqlite")
     _add_candidate(conn, "2401.00001", 6000)
     _add_candidate(conn, "2401.00002", 3000)
-    assert [s.tokens for s in suggest_papers(conn, [], count=5)] == [1000, 2000]
+    picks = suggest_papers(conn, [], count=5)
+    conn.close()
+    assert [s.tokens for s in picks] == [1000, 2000]
 
 
 def test_cli_gold_suggest_lists_and_hints(vault):

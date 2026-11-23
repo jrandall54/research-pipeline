@@ -34,6 +34,7 @@ class EvalEntry(BaseModel):
     citations_ok: bool = False  # every claim cites a section that exists
     verdicts: list[FactVerdict | None] | None = None  # one slot per key fact; None = not judged
     judge_error: str | None = None
+    key_facts: list[str] = []  # the key facts used for this run (old files have none)
 
 
 class EvalSetup(BaseModel):
@@ -96,12 +97,27 @@ def latest_day(vault: Path) -> date | None:
     return max(eval_days(vault), default=None)
 
 
-def load_eval(vault: Path, day: date) -> EvalFile:
-    path = _dir(vault) / f"{day.isoformat()}.json"
+def _previous_path(vault: Path, day: date) -> Path:
+    return _dir(vault) / f"{day.isoformat()}.previous.json"
+
+
+def _load_path(path: Path) -> EvalFile:
     try:
         return EvalFile.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValidationError, ValueError) as e:
         raise ConfigError(f"{path}: not a valid eval file: {e}") from e
+
+
+def load_eval(vault: Path, day: date) -> EvalFile:
+    return _load_path(_dir(vault) / f"{day.isoformat()}.json")
+
+
+def has_judged_run(vault: Path, day: date) -> bool:
+    """True when that day's eval file exists and has at least one verdict."""
+    try:
+        return any(e.verdicts is not None for e in load_eval(vault, day).entries)
+    except ConfigError:
+        return False
 
 
 def _write_json(vault: Path, data: EvalFile) -> None:
@@ -176,7 +192,8 @@ def run_eval(
 
     A paper with no full text is summarized from its abstract (looked up with
     ``abstract_for``). A paper that fails gets an error entry and the rest carry on.
-    Re-running on the same day overwrites that day's file, grades included.
+    Re-running on the same day overwrites that day's file, grades included; if the file being
+    replaced has verdicts it is first kept as `YYYY-MM-DD.previous.json`, the baseline for `compare`.
     With ``judge``, each summary is also graded fact by fact; the usage limit stops judging
     (summaries carry on), any other judge error skips that one paper.
     """
@@ -202,7 +219,11 @@ def run_eval(
                     sections_by_id[g.paper_id] = sections
                 result = summarize_paper(llm, g.title, abstract, sections, num_ctx)
                 entry = EvalEntry(
-                    paper_id=g.paper_id, title=g.title, summary=result, citations_ok=not result.unverified
+                    paper_id=g.paper_id,
+                    title=g.title,
+                    summary=result,
+                    citations_ok=not result.unverified,
+                    key_facts=list(g.key_facts),
                 )
                 entries.append(entry)
                 if judge is not None:
@@ -221,7 +242,7 @@ def run_eval(
                             entry.judge_error = " ".join(str(exc).split()) or type(exc).__name__
             except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
                 msg = " ".join(str(exc).split()) or type(exc).__name__
-                entries.append(EvalEntry(paper_id=g.paper_id, title=g.title, error=msg))
+                entries.append(EvalEntry(paper_id=g.paper_id, title=g.title, error=msg, key_facts=list(g.key_facts)))
             handle.step(
                 g.paper_id, current=n, outcome="failed" if entries[-1].error else "ok", detail=entries[-1].error or ""
             )
@@ -240,6 +261,8 @@ def run_eval(
         judge_model=getattr(judge, "model_name", "?") if judging else None,
         self_graded=self_graded,
     )
+    if has_judged_run(vault, today):
+        _atomic_write(_previous_path(vault, today), (_dir(vault) / f"{today.isoformat()}.json").read_text(encoding="utf-8"))
     _write_json(vault, EvalFile(day=today, entries=entries, setup=setup))
     ok = sum(e.citations_ok for e in entries)
     parts = [
@@ -283,19 +306,34 @@ def judged_counts(data: EvalFile) -> dict[str, int]:
     return out
 
 
-def _paper_counts(entry: EvalEntry, indexes: set[int] | None = None) -> dict[str, int]:
-    out = {"covered": 0, "missed": 0, "contradicted": 0}
+def _norm_fact(fact: str) -> str:
+    return " ".join(fact.split()).casefold()
+
+
+def _verdicts_by_key(entry: EvalEntry, by_text: bool) -> dict[str | int, FactVerdict]:
+    """The judged facts of one paper, keyed by normalised fact text (or by position for old files)."""
+    out: dict[str | int, FactVerdict] = {}
     for i, v in enumerate(entry.verdicts or []):
-        if v is not None and (indexes is None or i in indexes):
-            out[v.verdict] += 1
+        if v is None:
+            continue
+        key: str | int = _norm_fact(entry.key_facts[i]) if by_text and i < len(entry.key_facts) else i
+        out.setdefault(key, v)
     return out
+
+
+def _setup_line(label: str, setup: EvalSetup | None) -> str:
+    if setup is None:
+        return f"  {label}: setup not recorded"
+    judge = f", judge {setup.judge_model}" if setup.judge_model else ""
+    return f"  {label}: {setup.backend}/{setup.model}, context {setup.num_ctx}, prompts {setup.prompt_version}{judge}"
 
 
 def compare(previous: EvalFile, current: EvalFile) -> str:
     """Compare two judged runs over the papers judged in both; ends with `Change: PASS|FAIL`.
 
     Passes when facts covered drop by at most 1, contradictions do not rise and unverified
-    citations do not rise. A fact not judged in either run is left out for that paper.
+    citations do not rise. Facts are matched by their text (by position for old files without a
+    key-fact snapshot); a fact not judged in both runs is left out for that paper.
     """
     prev = {e.paper_id: e for e in previous.entries if e.verdicts is not None}
     cur = {e.paper_id: e for e in current.entries if e.verdicts is not None}
@@ -303,21 +341,30 @@ def compare(previous: EvalFile, current: EvalFile) -> str:
     if not common:
         return "No earlier judged run to compare."
     totals = {"p": {"covered": 0, "contradicted": 0, "unverified": 0}, "c": {"covered": 0, "contradicted": 0, "unverified": 0}}
+    changed: list[str] = []
     for pid in common:
         a, b = prev[pid], cur[pid]
-        both = {
-            i
-            for i in range(min(len(a.verdicts or []), len(b.verdicts or [])))
-            if a.verdicts[i] is not None and b.verdicts[i] is not None  # type: ignore[index]
-        }
-        for key, e in (("p", a), ("c", b)):
-            n = _paper_counts(e, both)
-            totals[key]["covered"] += n["covered"]
-            totals[key]["contradicted"] += n["contradicted"]
+        by_text = bool(a.key_facts) and bool(b.key_facts)
+        if by_text and [_norm_fact(f) for f in a.key_facts] != [_norm_fact(f) for f in b.key_facts]:
+            changed.append(pid)
+        va, vb = _verdicts_by_key(a, by_text), _verdicts_by_key(b, by_text)
+        both = va.keys() & vb.keys()
+        for key, e, verdicts in (("p", a, va), ("c", b, vb)):
+            for k in both:
+                if verdicts[k].verdict in ("covered", "contradicted"):
+                    totals[key][verdicts[k].verdict] += 1
             totals[key]["unverified"] += len(e.summary.unverified) if e.summary else 0
     p, c = totals["p"], totals["c"]
+    earlier = (
+        f"the earlier run on {previous.day.isoformat()}"
+        if previous.day != current.day
+        else f"the earlier run today ({previous.day.isoformat()})"
+    )
     lines = [
-        f"Compared with {previous.day.isoformat()} over {len(common)} paper(s) judged in both:",
+        f"Compared with {earlier} over {len(common)} paper(s) judged in both:",
+        _setup_line("Earlier", previous.setup),
+        _setup_line("Now", current.setup),
+        *[f"  facts changed for {pid} since the earlier run; compared only the unchanged ones" for pid in changed],
         f"  Facts covered: {p['covered']} -> {c['covered']}",
         f"  Contradicted: {p['contradicted']} -> {c['contradicted']}",
         f"  Unverified citations: {p['unverified']} -> {c['unverified']}",
@@ -334,6 +381,15 @@ def compare(previous: EvalFile, current: EvalFile) -> str:
 
 
 def _earlier_judged(vault: Path, day: date) -> EvalFile | None:
+    """The comparison baseline: the day's own `.previous` file, else the latest earlier judged day."""
+    kept = _previous_path(vault, day)
+    if kept.exists():
+        try:
+            data = _load_path(kept)
+            if any(e.verdicts is not None for e in data.entries):
+                return data
+        except ConfigError:
+            pass
     for d in reversed([d for d in eval_days(vault) if d < day]):
         try:
             data = load_eval(vault, d)
@@ -353,13 +409,21 @@ def report(vault: Path, day: date) -> str:
     waiting = [e for e in data.entries if e.summary is not None and e.paper_id not in grades]
     rate = accurate / total if total else 0.0
     verdict = "PASS" if rate >= PASS_MARK else "FAIL"
-    lines = [
-        f"Eval {day.isoformat()}",
-        f"Graded: {len(grades)} of {total}",
-        f"Accurate: {accurate} of {total} ({rate:.0%}); pass mark {PASS_MARK:.0%}",
-        f"Citation-clean: {clean} of {total}",
-        f"Result: {verdict}" + (" (not everything is graded yet; ungraded papers count as not accurate)" if waiting else ""),
-    ]
+    if grades:
+        lines = [
+            f"Eval {day.isoformat()}",
+            f"Graded: {len(grades)} of {total}",
+            f"Accurate: {accurate} of {total} ({rate:.0%}); pass mark {PASS_MARK:.0%}",
+            f"Citation-clean: {clean} of {total}",
+            f"Result: {verdict}"
+            + (" (not everything is graded yet; ungraded papers count as not accurate)" if waiting else ""),
+        ]
+    else:
+        lines = [
+            f"Eval {day.isoformat()}",
+            "Human grades: none yet (optional: rpipe eval grade)",
+            f"Citation-clean: {clean} of {total}",
+        ]
     failed = []
     for e in data.entries:
         if e.summary is None:
@@ -369,9 +433,9 @@ def report(vault: Path, day: date) -> str:
             failed.append(f"  {e.paper_id} {e.title}: {note}")
     if failed:
         lines += ["", "Failed:", *failed]
-    if waiting:
+    if waiting and grades:
         lines += ["", "Not graded yet:", *[f"  {e.paper_id} {e.title}" for e in waiting]]
-    if data.setup and data.setup.judge_model is not None or any(e.verdicts is not None for e in data.entries):
+    if (data.setup and data.setup.judge_model is not None) or any(e.verdicts is not None for e in data.entries):
         n = judged_counts(data)
         facts = n["covered"] + n["missed"] + n["contradicted"] + n["not_judged"]
         lines += ["", f"Judged: {n['papers_judged']} of {total} papers"]

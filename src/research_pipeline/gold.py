@@ -158,7 +158,7 @@ class Suggestion:
 
 
 def suggest_papers(conn: sqlite3.Connection, gold: list[GoldPaper], count: int = GOLD_TARGET) -> list[Suggestion]:
-    """Pick `count` summarized papers with full text, spread evenly across lengths.
+    """Pick `count` summarized arXiv papers with full text, spread evenly across lengths.
 
     Always includes the shortest and the longest (when count >= 2); a single pick is the median.
     """
@@ -170,6 +170,10 @@ def suggest_papers(conn: sqlite3.Connection, gold: list[GoldPaper], count: int =
     ).fetchall()
     candidates: list[Suggestion] = []
     for row in rows:
+        try:
+            normalise_arxiv_id(row["id"])  # gold draft fetches from arXiv, so only arXiv ids are useful
+        except ValueError:
+            continue
         if has_gold(gold, row["id"]):
             continue
         sections = get_fulltext(conn, row["id"]) or []

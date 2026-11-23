@@ -30,6 +30,14 @@ _BLOCKS = {
     "h1", "h2", "h3", "h4", "h5", "h6",
 }
 _LENGTH = re.compile(r"^(-?\d*\.?\d+)([a-z%]*)$")
+# Elements that are never the paper's argument, by class (confirmed on a real arXiv HTML page,
+# 2026-11-22): the bibliography, arXiv's "Instructions for reporting errors" block, the site
+# header and footer and the page navigation bar. Appendices are NOT listed: they are kept when
+# the paper fits (see pruning.py).
+_BOILERPLATE_CLASSES = {
+    "ltx_bibliography", "keyboard-glossary", "arxiv-html-footer", "ltx_page_navbar",
+    "ds-site-header", "ds-site-footer",
+}
 
 # Request spacing is module-level so the 3 s gap holds across separate calls.
 _clock: Callable[[], float] = time.monotonic
@@ -201,6 +209,8 @@ def parse_sections(html: str) -> list[Section]:
     """Split visible text into sections; each h2/h3 heading starts a new one."""
     soup = BeautifulSoup(strip_hidden(html), "html.parser")
     _flatten_math(soup)
+    for el in soup.find_all(class_=lambda c: c in _BOILERPLATE_CLASSES):
+        el.decompose()
     root = soup.body or soup
     sections: list[tuple[str, list[str]]] = []
     current: list[str] | None = None

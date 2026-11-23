@@ -192,3 +192,16 @@ def test_long_math_is_cut():
     )
     text = parse_sections(html)[0].text
     assert len(text) < fulltext.MAX_MATH_CHARS + 40 and "after prose." in text
+
+
+BOILERPLATE = (Path(__file__).parent / "fixtures" / "arxiv_boilerplate.html").read_text(encoding="utf-8")
+
+
+def test_bibliography_and_page_chrome_are_not_sections():
+    titles = [s.title for s in parse_sections(BOILERPLATE)]
+    assert titles == ["1 Introduction", "Appendix A Details"]
+
+
+def test_appendix_markup_is_kept_for_the_fit_stage():
+    secs = parse_sections(BOILERPLATE)
+    assert "Extra training details" in secs[-1].text

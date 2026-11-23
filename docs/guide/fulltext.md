@@ -54,9 +54,12 @@ Worked example. A page contains:
 | Invisible by style (a trailing `!important` is ignored, so it cannot defeat a rule) | inline `display:none`, `visibility:hidden`, `opacity:0`, `font-size` of 2px or less (including `0`) |
 | Same colour as the page | inline text colour `#fff`, `#ffffff`, `white`, `rgb(255,255,255)`, `rgba(255,255,255,1)`, `transparent` |
 | Off-screen | inline `left`, `top` or `text-indent` of -1000px or further (very large negative `em`/`rem` too) |
+| Page boilerplate | elements with class `ltx_bibliography` (the reference list), `keyboard-glossary` (arXiv's "Instructions for reporting errors"), `arxiv-html-footer`, `ds-site-header`, `ds-site-footer` and `ltx_page_navbar`. These names were read off a real arXiv HTML page on 2026-11-22; if arXiv renames them the section classifier in `pruning.py` still drops References and the reporting-errors heading by title |
 | Invisible characters | zero-width characters (U+200B to U+200F, U+2060, U+FEFF) and the Unicode tag block (U+E0000 to U+E007F), deleted from all text |
 
 **Known gaps.** The stripping is a first layer, not a guarantee. It does not handle: `height:0` with `overflow:hidden`, `clip` rules, `transform:scale(0)`, near-white colours (`#fefefe`), percentage font sizes, bidirectional override characters (U+202A to U+202E, which can reorder text on screen), or anything done by external CSS classes (we never load stylesheets). The second layer is in the prompts: the paper is wrapped in `<paper>` tags and the model is told to treat it as data only, and code checks every citation against the real section titles (see [summaries.md](summaries.md)).
+
+Appendices (`ltx_appendix`) are deliberately not removed here: they are kept when the paper fits and dropped first when it does not (`pruning.py`, see `summaries.md`).
 
 Removing an element removes everything inside it. Only inline styles are checked; arXiv's own pages do not hide content through external stylesheets, and we do not load those.
 

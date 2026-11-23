@@ -1,4 +1,4 @@
-# Handoff — after Phase 6 parts A and C (2026-11-22)
+# Handoff — after Phase 6 Part B.1 (answer key) (2026-11-22)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
 
@@ -16,12 +16,13 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 | 3 | Code complete (votes/saves, Datasette, timer, run log, versioning, onboarding). "A week unattended" not yet observed. |
 | 4 | Shelf built. Overlap alerts, archive connections, feasibility tag, weekly synthesis not built; `links` table unused. |
 | 5 | Built and merged; Claude Code smoke test passed. AI club pilot not started. |
-| 6 | Parts A and C built and merged. Part B waits on the owner's model verdict; Part D decided (master plan). |
+| 6 | Parts A and C merged; Part D decided. **Part B redesigned as hardware-adaptive** (spec `specs/2026-11-22-part-b-hardware-adaptive-design.md`, 6 parts); **B.1 answer key built and merged** (`rpipe gold suggest/draft`, `rpipe eval run --judge`). B.2-B.6 not started. |
 | 7 | Planned; plan must be refreshed (see Next, item 4). |
 
 ## Next
-1. **Start here (next session): review the owner's Google Neon document** (model choices and pipeline ideas), then brainstorm (superpowers:brainstorming) before any plan. It may change the master plan.
-2. **Part B (long papers) is reframed as hardware-adaptive.** The pipeline is for other users too, so the design must not lock onto one local model; model and context choices adapt to each user's hardware. The owner's comparison `~/research-vault/model-comparison-2026-11-22.md` is one data point, not a pick: the same 3 long papers summarised by a 27B model at ~34K context (fits 33,792 tokens; truncated 2 of 3; 54-83 s/paper; 0 unverified citations) and a 14B model at ~143K context (fits 130,048 tokens; whole papers; 28-56 s/paper; 7 unverified citations). Candidate adaptive rules: `auto` prefers a model whose fitted context holds a typical paper; section-priority trimming or chunked summaries when context is short; a tighter citation retry for long contexts. Spec constraint carried forward: any change to `auto` must not silently move every user to a smaller model, must work on an empty vault, and is checked against the gold set or the comparison papers. Write Part B's plan after the brainstorm.
+1. **Start here (next session): owner run-through of B.1** — reinstall the tool (`uv tool install --editable '.[embed,serve]' --force`), then `rpipe gold suggest` → `rpipe gold draft ID…` (owner reviews facts) → `rpipe eval run --judge` → `rpipe eval report`. Record the baseline numbers (facts covered, contradictions, unverified, time per paper) here; B.2 and B.3 are measured against it.
+2. **Then plan and build B.2 (strict pruning of non-paper text, `back_matter_dropped` vs `body_cut`) and B.3 (one prompt layout: shared prefix for caching, question repeated at the end, `num_predict`)**, then B.4 (machine scan + model/settings recommender incl. uninstalled models, consented sudo changes with undo), B.5 (RAM-spill reruns within a night deadline), B.6 (task splitting / map-reduce where measured to help). The spec holds the evidence and all rulings.
+   - **Measured 2026-11-22 (owner machine):** `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` (drop-in `/etc/systemd/system/ollama.service.d/kv-cache.conf`, owner applied; undo = delete it + restart) raised the 27B's GPU context 32,768 → 57,344 (14B 141K → 223K); 2 of 3 comparison papers now whole, 0 unverified, same speed. Spilling 7% of the model to RAM read the 3rd paper whole in 155 s vs 88 s. 40 recent papers: median ~22K tokens, max 41K, all fit at 56K. CPU-only 14B: reads 80 tok/s, writes 18 tok/s (≈3-4.5 h/night of 15 before B.3/B.6 savings). `rpipe model fit` cache now 57,344.
 3. **Done 2026-11-22 (owner approved):** Part D recorded in the master plan (overlap alerts, archive connections and weekly synthesis to app Phase 9; feasibility tag to Ongoing; `links` table stays for Phase 9); `CLAUDE.md` gained the progress convention line.
 4. **Refresh `plans/2026-11-22-pipeline-app-split.md` (Phase 7), then execute it.** What changed: `progress.py` is classified *shared*; `run_summarize`'s `on_progress` is gone (stages take a keyword-only `reporter`); per-paper summarize lines now go to stderr.
 

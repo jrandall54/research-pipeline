@@ -243,3 +243,9 @@
 **AST (abstract syntax tree)** — the parsed structure of a Python file: every import, function and expression as a node in a tree. Tests read source files with Python's `ast` module to check what they import, without running them. See `shelf.md`, What never leaves your machine.
 
 **Boundary test** — a test that enforces a rule about the architecture rather than a behaviour, for example "no module that talks to a model may import the private shelf". It fails the build if the rule is broken. See `shelf.md`, What never leaves your machine.
+
+**Judge** — a model asked to grade or write checks for another model's work. Here it is Claude Code: it drafts key facts for a paper and says, fact by fact, whether a summary covered, missed or contradicted each. See `evaluation.md`, The judge.
+
+**Self-graded** — a grade where the judge is the same model that produced the thing graded. It tends to share the author's blind spots, so such grades are flagged as less trustworthy. See `evaluation.md`, The judge.
+
+**Answer key (gold set)** — the small set of papers with hand-checked key facts that summaries are measured against. "Answer key" and "gold set" are two names for the same thing. See `evaluation.md`.

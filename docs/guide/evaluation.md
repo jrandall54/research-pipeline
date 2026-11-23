@@ -176,3 +176,36 @@ uv run pytest tests/test_eval.py -q
 ## Where the code is
 
 `src/research_pipeline/evaluate.py` (`run_eval`, `save_grade`, `report`, `EvalEntry`, `Grade`, `PASS_MARK`), the `eval_app` section of `src/research_pipeline/cli.py`, and `tests/test_eval.py`.
+
+## The judge
+
+### What it does
+
+The judge is a second model that does two jobs for the answer key (the gold set): it drafts 3 to 5 key facts for a paper, which you then review and edit, and it grades a summary fact by fact, saying for each one whether the summary **covered** it, **missed** it or **contradicted** it, with a one-line reason.
+
+### How it works
+
+1. `make_judge` finds Claude Code (the `claude` program) and checks you are logged in. It makes no model call, so it is quick and costs nothing.
+2. `draft_facts` sends the paper (fitted to the model's size limit, with any text that imitates our `<paper>` tag defused) and asks for the facts a correct summary must get right: main claim, method, a key number, the main limitation. Replies are cleaned (whitespace tidied, empties and duplicates dropped) and capped at 5. If nothing usable is left it raises an error instead of saving an empty key.
+3. `judge_summary` sends the numbered facts, the paper and the summary rendered as plain text, and gets one verdict per fact. Each verdict names its fact by number. The result has one slot per fact, in order; a fact the judge did not rule on, or a verdict with a number that matches no fact, leaves that slot as `None` ("not judged"), which callers show as unknown rather than guessing.
+
+Worked example: facts `["f1","f2","f3"]` and the judge answers for numbers 2, 2, 1, 9. The result is `[verdict 1, first verdict 2, None]`: the repeat and the stray 9 are ignored and fact 3 is shown as not judged.
+
+### Why it's built this way
+
+- **Always Claude Code, whichever backend summarizes.** A small local model is a weak judge. This means the paper text is sent to Anthropic when you draft or grade, even if your summaries are made locally; use the judge only for papers you are happy to share.
+- **It may grade its own work.** If Claude Code also wrote the summary, the judge is the same model and shares its blind spots. `is_self_graded` detects this so the report can say so. The human review of the facts stays the real check.
+- **Verdicts are matched by number, not position**, so a judge that skips or reorders facts cannot shift a verdict onto the wrong fact.
+- Rejected: asking for a pass/fail score only. Per-fact verdicts show what was missed.
+
+### How to run / check it
+
+```
+uv run pytest tests/test_judge.py -q
+```
+
+Commands that use the judge come in later tasks. If it is unavailable the error says to install Claude Code, log in, or run `rpipe model setup`.
+
+### Where the code is
+
+`src/research_pipeline/judge.py` (`make_judge`, `draft_facts`, `judge_summary`, `is_self_graded`, `JudgeUnavailable`) and `tests/test_judge.py`.

@@ -119,7 +119,7 @@ rpipe model set-url http://gpu-box:11434   # a different Ollama server (must sta
 rpipe model set-context 16384   # pin the context in tokens, at least 8192, or `auto`; invalid values are refused and the file is left alone
 ```
 
-**Check that prefix caching works.** The summary and the critique start with identical text (see `summaries.md`), so Ollama should read the paper once. After every reply the client keeps Ollama's own timing numbers in `client.last_stats` (`prompt_eval_count`: prompt tokens actually read, with the cached part not counted; `prompt_eval_duration` and `eval_duration` in nanoseconds; `eval_count`: tokens written; `None` when Ollama sends none). To see it on one paper:
+**Check that prefix caching works.** The summary and the critique start with identical text (see `summaries.md`), so Ollama should read the paper once. After every reply the client keeps Ollama's own timing numbers in `client.last_stats` (`prompt_eval_count`: the prompt's length in tokens, which this Ollama counts in full even when part of it came from the cache; `prompt_eval_duration` and `eval_duration` in nanoseconds, where the cache shows up; `eval_count`: tokens written; `None` when Ollama sends none). To see it on one paper:
 
 ```
 uv run python - <<'PY'
@@ -130,13 +130,13 @@ from research_pipeline.models import Section
 secs = [Section(title="1 Introduction", text="We study X. " * 2000)]  # use a real paper's sections for a real test
 c = OllamaClient("http://localhost:11434", "YOUR_MODEL", 32768)
 c.generate(*build_summary_prompt("T", secs, "full_text"), Summary)
-print("summary read", c.last_stats["prompt_eval_count"])
+print("summary read", c.last_stats["prompt_eval_duration"] / 1e9, "s")
 c.generate(*build_critique_prompt("T", secs, "full_text"), Critique)
-print("critique read", c.last_stats["prompt_eval_count"])
+print("critique read", c.last_stats["prompt_eval_duration"] / 1e9, "s")
 PY
 ```
 
-Working caching shows the second number far smaller than the first (only the task text). If both are about equal, the server is not reusing its reading (another model was loaded in between, Ollama was restarted, or the options differ).
+Working caching shows the second time far smaller than the first (only the task text is read again). Measured 2026-11-22 on the owner machine (27B model, 76,000-character paper, about 24,800 prompt tokens): with separate system prompts both calls spent about 15.5 s reading the prompt; with the shared layout the summary still took 15.7 s and the critique 0.5 s, so the critique call went from 42 s to 16 s overall. If both times are about equal, the server is not reusing its reading (another model was loaded in between, Ollama was restarted, or the options differ).
 
 `rpipe model check` (which resolves `auto` first, so with `auto` settings it may probe the GPU and be slow the first time) compares names with the tag spelled out, so `llama3.2` matches the `llama3.2:latest` that Ollama lists. It uses a 10-second timeout (generating has a much longer one), so a hung server fails fast. It exits 1 with a fix hint if the server is down or the model is missing. Tests use a fake client, so `uv run pytest -q` needs no Ollama.
 

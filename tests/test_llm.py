@@ -41,6 +41,42 @@ def test_generate_sends_required_options():
 
 
 @respx.mock
+def test_generate_sends_num_predict():
+    route = respx.post(f"{URL}/api/chat").mock(return_value=reply('{"text": "hi"}'))
+    client().generate("s", "u", Answer)
+    assert json.loads(route.calls[0].request.content)["options"]["num_predict"] == 4096
+    respx.post(f"{URL}/api/chat").mock(return_value=reply('{"text": "hi"}'))
+    OllamaClient(URL, "m", 8192, num_predict=512).generate("s", "u", Answer)
+    assert json.loads(respx.calls[-1].request.content)["options"]["num_predict"] == 512
+
+
+@respx.mock
+def test_last_stats_records_timing_fields():
+    stats = {"prompt_eval_count": 21000, "prompt_eval_duration": 9_000_000_000, "eval_count": 400, "eval_duration": 22_000_000_000}
+    respx.post(f"{URL}/api/chat").mock(return_value=httpx.Response(
+        200, json={"message": {"role": "assistant", "content": '{"text": "hi"}'}, **stats, "model": "m"}))
+    c = client()
+    assert c.last_stats is None
+    c.generate("s", "u", Answer)
+    assert c.last_stats == stats
+
+
+@respx.mock
+def test_last_stats_none_without_fields():
+    respx.post(f"{URL}/api/chat").mock(return_value=reply('{"text": "hi"}'))
+    c = client()
+    c.generate("s", "u", Answer)
+    assert c.last_stats is None
+
+
+@respx.mock
+def test_output_cut_by_the_cap_raises_llm_error():
+    respx.post(f"{URL}/api/chat").mock(side_effect=[reply('{"text": "cut off mid'), reply('{"text": "cut off mid')])
+    with pytest.raises(LlmError, match="invalid output twice"):
+        client().generate("s", "u", Answer)
+
+
+@respx.mock
 def test_invalid_json_retries_once_then_raises():
     respx.post(f"{URL}/api/chat").mock(side_effect=[reply("nope"), reply('{"wrong": 1}')])
     with pytest.raises(LlmError):

@@ -261,3 +261,5 @@
 **Pass bar (eval)** — the rule for a judged run versus the previous one: facts covered drop by at most 1, contradictions and unverified citations do not rise. See `evaluation.md`, Comparing runs.
 
 **Unreviewed (gold paper)** — a gold paper whose key facts Claude drafted and saved with `rpipe gold auto` without a person checking them. The report says so, because the score then compares runs with each other instead of proving accuracy. See `evaluation.md`, Filling the set with no questions.
+
+**num_predict** — the Ollama option that caps how many tokens the model may write in one answer. We send 4096 with every call so a runaway answer cannot stall a night's run. See `llm.md`.

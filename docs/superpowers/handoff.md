@@ -26,6 +26,16 @@ Read this first in a new session. The master plan (Claude Docs, "Research Pipeli
 3. **Done 2026-11-22 (owner approved):** Part D recorded in the master plan (overlap alerts, archive connections and weekly synthesis to app Phase 9; feasibility tag to Ongoing; `links` table stays for Phase 9); `CLAUDE.md` gained the progress convention line.
 4. **Refresh `plans/2026-11-22-pipeline-app-split.md` (Phase 7), then execute it.** What changed: `progress.py` is classified *shared*; `run_summarize`'s `on_progress` is gone (stages take a keyword-only `reporter`); per-paper summarize lines now go to stderr.
 
+## B.2 and B.3 built (2026-11-22, branch `part-b2-b3`, not merged)
+
+Plans: `plans/2026-11-22-part-b2-strict-pruning.md`, `plans/2026-11-22-part-b3-prompt-layout.md`. Both built in full (B.2 tasks 1-5, B.3 tasks 1-3); prompt version `2026-11-p6`; `uv run pytest -q` 1090 passing, ruff clean.
+
+- **B.2:** `pruning.py` (classify, ordered trim), `PaperSummary.body_cut` + `dropped` (old `truncated` rows read as `body_cut`), health line `body cut N`, eval `Left out:` line, DOM rule for `ltx_bibliography`, `keyboard-glossary`, site header/footer (class names read off a real arXiv page).
+- **B.3:** shared system prompt, task after the paper, `num_predict` 4096, `OllamaClient.last_stats`.
+- **Caching measured** (27B, 76,000-char paper, ~24,800 prompt tokens): old layout read the prompt in 15.4 s then 15.5 s; new layout 15.7 s then **0.5 s**; critique call 42 s -> 16 s. This Ollama reports the full prompt in `prompt_eval_count` even when cached, so compare `prompt_eval_duration`.
+- **Quality check is weak, not a proof.** Answer key: 2 unreviewed papers (only 3 papers in the vault have stored full text). p4 -> p5: PASS but only 1 paper comparable (facts were redrafted). p5 -> p6: PASS, facts covered 2 -> 2 of 10, 0 contradicted, 0 unverified. 2 of 10 is a low absolute score: the auto-drafted facts are long and number-heavy and the summaries short, so the key barely moves. Before trusting B.2/B.3 on quality, build a larger key (`rpipe gold auto` once more papers have full text, then ideally review a few).
+- Left from the plans: nothing in code. Owner decisions: merge the branch, and whether to widen the answer key first.
+
 ## Phase 6 check (real run, 2026-11-22, copy of the owner vault, ollama backend)
 `rpipe run --vault <copy> 2>&1 | cat` (stderr merged): plain lines, 0 escape codes, 0 carriage returns.
 ```

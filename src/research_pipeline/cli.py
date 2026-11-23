@@ -1389,7 +1389,10 @@ def _latest_eval(vault: Path) -> date:
 
 
 @eval_app.command("run")
-def eval_run(vault: VaultOption = None) -> None:
+def eval_run(
+    vault: VaultOption = None,
+    use_judge: Annotated[bool, typer.Option("--judge", help="Also grade every key fact with the Claude judge.")] = False,
+) -> None:
     """Summarize every gold-set paper with the local model and write a report to grade."""
     ctx = _open(vault)
     _require_model(ctx.config)
@@ -1400,6 +1403,13 @@ def eval_run(vault: VaultOption = None) -> None:
     if len(papers) < GOLD_TARGET:
         typer.echo(f"Warning: the gold set has {len(papers)} papers; {GOLD_TARGET} make a fair test (rpipe gold add).")
     pipeline = build_pipeline(ctx.config)
+    eval_judge: LLM | None = None
+    if use_judge:
+        try:
+            eval_judge = pipeline.make_judge()
+        except judge.JudgeUnavailable as exc:
+            raise _fail(f"The judge is not available: {exc}") from exc
+        typer.echo("The paper text is sent to Claude to grade the summaries.")
     try:
         llm = _ready_llm(pipeline)
     except Exception as exc:  # noqa: BLE001
@@ -1418,9 +1428,9 @@ def eval_run(vault: VaultOption = None) -> None:
     with _clean_errors():
         with _reporter() as reporter:
             md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
-                          reporter=reporter)
+                          reporter=reporter, judge=eval_judge)
     typer.echo(f"Report written: {md}")
-    typer.echo("Next: rpipe eval grade")
+    typer.echo("Next: rpipe eval report" + ("" if eval_judge else " (add --judge for automatic grading), then rpipe eval grade"))
 
 
 @eval_app.command("grade")

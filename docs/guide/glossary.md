@@ -249,3 +249,7 @@
 **Self-graded** — a grade where the judge is the same model that produced the thing graded. It tends to share the author's blind spots, so such grades are flagged as less trustworthy. See `evaluation.md`, The judge.
 
 **Answer key (gold set)** — the small set of papers with hand-checked key facts that summaries are measured against. "Answer key" and "gold set" are two names for the same thing. See `evaluation.md`.
+
+**Setup (eval)** — the record of which backend, model, context size, prompt version and judge produced an eval result, stored in the eval file so two runs can be compared fairly. See `evaluation.md`, Automatic grading.
+
+**Pass bar (eval)** — the rule for a judged run versus the previous one: facts covered drop by at most 1, contradictions and unverified citations do not rise. See `evaluation.md`, Comparing runs.

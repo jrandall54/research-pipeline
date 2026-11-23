@@ -1,16 +1,29 @@
 from datetime import date
 
 import pytest
-from conftest import SECTIONS, AlwaysSummary
+from conftest import SECTIONS, AlwaysSummary, FakeLLM
 from typer.testing import CliRunner
 
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
-from research_pipeline.evaluate import Grade, latest_day, load_eval, report, run_eval, save_grade
+from research_pipeline.evaluate import (
+    EvalEntry,
+    EvalFile,
+    Grade,
+    compare,
+    latest_day,
+    load_eval,
+    report,
+    run_eval,
+    save_grade,
+)
 from research_pipeline.fulltext import FullTextUnavailable
 from research_pipeline.gold import GoldPaper, add_gold
-from research_pipeline.llm import LlmError
+from research_pipeline.judge import FactVerdict, JudgeAnswer
+from research_pipeline.llm import LlmError, LlmLimitReached
 from research_pipeline.models import PaperMeta
+from research_pipeline.prompts import PROMPT_VERSION
+from research_pipeline.summarize import PaperSummary
 from research_pipeline.vault import init_vault
 
 runner = CliRunner()
@@ -194,3 +207,132 @@ def test_run_eval_emits_one_step_per_paper(vault):
     assert steps == [("2401.00000", "failed"), ("2401.00001", "ok")]
     assert rep.events[0].kind == "start" and rep.events[0].total == 2
     assert rep.events[-1].kind == "done"
+
+
+# ---- judge ----
+
+def covered(n=1):
+    return FactVerdict(number=n, verdict="covered", reason="r")
+
+
+def judge_ok():
+    return JudgeAnswer(verdicts=[covered()])
+
+
+class ScriptedJudge(FakeLLM):
+    def generate(self, system, user, schema):
+        r = self.responses.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+def jrun(vault, judge, day=DAY, llm=None):
+    return run_eval(vault, llm or AlwaysSummary([]), fetch, 32768, day, judge=judge)
+
+
+def test_eval_judge_records_verdicts_and_setup(vault):
+    add_papers(vault, 1)
+    jrun(vault, ScriptedJudge([judge_ok()]))
+    data = load_eval(vault, DAY)
+    assert [v.verdict for v in data.entries[0].verdicts] == ["covered"]
+    assert data.setup.model == "fake-llm"
+    assert data.setup.prompt_version == PROMPT_VERSION
+    assert data.setup.num_ctx == 32768 and data.setup.judge_model == "fake-llm"
+
+
+def test_eval_judge_limit_stops_judging_keeps_summaries(vault):
+    add_papers(vault, 3)
+    judge = ScriptedJudge([LlmLimitReached("limit")])
+    jrun(vault, judge)
+    data = load_eval(vault, DAY)
+    assert all(e.summary for e in data.entries)
+    assert all(e.verdicts is None for e in data.entries)
+    assert [e.judge_error for e in data.entries] == ["usage limit reached"] * 3
+    assert judge.responses == []  # asked once, then stopped
+    assert "Judged: 0 of 3" in report(vault, DAY)
+
+
+def test_eval_judge_error_skips_one_paper(vault):
+    add_papers(vault, 2)
+    jrun(vault, ScriptedJudge([LlmError("boom"), judge_ok()]))
+    e = load_eval(vault, DAY).entries
+    assert e[0].verdicts is None and e[0].judge_error == "boom"
+    assert e[1].verdicts is not None
+
+
+def test_eval_self_graded_flag(vault):
+    add_papers(vault, 1)
+    llm, judge = AlwaysSummary([]), ScriptedJudge([judge_ok()])
+    llm.name = judge.name = "claude-code"
+    jrun(vault, judge, llm=llm)
+    assert load_eval(vault, DAY).setup.self_graded
+    assert "Self-graded" in report(vault, DAY)
+
+
+def test_report_counts_not_judged_separately(vault):
+    add_papers(vault, 1, facts=("a", "b"))
+    jrun(vault, ScriptedJudge([judge_ok()]))
+    assert "Facts covered: 1 of 2 (missed 0, contradicted 0, not judged 1)" in report(vault, DAY)
+
+
+def _file(day, covered_n, contradicted=0, unverified=0, pid="p1"):
+
+    s = PaperSummary.model_validate(
+        {**run_summary_dict(), "unverified": ["x"] * unverified}
+    )
+    vs = [covered(i + 1) for i in range(covered_n)]
+    vs += [FactVerdict(number=len(vs) + 1, verdict="contradicted", reason="r") for _ in range(contradicted)]
+    vs += [FactVerdict(number=len(vs) + 1, verdict="missed", reason="r") for _ in range(4 - len(vs))]
+    return EvalFile(day=day, entries=[EvalEntry(paper_id=pid, title="T", summary=s, verdicts=vs)])
+
+
+def run_summary_dict():
+    from research_pipeline.summarize import summarize_paper
+
+    return summarize_paper(AlwaysSummary([]), "T", "", SECTIONS, 32768).model_dump()
+
+
+def test_compare_pass_and_fail_rules():
+    base = _file(DAY, 4)
+    assert compare(base, _file(date(2026, 11, 22), 3)).endswith("Change: PASS")
+    assert compare(base, _file(date(2026, 11, 22), 2)).endswith("Change: FAIL (facts covered)")
+    assert "FAIL (contradicted)" in compare(base, _file(date(2026, 11, 22), 3, contradicted=1))
+    assert "FAIL (unverified citations)" in compare(base, _file(date(2026, 11, 22), 4, unverified=1))
+
+
+def test_compare_no_common_papers():
+    assert compare(_file(DAY, 2, pid="a"), _file(date(2026, 11, 22), 2, pid="b")) == "No earlier judged run to compare."
+
+
+def test_report_compares_with_earlier_judged_run(vault):
+    add_papers(vault, 1)
+    jrun(vault, ScriptedJudge([judge_ok()]), day=DAY)
+    jrun(vault, ScriptedJudge([judge_ok()]), day=date(2026, 11, 22))
+    out = report(vault, date(2026, 11, 22))
+    assert "Compared with 2026-11-21" in out and "Change: PASS" in out
+    assert "No earlier judged run to compare." in report(vault, DAY)
+
+
+def test_old_eval_file_still_loads(vault):
+    add_papers(vault, 1)
+    run(vault)
+    import json
+
+    path = vault / "eval" / "2026-11-21.json"
+    d = json.loads(path.read_text())
+    d.pop("setup")
+    for e in d["entries"]:
+        e.pop("verdicts"), e.pop("judge_error")
+    path.write_text(json.dumps(d))
+    out = report(vault, DAY)
+    assert "Graded: 0 of 1" in out and "Judged" not in out
+
+
+def test_cli_eval_run_judge_unavailable_exits_before_summarizing(vault, monkeypatch):
+    install(monkeypatch)
+    add_papers(vault, 1)
+    res = erun(vault, "run", "--judge")
+    assert res.exit_code == 1
+    assert "judge is not available" in res.output
+    assert not (vault / "eval").exists() or not list((vault / "eval").glob("*.json"))

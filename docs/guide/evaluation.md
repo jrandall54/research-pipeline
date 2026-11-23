@@ -221,7 +221,7 @@ Change one thing at a time, then run `rpipe eval run` again and grade again:
 
 ## Why it's built this way
 
-- **Grading is human.** An LLM judge shares the generator's blind spots: a model that misreads a paper may well misread it the same way when asked to check. The gold set exists to catch exactly that, by comparing against facts a person who knows the paper wrote down. An LLM-as-judge variant, useful for many more papers than you can grade by hand, is deferred to Phase 6.
+- **Grading is human.** An LLM judge shares the generator's blind spots: a model that misreads a paper may well misread it the same way when asked to check. The gold set exists to catch exactly that, by comparing against facts a person who knows the paper wrote down. The automatic judge (see "Automatic grading") is a second opinion that scales to more papers, not a replacement: where you have graded a paper, your grade wins and the "Accurate" line counts human grades only.
 - **The report carries the evidence.** Showing the cited section text beside each claim means grading takes a minute per paper, not a trip to the PDF. Rejected: grading from the summary alone.
 - **Dates as keys, one file per day.** Easy to compare runs after a model change. Rejected: a single results file that each run overwrites, which would lose the history.
 - **Grades saved one at a time.** Ten papers is a long sitting; an interrupt must not lose work.
@@ -229,16 +229,80 @@ Change one thing at a time, then run `rpipe eval run` again and grade again:
 
 ## How to run / check it
 
+The full flow, from an empty answer key to a compared result:
+
 ```
-uv run rpipe eval run
-uv run rpipe eval grade
-uv run rpipe eval report
+uv run rpipe gold suggest                  # pick papers across short and long
+uv run rpipe gold draft ID [ID ...]        # the judge drafts key facts; you review them
+uv run rpipe eval run --judge              # summarize each paper, grade every key fact
+uv run rpipe eval report                   # counts, and the comparison with the last run
+uv run rpipe eval grade                    # optional: your own yes/no (your grade wins)
 uv run pytest tests/test_eval.py -q
 ```
 
+Without `--judge`, `rpipe eval run` works as before and needs no Claude.
+
 ## Where the code is
 
-`src/research_pipeline/evaluate.py` (`run_eval`, `save_grade`, `report`, `EvalEntry`, `Grade`, `PASS_MARK`), the `eval_app` section of `src/research_pipeline/cli.py`, and `tests/test_eval.py`.
+`src/research_pipeline/evaluate.py` (`run_eval`, `save_grade`, `report`, `judged_counts`, `compare`, `EvalEntry`, `EvalSetup`, `Grade`, `PASS_MARK`), the `eval_app` section of `src/research_pipeline/cli.py`, and `tests/test_eval.py`.
+
+## Automatic grading
+
+### What it does
+
+`rpipe eval run --judge` also asks the judge (Claude Code, see "The judge") to grade each summary against the key facts of that paper. The verdicts are stored beside the summary in the eval file, so the report can say how many facts the summaries got right without you reading every one.
+
+### How it works
+
+1. Before anything is summarized, the command builds the judge. If Claude Code is missing or not logged in it stops with the reason (exit code 1) and nothing is run. It also reminds you that the paper text is sent to Claude.
+2. Each paper is summarized as before. Then the judge gets the same sections the summarizer got, the numbered key facts and the summary text. The progress line for that paper says `judging` while it waits.
+3. Each key fact ends up with one of four marks:
+   - **covered**: the summary states it correctly;
+   - **missed**: the summary does not mention it;
+   - **contradicted**: the summary says something that conflicts with it (the worst case);
+   - **not judged**: the judge gave no ruling for that fact. This is counted separately and never as covered.
+4. The file also records a **setup** (backend, model, context size, prompt version, judge model), so you can tell later which configuration produced a result.
+5. If the judge is the same backend and model as the summarizer, the run is marked **self-graded** and the report says so. It is allowed, but remember the judge then shares the summarizer's blind spots.
+6. If Claude's usage limit is reached, judging stops for the rest of the run but summaries carry on; the remaining papers get the note "usage limit reached". Any other judge error skips only that paper. The report shows `Judged: N of M papers`.
+
+Sample (illustrative output):
+
+```
+Judged: 9 of 10 papers
+Facts covered: 31 of 38 (missed 4, contradicted 1, not judged 2)
+Setup: ollama/some-model, context 32768, prompts 2026-11-p4
+```
+
+### Why it's built this way
+
+- The key facts were reviewed by you, so the judge only compares text against facts you approved. It is cheaper than grading 40 facts by hand and consistent between runs.
+- Human grades stay and win. The judge's verdicts never change the "Accurate" line.
+- A fact the judge skipped is "not judged", not covered, so a sloppy judge cannot inflate the score.
+- A usage limit stops only the judging, so a long summarizing run is never thrown away.
+
+## Comparing runs
+
+### What it does
+
+After a judged run, `rpipe eval report` compares it with the latest earlier eval that also has verdicts, and ends with `Change: PASS` or `Change: FAIL (reason)`. This is the yardstick for any change to the model, the prompts or the context size.
+
+### How it works
+
+Only papers judged in both runs count, and for each paper only the facts judged in both. The change passes when all three hold:
+
+- facts covered dropped by **at most 1**;
+- contradicted facts did **not rise**;
+- unverified citations (claims citing a section that does not exist) did **not rise**.
+
+With no paper in common, or no earlier judged run, the report says "No earlier judged run to compare."
+
+### Why it's built this way
+
+One run is enough because the summaries are made at temperature 0 (the model always picks its most likely word, so the same input gives nearly the same output); a difference between two runs is then mostly your change, not luck. The allowed drop of 1 absorbs the small wobble that remains and the judge's own noise. Contradictions and bad citations get no allowance because they are the failures that mislead a reader.
+
+### Where the code is
+
+`run_eval`, `judged_counts`, `compare` and `report` in `src/research_pipeline/evaluate.py`, the `--judge` option of `eval_run` in `src/research_pipeline/cli.py`, tests in `tests/test_eval.py`.
 
 ## The judge
 
@@ -267,7 +331,7 @@ Worked example: facts `["f1","f2","f3"]` and the judge answers for numbers 2, 2,
 uv run pytest tests/test_judge.py -q
 ```
 
-`rpipe gold draft` uses the judge to draft key facts; grading commands come later. If it is unavailable the error says to install Claude Code, log in, or run `rpipe model setup`.
+`rpipe gold draft` uses the judge to draft key facts and `rpipe eval run --judge` uses it to grade. If it is unavailable the error says to install Claude Code, log in, or run `rpipe model setup`.
 
 ### Where the code is
 

@@ -12,7 +12,7 @@ import httpx
 from bs4 import BeautifulSoup, Comment, Tag
 
 from research_pipeline.models import Section
-from research_pipeline.sources.arxiv import MIN_SPACING, USER_AGENT
+from research_pipeline.sources.arxiv import MIN_SPACING, USER_AGENT, retry_delay
 from research_pipeline.sources.base import SourceError
 
 HTML_URL = "https://arxiv.org/html/{paper_id}"
@@ -260,27 +260,40 @@ def fetch_fulltext(
         raise FullTextUnavailable(f"{paper_id} is not an arXiv id")
     own = client is None
     http = client or httpx.Client(timeout=30, headers={"User-Agent": USER_AGENT})
-    _wait_for_spacing(sleep)
+    attempt = 0
     try:
-        with http.stream(
-            "GET", HTML_URL.format(paper_id=paper_id), headers={"User-Agent": USER_AGENT},
-            follow_redirects=True,
-        ) as resp:
-            if resp.status_code == 404:
-                raise FullTextUnavailable(f"no HTML version of {paper_id}")
-            resp.raise_for_status()
-            body = bytearray()
-            for chunk in resp.iter_bytes():
-                body.extend(chunk)
-                if len(body) > MAX_BYTES:
-                    raise SourceError(f"arXiv HTML for {paper_id} is too large (over 5 MB)")
-            encoding = resp.encoding or "utf-8"
-    except httpx.HTTPStatusError as exc:
-        raise SourceError(f"arXiv HTML returned HTTP {exc.response.status_code}") from exc
-    except httpx.HTTPError as exc:
-        raise SourceError(f"arXiv HTML request failed: {exc!r}") from exc
+        while True:
+            _wait_for_spacing(sleep)
+            wait: float | None = None
+            try:
+                with http.stream(
+                    "GET", HTML_URL.format(paper_id=paper_id), headers={"User-Agent": USER_AGENT},
+                    follow_redirects=True,
+                ) as resp:
+                    if resp.status_code == 404:
+                        raise FullTextUnavailable(f"no HTML version of {paper_id}")
+                    # A 429/503 means "too many requests": wait and try again a few times.
+                    wait = retry_delay(resp.status_code, resp.headers.get("Retry-After"), attempt)
+                    if wait is None:
+                        resp.raise_for_status()
+                        body = bytearray()
+                        for chunk in resp.iter_bytes():
+                            body.extend(chunk)
+                            if len(body) > MAX_BYTES:
+                                raise SourceError(f"arXiv HTML for {paper_id} is too large (over 5 MB)")
+                        encoding = resp.encoding or "utf-8"
+            except httpx.HTTPStatusError as exc:
+                limited = " (rate limited)" if exc.response.status_code in (429, 503) else ""
+                raise SourceError(f"arXiv HTML returned HTTP {exc.response.status_code}{limited}") from exc
+            except httpx.HTTPError as exc:
+                raise SourceError(f"arXiv HTML request failed: {exc!r}") from exc
+            finally:
+                _last_request = _clock()
+            if wait is None:
+                break
+            sleep(wait)
+            attempt += 1
     finally:
-        _last_request = _clock()
         if own:
             http.close()
     return parse_sections(bytes(body).decode(encoding, errors="replace"))

@@ -20,9 +20,32 @@ PAGE_SIZE = 100
 # this returns the newest papers first. (Checked live: every entry carried a cs category.)
 ALL_QUERY = "cat:cs.*"
 MIN_SPACING = 3.0  # seconds between API calls, per arXiv's terms of use
+# arXiv answers 429 (too many requests) or 503 when a client is going too fast. We wait and try
+# again a few times, then give up with a clear message. See docs/guide/sources.md.
+RETRY_STATUSES = (429, 503)
+BACKOFF_SECONDS = (15.0, 45.0, 120.0)  # waits before retry 1, 2, 3 when the server gives no Retry-After
+MAX_RETRY_AFTER = 300.0  # never wait longer than this because a server asked (seconds)
 
 _ATOM = "{http://www.w3.org/2005/Atom}"
 _ID_RE = re.compile(r"^(?P<id>.+?)(?:v(?P<version>\d+))?$")
+
+
+def retry_delay(status: int, retry_after: str | None, attempt: int) -> float | None:
+    """Seconds to wait before retry number ``attempt + 1``, or None to give up.
+
+    ``attempt`` counts retries already made (0 for the first failure). Only 429 and 503 are
+    retried. A numeric ``Retry-After`` header is honoured (capped at MAX_RETRY_AFTER); a missing
+    or non-numeric one (an HTTP date) falls back to BACKOFF_SECONDS.
+    """
+    if status not in RETRY_STATUSES or attempt >= len(BACKOFF_SECONDS):
+        return None
+    try:
+        wait = float(retry_after) if retry_after else -1.0
+    except ValueError:
+        wait = -1.0
+    if wait < 0:
+        wait = BACKOFF_SECONDS[attempt]
+    return min(wait, MAX_RETRY_AFTER)
 
 
 def _text(el: ET.Element | None) -> str:
@@ -87,25 +110,31 @@ class ArxivSource:
         self._client.close()
 
     def _get(self, params: dict[str, str | int]) -> list[PaperMeta]:
-        """One API call, waiting out the remainder of the 3 s gap since the last one."""
-        if self._last_call is not None:
-            gap = MIN_SPACING - (self._clock() - self._last_call)
-            if gap > 0:
-                self._sleep(gap)
-        try:
-            resp = self._client.get(
-                API_URL, params=params, headers={"User-Agent": USER_AGENT}
-            )
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise SourceError(
-                f"arXiv API returned HTTP {exc.response.status_code}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise SourceError(f"arXiv API request failed: {exc!r}") from exc
-        finally:
-            self._last_call = self._clock()
-        return parse_arxiv_atom(resp.text)
+        """One API call, waiting out the 3 s gap since the last one; retries a 429/503 a few times."""
+        attempt = 0
+        while True:
+            if self._last_call is not None:
+                gap = MIN_SPACING - (self._clock() - self._last_call)
+                if gap > 0:
+                    self._sleep(gap)
+            try:
+                resp = self._client.get(API_URL, params=params, headers={"User-Agent": USER_AGENT})
+                resp.raise_for_status()
+                return parse_arxiv_atom(resp.text)
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                delay = retry_delay(status, exc.response.headers.get("Retry-After"), attempt)
+                if delay is None:
+                    hint = f" (rate limited; gave up after {attempt} retries)" if status in RETRY_STATUSES and attempt else ""
+                    raise SourceError(f"arXiv API returned HTTP {status}{hint}") from exc
+                if self._reporter is not None:
+                    self._reporter.note(f"arXiv said HTTP {status} (too many requests): waiting {delay:.0f}s, retry {attempt + 1} of {len(BACKOFF_SECONDS)}")
+            except httpx.HTTPError as exc:
+                raise SourceError(f"arXiv API request failed: {exc!r}") from exc
+            finally:
+                self._last_call = self._clock()
+            self._sleep(delay)
+            attempt += 1
 
     def set_known_checker(self, is_known: Callable[[str], bool]) -> None:
         """Install the "is this id already stored?" test (the caller owns the DB)."""

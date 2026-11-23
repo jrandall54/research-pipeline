@@ -205,3 +205,30 @@ def test_bibliography_and_page_chrome_are_not_sections():
 def test_appendix_markup_is_kept_for_the_fit_stage():
     secs = parse_sections(BOILERPLATE)
     assert "Extra training details" in secs[-1].text
+
+
+@respx.mock
+def test_fetch_429_is_retried_then_succeeds():
+    fulltext.reset_spacing()
+    respx.get(URL).mock(side_effect=[httpx.Response(429), httpx.Response(200, text=HTML)])
+    sleeps = []
+    assert fetch_fulltext("2401.00001", sleep=sleeps.append)[0].title == "Abstract"
+    assert 15.0 in sleeps
+
+
+@respx.mock
+def test_fetch_429_gives_up_with_rate_limit_message():
+    fulltext.reset_spacing()
+    route = respx.get(URL).mock(return_value=httpx.Response(429))
+    with pytest.raises(SourceError, match=r"HTTP 429 \(rate limited\)"):
+        fetch_fulltext("2401.00001", sleep=lambda s: None)
+    assert len(route.calls) == 4
+
+
+@respx.mock
+def test_fetch_500_is_not_retried():
+    fulltext.reset_spacing()
+    route = respx.get(URL).mock(return_value=httpx.Response(500))
+    with pytest.raises(SourceError, match="HTTP 500"):
+        fetch_fulltext("2401.00001", sleep=lambda s: None)
+    assert len(route.calls) == 1

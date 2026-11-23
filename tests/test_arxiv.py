@@ -284,3 +284,85 @@ def test_fetch_notes_each_page_to_the_reporter():
         src.fetch()
     notes = [e.label for e in rep.events if e.kind == "note"]
     assert notes == ["arXiv page 1 (0 papers so far)", "arXiv page 2 (100 papers so far)"]
+
+
+from research_pipeline.sources.arxiv import BACKOFF_SECONDS, MAX_RETRY_AFTER, retry_delay  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("status", "header", "attempt", "expected"),
+    [
+        (429, None, 0, 15.0), (429, None, 1, 45.0), (429, None, 2, 120.0), (429, None, 3, None),
+        (503, None, 0, 15.0), (500, None, 0, None), (404, None, 0, None),
+        (429, "7", 0, 7.0), (429, "99999", 0, MAX_RETRY_AFTER),
+        (429, "Wed, 21 Oct 2026 07:28:00 GMT", 1, 45.0), (429, "-5", 0, 15.0), (429, "", 2, 120.0),
+    ],
+)
+def test_retry_delay_table(status, header, attempt, expected):
+    assert retry_delay(status, header, attempt) == expected
+
+
+def _ticking(clock):
+    sleeps: list[float] = []
+
+    def sleep(s):
+        sleeps.append(s)
+        clock.now += s
+
+    return sleeps, sleep
+
+
+@respx.mock
+def test_429_is_retried_with_backoff_then_succeeds():
+    respx.get(API).mock(side_effect=[httpx.Response(429), httpx.Response(429), httpx.Response(200, text=feed(2))])
+    clock = Clock()
+    sleeps, sleep = _ticking(clock)
+    src = ArxivSource(["cs.LG"], max_results=100, sleep=sleep, clock=clock)
+    assert len(src.fetch()) == 2
+    assert sleeps == [15.0, 45.0]
+
+
+@respx.mock
+def test_retry_after_header_is_honoured():
+    respx.get(API).mock(side_effect=[httpx.Response(429, headers={"Retry-After": "9"}), httpx.Response(200, text=feed(1))])
+    clock = Clock()
+    sleeps, sleep = _ticking(clock)
+    ArxivSource(["cs.LG"], sleep=sleep, clock=clock).fetch()
+    assert sleeps == [9.0]
+
+
+@respx.mock
+def test_429_gives_up_after_three_retries_with_a_clear_message():
+    route = respx.get(API).mock(return_value=httpx.Response(429))
+    clock = Clock()
+    sleeps, sleep = _ticking(clock)
+    src = ArxivSource(["cs.LG"], sleep=sleep, clock=clock)
+    with pytest.raises(SourceError, match=r"HTTP 429 \(rate limited; gave up after 3 retries\)"):
+        src.fetch()
+    assert len(route.calls) == 1 + len(BACKOFF_SECONDS)
+    assert sleeps == list(BACKOFF_SECONDS)
+
+
+@respx.mock
+def test_other_errors_are_not_retried():
+    route = respx.get(API).mock(return_value=httpx.Response(500))
+    with pytest.raises(SourceError, match="HTTP 500"):
+        ArxivSource(["cs.LG"], sleep=lambda s: None).fetch()
+    assert len(route.calls) == 1
+
+
+@respx.mock
+def test_retry_wait_is_announced_through_the_reporter():
+    respx.get(API).mock(side_effect=[httpx.Response(429), httpx.Response(200, text=feed(1))])
+    clock = Clock()
+    _, sleep = _ticking(clock)
+    notes: list[str] = []
+
+    class Handle:
+        def note(self, label):
+            notes.append(label)
+
+    src = ArxivSource(["cs.LG"], sleep=sleep, clock=clock)
+    src.set_reporter(Handle())
+    src.fetch()
+    assert any("HTTP 429" in n and "waiting 15s" in n and "retry 1 of 3" in n for n in notes)

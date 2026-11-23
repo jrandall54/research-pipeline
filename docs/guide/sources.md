@@ -70,9 +70,17 @@ The API returns at most a page of results per call. We ask for pages of 100: `st
 
 #### Errors
 
+**When arXiv says "too many requests" (HTTP 429, or 503).** The 3-second gap is kept per process, so two commands running at once (say a `rpipe summarize --backlog` and a `rpipe gold draft`), or a lot of recent use, can still make arXiv refuse. arXiv sends no fixed wait time (a 429 from the API came with no `Retry-After` header when we tested on 2026-11-22), so the code waits and tries again, at most three times:
+
+```
+failure 1 -> wait 15 s -> retry 1;  failure 2 -> wait 45 s -> retry 2;  failure 3 -> wait 120 s -> retry 3;  failure 4 -> give up
+```
+
+If the server does send a numeric `Retry-After` the code waits that long instead (never more than 300 s); a date-style header is ignored. While it waits the progress display shows `arXiv said HTTP 429 (too many requests): waiting 15s, retry 1 of 3`, so a long pause is never silent. After the last retry it raises `arXiv API returned HTTP 429 (rate limited; gave up after 3 retries)`, which the nightly run records as that source's error and carries on with the other sources. Only 429 and 503 are retried; any other error (such as 500) fails at once, as before. The worst case for one call is about 3 minutes of waiting. The same rule covers the HTML full-text fetch (below). Why bounded retries: waiting forever could hold up a night's run, and giving up at the first 429 would lose a whole day's collection for a pause of seconds. Rejected: a single shared lock across processes (more machinery than a few retries, and it would not help when the limit is reached by recent use).
+
 Every failure raises `SourceError` (from `sources/base.py`) with a message saying what happened:
 
-- HTTP error status (e.g. `arXiv API returned HTTP 500`)
+- HTTP error status (e.g. `arXiv API returned HTTP 500`; for 429/503 after the retries, `... (rate limited; gave up after 3 retries)`)
 - timeouts and connection failures (`arXiv API request failed: ...`)
 - a response that is not valid XML or has malformed entries (`could not parse arXiv response: ...`)
 

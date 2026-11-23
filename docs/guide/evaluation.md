@@ -112,11 +112,40 @@ Fact 1:
 Added 2307.15043 with 2 fact(s).
 ```
 
-**Why it's built this way.** Writing good facts from scratch is the part people skip; reviewing drafts is quicker and still puts your judgement in the key. Facts are saved only after the whole review of that paper, so an interrupt never leaves half a paper. The paper text goes to Anthropic (see "The judge"), which is why the command says so each time. Rejected: saving drafts unreviewed (the key would then be graded by the same kind of model that writes the summaries).
+**Why it's built this way.** Writing good facts from scratch is the part people skip; reviewing drafts is quicker and still puts your judgement in the key. Facts are saved only after the whole review of that paper, so an interrupt never leaves half a paper. The paper text goes to Anthropic (see "The judge"), which is why the command says so each time. Rejected for this command: saving drafts unreviewed (the key would then be graded by the same kind of model that writes the summaries). The next section, `gold auto`, makes that trade deliberately and labels the result.
 
 **How to run it.** `uv run rpipe gold draft 2307.15043 2401.01234`. Pick ids from `rpipe gold suggest`. Tests: `uv run pytest tests/test_gold_draft.py -q`.
 
 **Where the code is.** `gold_draft` and `_review_drafted` in `src/research_pipeline/cli.py` (the judge itself is in `judge.py`), `Pipeline.make_judge`, tests in `tests/test_gold_draft.py`.
+
+### Filling the set with no questions: `gold auto`
+
+**What it does.** `rpipe gold auto` builds the gold set without you reading or answering anything. It picks papers from your vault, has Claude draft the key facts, and saves them marked **unreviewed**. It exists because finding papers, reading them and checking facts is real work, and a gold set that never gets built is worth nothing. A set you check later (see "What a good key fact looks like") is better, but an unchecked one still lets you compare runs.
+
+**How it works.**
+
+1. It builds the judge first. If Claude Code is missing or not logged in it stops with one error before fetching anything.
+2. It works out how many papers to add: `--count N` if you gave it, otherwise enough to reach 10 (the `GOLD_TARGET`). A set that already has 10 says "nothing to add".
+3. It picks papers with the same function as `rpipe gold suggest` (summarized, full text stored, arXiv id, not already in the set, spread from short to long). With no candidates it tells you to run `rpipe run`.
+4. For each pick, with progress (stage `gold auto`, one step per paper), it fetches the title and full text from arXiv and asks Claude for key facts, exactly like `gold draft`. Then it saves the paper with `unreviewed: true`. No question is asked.
+5. A paper with no arXiv record, no HTML text or a failed draft is skipped and the rest carry on. If Claude's usage limit is reached it stops and keeps what was saved. Papers already in the set (including ones you wrote by hand) are never touched.
+
+**What "unreviewed" changes.**
+
+- `rpipe gold list` shows `(unreviewed: drafted by Claude)` beside the paper.
+- `rpipe eval run` records how many unreviewed papers it used, and `rpipe eval report` prints `Unreviewed answer key: N of M papers use facts Claude drafted and no person checked.` The score is then a comparison between runs, not proof of accuracy.
+- To replace a paper with a checked one: `rpipe gold remove ID`, then `rpipe gold draft ID` (you review each fact) or `rpipe gold add ID` (you type them). Papers you add or draft that way are never marked unreviewed. `edit-fact` and `add-fact` do not clear the mark, because fixing one fact does not mean the rest were checked.
+
+**Why it's built this way.**
+
+- Claude is a much stronger model than the local one that writes the summaries, so when its facts and a summary disagree, the summary is usually the one that is wrong. The key still catches big regressions such as a missing main result or a flipped number.
+- It is weaker than a human-checked key: a wrong drafted fact gives a false failure, and if both models misread the same thing nobody notices. That is why the label exists and travels into the report.
+- What matters most for B.2 and B.3 (pruning and prompt layout) is whether the score moves between runs, and an unreviewed key is good enough for that.
+- Rejected: saving silently with no label (the report would then claim accuracy it cannot back up), and asking one question per paper (that is `gold draft` and is the effort this command removes).
+
+**How to run it.** `uv run rpipe gold auto` (fill to 10) or `uv run rpipe gold auto --count 5`. Then `rpipe gold list` to see the result and `rpipe eval run --judge`. Tests: `uv run pytest tests/test_gold_auto.py -q`.
+
+**Where the code is.** `gold_auto` in `src/research_pipeline/cli.py`, `GoldPaper.unreviewed` in `src/research_pipeline/gold.py`, `EvalSetup.unreviewed_papers` and the report line in `src/research_pipeline/evaluate.py`, tests in `tests/test_gold_auto.py`.
 
 ### What a good key fact looks like
 
@@ -234,6 +263,7 @@ The full flow, from an empty answer key to a compared result:
 
 ```
 uv run rpipe gold suggest                  # pick papers across short and long
+uv run rpipe gold auto                     # or skip the above: auto-fill the set, unreviewed
 uv run rpipe gold draft ID [ID ...]        # the judge drafts key facts; you review them
 uv run rpipe eval run --judge              # summarize each paper, grade every key fact
 uv run rpipe eval report                   # counts, and the comparison with the last run
@@ -271,6 +301,7 @@ Sample (illustrative output):
 ```
 Judged: 9 of 10 papers
 Facts covered: 31 of 38 (missed 4, contradicted 1, not judged 2)
+Unreviewed answer key: 10 of 10 papers use facts Claude drafted and no person checked. Read the scores as a comparison between runs, not as proof of accuracy.
 Setup: ollama/some-model, context 32768, prompts 2026-11-p4
 ```
 

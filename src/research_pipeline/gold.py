@@ -24,6 +24,7 @@ class GoldPaper(BaseModel):
     paper_id: str
     title: str
     key_facts: list[str]  # what a correct summary must get right, written by the owner
+    unreviewed: bool = False  # True when `rpipe gold auto` saved Claude's drafts without a human check
 
 
 def _path(vault: Path) -> Path:

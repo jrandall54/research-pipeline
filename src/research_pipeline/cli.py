@@ -1185,7 +1185,8 @@ def gold_list(vault: VaultOption = None) -> None:
         papers = load_gold(ctx.vault)
     typer.echo(f"Gold set: {len(papers)}/{GOLD_TARGET} papers")
     for p in papers:
-        typer.echo(f"\n{profile_edit.normalise_text(p.paper_id)}  {profile_edit.normalise_text(p.title)}")
+        mark = "  (unreviewed: drafted by Claude)" if p.unreviewed else ""
+        typer.echo(f"\n{profile_edit.normalise_text(p.paper_id)}  {profile_edit.normalise_text(p.title)}{mark}")
         for n, fact in enumerate(p.key_facts, 1):
             typer.echo(f"  {n}. {profile_edit.normalise_text(fact)}")
 
@@ -1209,6 +1210,59 @@ def gold_suggest(
     for s in picks:
         typer.echo(f"  {s.paper_id}  ~{s.tokens} tokens  {profile_edit.normalise_text(s.title)}")
     typer.echo("Pick the ones you know well, then: rpipe gold draft ID ...")
+
+
+@gold_app.command("auto")
+def gold_auto(
+    count: Annotated[int | None, typer.Option("--count", min=1, help="How many papers to add (default: fill the set up to 10).")] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Fill the gold set with no questions: pick papers, let Claude draft the facts, save them unreviewed."""
+    ctx = _open(vault)
+    pipeline = build_pipeline(ctx.config)
+    try:
+        llm = pipeline.make_judge()
+    except judge.JudgeUnavailable as exc:
+        raise _fail(f"The judge is not available: {exc}") from exc
+    with _clean_errors():
+        existing = load_gold(ctx.vault)
+        wanted = count if count is not None else GOLD_TARGET - len(existing)
+        if wanted <= 0:
+            typer.echo(f"The gold set already has {len(existing)} papers; nothing to add. Use --count N to add more.")
+            return
+        picks = suggest_papers(ctx.conn, existing, wanted)
+    if not picks:
+        typer.echo("No summarized papers with full text yet: run `rpipe run` first, or add papers by hand with `rpipe gold add`.")
+        return
+    typer.echo(
+        "The paper text is sent to Claude to draft the facts. Nothing is reviewed: every paper is saved as unreviewed, "
+        "so the scores only compare runs with each other."
+    )
+    added = 0
+    with _reporter() as reporter, stage(reporter, "gold auto", total=len(picks)) as handle:
+        for number, pick in enumerate(picks, 1):
+            try:
+                found = pipeline.seed_fetcher([pick.paper_id])
+                if not found:
+                    handle.step(pick.paper_id, current=number, outcome="not found")
+                    continue
+                sections = ensure_usable(pipeline.fulltext_fetcher(found[0].id))
+                facts = [profile_edit.normalise_text(f) for f in judge.draft_facts(llm, found[0].title, sections)]
+                facts = [f for f in facts if f]
+                if not facts:
+                    handle.step(pick.paper_id, current=number, outcome="no facts")
+                    continue
+                add_gold(ctx.vault, GoldPaper(paper_id=found[0].id, title=found[0].title, key_facts=facts, unreviewed=True))
+                added += 1
+                handle.step(pick.paper_id, current=number)
+            except FullTextUnavailable:
+                handle.step(pick.paper_id, current=number, outcome="no full text")
+            except LlmLimitReached:
+                handle.step(pick.paper_id, current=number, outcome="usage limit reached")
+                break
+            except (LlmError, SourceError) as exc:
+                handle.step(pick.paper_id, current=number, outcome="failed", detail=str(exc))
+    typer.echo(f"Added {added} paper(s), all unreviewed. See them with `rpipe gold list`; replace any later with `rpipe gold remove ID` then `rpipe gold draft ID`.")
 
 
 @gold_app.command("draft")

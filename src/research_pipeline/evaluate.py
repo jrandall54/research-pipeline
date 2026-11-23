@@ -44,6 +44,7 @@ class EvalSetup(BaseModel):
     prompt_version: str
     judge_model: str | None = None
     self_graded: bool = False
+    unreviewed_papers: int = 0  # gold papers whose facts were auto-drafted and never checked by a person
 
 
 class Grade(BaseModel):
@@ -260,6 +261,7 @@ def run_eval(
         prompt_version=PROMPT_VERSION,
         judge_model=getattr(judge, "model_name", "?") if judging else None,
         self_graded=self_graded,
+        unreviewed_papers=sum(g.unreviewed for g in gold),
     )
     if has_judged_run(vault, today):
         _atomic_write(_previous_path(vault, today), (_dir(vault) / f"{today.isoformat()}.json").read_text(encoding="utf-8"))
@@ -445,6 +447,11 @@ def report(vault: Path, day: date) -> str:
         )
         if data.setup and data.setup.self_graded:
             lines.append("Self-graded: the judge is the same model that wrote the summaries")
+        if data.setup and data.setup.unreviewed_papers:
+            lines.append(
+                f"Unreviewed answer key: {data.setup.unreviewed_papers} of {total} papers use facts Claude drafted and "
+                "no person checked. Read the scores as a comparison between runs, not as proof of accuracy."
+            )
         errors = [e for e in data.entries if e.judge_error]
         lines += [f"  not judged {e.paper_id} {e.title}: {e.judge_error}" for e in errors]
         previous = _earlier_judged(vault, day)

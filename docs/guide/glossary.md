@@ -253,3 +253,5 @@
 **Setup (eval)** — the record of which backend, model, context size, prompt version and judge produced an eval result, stored in the eval file so two runs can be compared fairly. See `evaluation.md`, Automatic grading.
 
 **Pass bar (eval)** — the rule for a judged run versus the previous one: facts covered drop by at most 1, contradictions and unverified citations do not rise. See `evaluation.md`, Comparing runs.
+
+**Unreviewed (gold paper)** — a gold paper whose key facts Claude drafted and saved with `rpipe gold auto` without a person checking them. The report says so, because the score then compares runs with each other instead of proving accuracy. See `evaluation.md`, Filling the set with no questions.

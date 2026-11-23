@@ -84,6 +84,8 @@
 
 **Hallucination** — when a language model states something fluent and confident that is not in its source (or not true at all), for example a result the paper never reports. See `summaries.md`.
 
+**Prompt prefix caching** — a model server remembering how it read the start of a long prompt, so that a second prompt beginning with the same text skips re-reading it. We send the summary and the critique with an identical start (system prompt, then the paper) and different endings, so the paper is read once per paper instead of twice. See `summaries.md`.
+
 **Grounding** — tying each statement a model makes to the source text it came from, so a reader (or code) can check it. Our summaries are grounded by citing paper sections. See `summaries.md`.
 
 **Citation check** — code comparing every section title a summary claim cites with the paper's real section titles. A title that matches none triggers one retry; if it is still wrong the claim is flagged "unverified". It proves the section exists, not that it says what the claim says. See `summaries.md`.
@@ -216,7 +218,7 @@
 
 **Token** — the small piece of text a language model reads and writes at a time: a short word or part of a longer one (roughly three-quarters of an English word). Context windows, prompt budgets and usage limits are all counted in tokens. See `llm.md`.
 
-**Prompt / system prompt** — the text sent to a language model to tell it what to do. The system prompt is the fixed instructions (for us, "summarize this paper and cite sections"); the rest is the material it works on, such as the paper. See `summaries.md`.
+**Prompt / system prompt** — the text sent to a language model to tell it what to do. The system prompt is the fixed instructions (for us, "summarize this paper and cite sections"); the rest is the material it works on, such as the paper. In our layout the task (summarise or critique) comes after the paper. See `summaries.md`.
 
 **Pydantic** — a Python library for describing the shape of data (which fields, what types) and checking it. We use it for the profile, the config and the model's JSON answers, so bad data is rejected with a clear error. See `llm.md`.
 

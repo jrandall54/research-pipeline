@@ -10,9 +10,9 @@ import re
 
 from research_pipeline.models import Section
 
-# Stamped on every stored summary (its provenance). Bump it whenever SUMMARY_SYSTEM or
-# CRITIQUE_SYSTEM change, so old summaries can be told apart from new ones.
-PROMPT_VERSION = "2026-11-p5"
+# Stamped on every stored summary (its provenance). Bump it whenever SHARED_SYSTEM or
+# the task texts change, so old summaries can be told apart from new ones.
+PROMPT_VERSION = "2026-11-p6"
 
 _PAPER_TAG = re.compile(r"<(/?)(paper)", re.IGNORECASE)
 
@@ -28,23 +28,36 @@ Rules:
   infer or guess it, and cite the section you checked.
 - Answer with JSON only, in the required schema."""
 
-SUMMARY_SYSTEM = f"""\
-You summarise research papers for a busy reader.
-Fill these fields: one_line (one sentence on what the paper does), problem, approach, results,
-limitations. Each of the last four is a claim: a short text plus the sections it comes from.
-Limitations are the ones the paper itself states; if it states none, say so.
-Length limits: one_line is one sentence. Each claim text is at most two sentences.
+# One system prompt for both calls, so the summary call and the critique call begin with the
+# same text and a model server can reuse its reading of the paper for the second call.
+SHARED_SYSTEM = f"""\
+You read research papers carefully and answer one task per request.
+The task comes after the paper; fill only that task's fields.
 
-{_SHARED_RULES}"""
+Summary task fields: one_line (one sentence on what the paper does), problem, approach,
+results, limitations. Each of the last four is a claim: a short text plus the sections it
+comes from. Limitations are the ones the paper itself states; if it states none, say so.
 
-CRITIQUE_SYSTEM = f"""\
-You are a careful, fair peer reviewer.
-Fill these fields: strengths and weaknesses (lists of claims, each a short text plus the
+Critique task fields: strengths and weaknesses (lists of claims, each a short text plus the
 sections it is based on) and questions (open questions a reader should ask the authors).
 Base every strength and weakness on what the paper shows or fails to show.
-Length limits: give 3 to 5 strengths, 3 to 5 weaknesses and 3 to 5 questions. Each claim text is at most two sentences.
 
 {_SHARED_RULES}"""
+
+# The task text goes after the paper (models pay most attention to the end of a long prompt),
+# and the reminder repeats the rules that matter most.
+REMINDER = (
+    'Reminder: use only the paper above, cite section titles exactly as written in its "## " '
+    "headings, answer with JSON only."
+)
+SUMMARY_TASK = f"""\
+Task: summarise the paper above.
+Length limits: one_line is one sentence. Each claim text is at most two sentences.
+{REMINDER}"""
+CRITIQUE_TASK = f"""\
+Task: critique the paper above.
+Length limits: give 3 to 5 strengths, 3 to 5 weaknesses and 3 to 5 questions. Each claim text is at most two sentences.
+{REMINDER}"""
 
 
 def defuse(text: str) -> str:
@@ -70,17 +83,18 @@ def _basis_note(basis: str) -> str:
 
 
 def _user(task: str, title: str, sections: list[Section], basis: str) -> str:
-    return f"{task} {_basis_note(basis)}\n\n{paper_block(title, sections)}"
+    """Basis note and paper first (identical for both tasks), the task last."""
+    return f"{_basis_note(basis)}\n\n{paper_block(title, sections)}\n\n{task}"
 
 
 def build_summary_prompt(title: str, sections: list[Section], basis: str) -> tuple[str, str]:
     """(system, user) asking for a `Summary` of the paper."""
-    return SUMMARY_SYSTEM, _user("Summarise the paper below.", title, sections, basis)
+    return SHARED_SYSTEM, _user(SUMMARY_TASK, title, sections, basis)
 
 
 def build_critique_prompt(title: str, sections: list[Section], basis: str) -> tuple[str, str]:
     """(system, user) asking for a `Critique` of the paper."""
-    return CRITIQUE_SYSTEM, _user("Critique the paper below.", title, sections, basis)
+    return SHARED_SYSTEM, _user(CRITIQUE_TASK, title, sections, basis)
 
 
 def citation_feedback(bad: list[str], valid: list[str]) -> str:

@@ -16,6 +16,14 @@ class Claim(BaseModel):
     sections: list[str] = Field(min_length=1)
 
 
+class Dropped(BaseModel):
+    """A section left out of what the model read, and why (see pruning.py)."""
+
+    title: str
+    chars: int
+    reason: Literal["non_paper", "appendix"]
+
+
 class Summary(BaseModel):
     one_line: str
     problem: Claim

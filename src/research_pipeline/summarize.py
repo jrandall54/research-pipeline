@@ -19,8 +19,8 @@ from research_pipeline.prompts import (
     build_critique_prompt,
     build_summary_prompt,
     citation_feedback,
-    fit_to_budget,
 )
+from research_pipeline.pruning import fit_to_budget
 from research_pipeline.sources.base import SourceError
 from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
 
@@ -80,7 +80,8 @@ def summarize_paper(
     basis: Literal["full_text", "abstract"] = "full_text"
     if sections is None:
         sections, basis = [Section(title="Abstract", text=abstract)], "abstract"
-    fitted, truncated = fit_to_budget(sections, num_ctx)
+    fit = fit_to_budget(sections, num_ctx)
+    fitted, truncated = fit.sections, fit.body_cut
     titles = [s.title for s in fitted]
 
     def phase(name: str) -> Callable[[], None] | None:

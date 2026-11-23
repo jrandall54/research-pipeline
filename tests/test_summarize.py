@@ -4,7 +4,7 @@ from conftest import SECTIONS, FakeLLM, critique, summary
 from research_pipeline.llm import LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section
 from research_pipeline.progress import ListReporter
-from research_pipeline.prompts import build_critique_prompt, build_summary_prompt, fit_to_budget
+from research_pipeline.prompts import build_critique_prompt, build_summary_prompt
 from research_pipeline.summarize import (
     Claim,
     Critique,
@@ -108,35 +108,6 @@ def test_unknown_citations_ignores_case_and_whitespace():
 def test_claim_needs_a_citation():
     with pytest.raises(ValueError):
         Claim(text="uncited", sections=[])
-
-
-def test_fit_to_budget_drops_references_first_then_trims():
-    num_ctx = 32768
-    budget = (num_ctx - 4000) * 3
-    big = [
-        Section(title="Abstract", text="a" * 1000),
-        Section(title="1 Introduction", text="i" * 100_000),
-        Section(title="2 Method", text="m" * 100_000),
-        Section(title="References", text="r" * 60_000),
-        Section(title="Acknowledgements", text="k" * 5_000),
-        Section(title="Appendix A Proofs", text="p" * 34_000),
-    ]
-    fitted, truncated = fit_to_budget(big, num_ctx)
-    assert truncated is True
-    assert sum(len(s.title) + len(s.text) for s in fitted) <= budget
-    assert [s.title for s in fitted] == ["Abstract", "1 Introduction", "2 Method"]
-    # trimmed proportionally: the two equal sections stay equal
-    assert len(fitted[1].text) == len(fitted[2].text)
-
-    fitted, truncated = fit_to_budget(SECTIONS, num_ctx)
-    assert truncated is False
-    assert fitted == SECTIONS
-
-
-def test_fit_to_budget_drops_back_matter_only_when_needed():
-    secs = SECTIONS + [Section(title="References", text="[1] A. Author.")]
-    fitted, truncated = fit_to_budget(secs, 32768)
-    assert (fitted, truncated) == (secs, False)
 
 
 def test_long_paper_summarised_with_truncated_flag():

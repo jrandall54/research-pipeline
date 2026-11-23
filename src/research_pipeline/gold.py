@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from research_pipeline.db import get_fulltext
 from research_pipeline.profile_edit import normalise_arxiv_id, normalise_text
-from research_pipeline.prompts import CHARS_PER_TOKEN, is_back_matter
+from research_pipeline.pruning import CHARS_PER_TOKEN, classify
 from research_pipeline.vault import ConfigError
 
 GOLD_TARGET = 10
@@ -178,7 +178,7 @@ def suggest_papers(conn: sqlite3.Connection, gold: list[GoldPaper], count: int =
         if has_gold(gold, row["id"]):
             continue
         sections = get_fulltext(conn, row["id"]) or []
-        chars = sum(len(s.text) for s in sections if not is_back_matter(s.title))
+        chars = sum(len(s.text) for s in sections if classify(s.title, s.text) == "paper")
         candidates.append(Suggestion(row["id"], row["title"], chars // CHARS_PER_TOKEN))
     candidates.sort(key=lambda s: (s.tokens, s.paper_id))
     n = len(candidates)

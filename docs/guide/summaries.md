@@ -28,7 +28,7 @@ Every point in both (a *claim*) names the paper section(s) it came from. Code th
 Step by step:
 
 1. **Pick the text.** With full text, the input is the stored sections and `basis` is `full_text`. Without it (`sections=None`, which also happens when a page had less than 50 characters of section text, see `fulltext.md`), the abstract becomes one pseudo-section titled `Abstract` and `basis` is `abstract`.
-2. **Fit the budget** (`fit_to_budget`, below). If the paper is too long, back matter is dropped and the rest trimmed; `truncated` becomes `True`.
+2. **Fit the budget** (`fit_to_budget` in `pruning.py`, below). Non-paper text is always dropped; if the paper is still too long, appendices go, then core text is trimmed (`truncated` becomes `True` only for that last case).
 3. **Build the prompt** (`build_summary_prompt`). The *system* prompt holds the rules. The *user* prompt holds a one-line task, a note on the basis, and the paper inside a single `<paper> ... </paper>` block, with each section introduced by a `## <title>` heading.
 4. **Ask the model** for JSON in the `Summary` schema ([llm.md](llm.md) handles invalid JSON with its own single retry).
 5. **Check citations** (`unknown_citations`). Every title a claim cites is compared with the real section titles, ignoring case and surrounding spaces (`"3 results "` matches `3 Results`).
@@ -79,12 +79,16 @@ budget (characters) = (num_ctx - 4000) * 3
 
 4000 tokens are kept free for the instructions and the answer. A token is roughly 4 characters of English; we count 3 to stay safely under. For example, with a context of 32768 tokens (whatever `auto` chose, or a pin): `(32768 - 4000) * 3 = 86,304` characters, a typical 25 to 40 page paper.
 
-If the sections (titles plus text) fit, they are used unchanged and `truncated` is `False`. Otherwise:
+What goes into that budget is decided in `src/research_pipeline/pruning.py`, in this order:
 
-1. Drop back matter: sections titled References, Bibliography, Acknowledg(e)ments or Appendix (numbered forms such as `7 References` or `Appendix B Proofs` too). If what remains fits, stop.
-2. Otherwise trim every remaining section by the same fraction, ending each cut section with ` [...]`.
+1. **Non-paper text is always dropped**, even when the paper would fit: References, Bibliography, Acknowledg(e)ments, Funding, Author contributions, Competing interests (and Conflicts of interest), Ethics statement, Reproducibility checklist, Instructions for reporting errors. A short "Data availability" or "Code availability" statement (1,500 characters or less) is dropped too; a long one is real content and stays. Numbered forms such as `7 References` match.
+2. **Appendices and supplementary material** (titles starting Appendix, Supplementary, Supplemental, Extended data) are **kept when everything else fits**, because a critique should not call an ablation "missing" when it sits in an appendix. If the paper does not fit, they are dropped next, before any core text is touched.
+3. **Children go with their parent.** A heading numbered under a dropped one (`6.1` under `6 Supplementary Information`, `A.1` under `Appendix A`) is dropped with it.
+4. **Only then is core text trimmed**, in two steps. First only the long method, background, related-work, approach, experimental-setup and implementation sections are shortened, by one common fraction and never below 25% of their text. The abstract, introduction, results, discussion and conclusion are not touched in this step. If that is still not enough, every remaining section is cut by the same fraction, each cut section ending with ` [...]`.
 
-Example: Introduction 100,000 characters, Method 100,000, References 60,000, Appendix 34,000. Dropping back matter leaves about 200,000, still too much, so each section keeps about 43% of its text (about 43,000 characters each). `truncated` is `True`. A long paper never causes an error.
+Example: Abstract 1,000 characters, Introduction 100,000, Method 100,000, References 60,000, Appendix 34,000. References are always dropped; with the Appendix that is still about 235,000, too much, so the Appendix goes too. About 201,000 remain, still too much, so the Method is shortened first (to at least 25,000 characters); the Introduction stays whole unless that is not enough. A long paper never causes an error.
+
+Every dropped section is listed, in order, with its size and reason (`non_paper` or `appendix`).
 
 ### Stopping early: usage limit versus timeout
 
@@ -107,7 +111,7 @@ Every summary saved by `rpipe summarize` / `rpipe run` also records where it cam
 - **Flag, do not drop.** A claim with a bad citation may still be true and useful. Deleting it would hide information and make the summary look more certain than it is. Marking it `unverified` lets the digest show it with a warning. The check is per claim, not per citation: a claim that cites one valid and one unknown section is flagged unverified as a whole, because we cannot tell which part the paper backs.
 - **One retry with the problem fed back.** Told exactly which titles are wrong and which exist, the model usually fixes it. More retries cost minutes per paper and rarely help.
 - **Abstract-only is labelled.** A summary from an abstract repeats the authors' own pitch and cannot speak to methods or limitations in depth. Labelling `basis: abstract` stops it being read as a full-text summary, and the prompt tells the model the full text is unavailable so it says "Not stated in the abstract." instead of guessing.
-- **Back matter goes first.** References and appendices are the least useful text for a summary, and cutting them keeps the main argument whole. Trimming proportionally rather than cutting the end keeps every section (results and conclusions are at the end).
+- **Non-paper text always goes; appendices go first when short.** References and acknowledgements are never worth the model's attention. Appendices are kept when they fit (rejected: always dropping them, because a critique would call an ablation "missing" when it sits there) and dropped before any core text is trimmed. Trimming the long method and related-work sections before the rest, and otherwise proportionally rather than cutting the end, keeps every section's start (results and conclusions are at the end).
 - **The paper in tags, rules in the system prompt.** This separates our instructions from the paper's text so injected sentences ("ignore previous instructions") read as content to describe. It does not make injection impossible, but together with hidden-text stripping ([fulltext.md](fulltext.md)) and the fixed JSON schema, injected text cannot change the shape of the output and any claim it produces still needs a real citation.
 - **Summary and critique are two calls.** Each prompt has one job, so each answer is shorter and more focused, and a failed critique does not lose a good summary's prompt work.
 

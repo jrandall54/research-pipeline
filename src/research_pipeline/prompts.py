@@ -1,4 +1,4 @@
-"""Prompt builders for summaries and critiques, and the context budget that keeps papers in.
+"""Prompt builders for summaries and critiques. What goes into them is decided in pruning.py.
 
 Paper text is untrusted data. It always sits inside one ``<paper>...</paper>`` block, any
 tag-like ``<paper>``/``</paper>`` text inside it is defused, and the system prompt tells
@@ -14,18 +14,6 @@ from research_pipeline.models import Section
 # CRITIQUE_SYSTEM change, so old summaries can be told apart from new ones.
 PROMPT_VERSION = "2026-11-p4"
 
-# Tokens kept free for the instructions and the model's answer.
-RESERVED_TOKENS = 4000
-# A conservative estimate: English text averages about 4 characters per token; 3 leaves room.
-CHARS_PER_TOKEN = 3
-TRIM_MARK = " [...]"
-
-# References, Bibliography, Acknowledgements, Appendix (optionally numbered: "7 References",
-# "A Appendix", "Appendix B Proofs").
-_BACK_MATTER = re.compile(
-    r"^(?:(?:\d+(?:\.\d+)*|[A-Z])\.?\s+)?(references|bibliography|acknowledg|appendi)",
-    re.IGNORECASE,
-)
 _PAPER_TAG = re.compile(r"<(/?)(paper)", re.IGNORECASE)
 
 _SHARED_RULES = """\
@@ -57,40 +45,6 @@ Base every strength and weakness on what the paper shows or fails to show.
 Length limits: give 3 to 5 strengths, 3 to 5 weaknesses and 3 to 5 questions. Each claim text is at most two sentences.
 
 {_SHARED_RULES}"""
-
-
-def _size(sections: list[Section]) -> int:
-    return sum(len(s.title) + len(s.text) for s in sections)
-
-
-def is_back_matter(title: str) -> bool:
-    return bool(_BACK_MATTER.match(title.strip()))
-
-
-def fit_to_budget(sections: list[Section], num_ctx: int) -> tuple[list[Section], bool]:
-    """Fit sections into ``(num_ctx - 4000) * 3`` characters; the bool says if anything was cut.
-
-    Back matter (references, bibliography, acknowledgements, appendices) is dropped first.
-    If that is not enough, every remaining section's text is cut by the same fraction.
-    """
-    budget = max(0, (num_ctx - RESERVED_TOKENS) * CHARS_PER_TOKEN)
-    if _size(sections) <= budget:
-        return list(sections), False
-
-    kept = [s for s in sections if not is_back_matter(s.title)]
-    if _size(kept) <= budget:
-        return kept, True
-
-    title_chars = sum(len(s.title) for s in kept)
-    text_chars = sum(len(s.text) for s in kept)
-    room = max(0, budget - title_chars - len(TRIM_MARK) * len(kept))
-    ratio = room / text_chars if text_chars else 0.0
-    trimmed = []
-    for s in kept:
-        keep = int(len(s.text) * ratio)
-        text = s.text if keep >= len(s.text) else s.text[:keep].rstrip() + TRIM_MARK
-        trimmed.append(Section(title=s.title, text=text))
-    return trimmed, True
 
 
 def defuse(text: str) -> str:

@@ -78,6 +78,46 @@ It prints each id with `~N tokens` and the title, then reminds you of the next s
 
 **Where the code is.** `suggest_papers` and `Suggestion` in `src/research_pipeline/gold.py`, the `gold suggest` command in `src/research_pipeline/cli.py`, tests in `tests/test_gold.py`.
 
+### Drafting key facts
+
+**What it does.** `rpipe gold draft ID [ID ...]` asks the judge (Claude, see "The judge" below) to draft 3 to 5 key facts for each paper, then walks you through them so that you keep, edit or drop each one. You stay the author of the answer key; the model only saves you typing.
+
+**How it works.** For each id, in order:
+
+1. If the paper is already in the gold set it is skipped with a message.
+2. The title comes from arXiv and the full text from arXiv's HTML version. If arXiv has no paper for the id, or no usable HTML text, the command says so, points to `rpipe gold add ID` (type the facts yourself) and moves on to the next id.
+3. The judge drafts the facts. This is the slow step, so it shows progress (stage `gold draft`, one step per paper). The progress display is closed before any question is asked, so prompts are never overwritten.
+4. Each drafted fact is shown numbered, and you answer `Keep, edit or drop? [k/e/d]`. Enter alone means keep. `e` asks for the replacement text (cleaned like any fact; an empty reply keeps the draft). `d` discards it.
+5. You are then asked for extra facts of your own, one per line, a blank line to finish.
+6. If at least one fact remains the paper is saved; otherwise "No facts kept, so nothing was saved".
+
+Ctrl-C or end of input during the review prints "Stopped. Nothing was saved for ID." and stops; papers finished earlier stay saved. If the judge is unavailable (Claude Code not installed or not logged in) the command stops with one error before fetching anything.
+
+Worked example (illustrative output; the drafts will differ):
+
+```
+$ rpipe gold draft 2307.15043
+The paper text is sent to Claude to draft the facts. You review every one before it is saved.
+
+Universal and Transferable Adversarial Attacks on Aligned Language Models
+  1. Adversarial suffixes are found automatically by greedy, gradient-guided search.
+Keep, edit or drop? [k/e/d]: k
+  2. The paper is about attacks.
+Keep, edit or drop? [k/e/d]: d
+  3. Suffixes found on open models also work on closed models such as ChatGPT.
+Keep, edit or drop? [k/e/d]: e
+New text (empty keeps the draft): Suffixes transfer to ChatGPT, Bard and Claude.
+Key facts a correct summary must get right (specific and checkable).
+Fact 1:
+Added 2307.15043 with 2 fact(s).
+```
+
+**Why it's built this way.** Writing good facts from scratch is the part people skip; reviewing drafts is quicker and still puts your judgement in the key. Facts are saved only after the whole review of that paper, so an interrupt never leaves half a paper. The paper text goes to Anthropic (see "The judge"), which is why the command says so each time. Rejected: saving drafts unreviewed (the key would then be graded by the same kind of model that writes the summaries).
+
+**How to run it.** `uv run rpipe gold draft 2307.15043 2401.01234`. Pick ids from `rpipe gold suggest`. Tests: `uv run pytest tests/test_gold_draft.py -q`.
+
+**Where the code is.** `gold_draft` and `_review_drafted` in `src/research_pipeline/cli.py` (the judge itself is in `judge.py`), `Pipeline.make_judge`, tests in `tests/test_gold_draft.py`.
+
 ### What a good key fact looks like
 
 Specific and checkable: someone reading a summary can say yes or no without interpretation.
@@ -227,7 +267,7 @@ Worked example: facts `["f1","f2","f3"]` and the judge answers for numbers 2, 2,
 uv run pytest tests/test_judge.py -q
 ```
 
-Commands that use the judge come in later tasks. If it is unavailable the error says to install Claude Code, log in, or run `rpipe model setup`.
+`rpipe gold draft` uses the judge to draft key facts; grading commands come later. If it is unavailable the error says to install Claude Code, log in, or run `rpipe model setup`.
 
 ### Where the code is
 

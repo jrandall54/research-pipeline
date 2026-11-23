@@ -20,7 +20,7 @@ from typing import Annotated
 
 import typer
 
-from research_pipeline import categories, ollama_fit, onboarding, profile_edit, registry, schedule
+from research_pipeline import categories, judge, ollama_fit, onboarding, profile_edit, registry, schedule
 from research_pipeline import serve as serve_mod
 from research_pipeline.backends.claude_code import LOGIN_HINT, find_claude, logged_in, resolve_model
 from research_pipeline.collect import run_collect
@@ -50,7 +50,7 @@ from research_pipeline.digest import render_summary, write_digest
 from research_pipeline.embed import Embedder, SentenceTransformerEmbedder
 from research_pipeline.evaluate import Grade, eval_exists, latest_day, load_eval, run_eval, save_grade, ungraded
 from research_pipeline.evaluate import report as eval_report
-from research_pipeline.fulltext import fetch_fulltext
+from research_pipeline.fulltext import FullTextUnavailable, ensure_usable, fetch_fulltext
 from research_pipeline.gold import (
     GOLD_TARGET,
     GoldPaper,
@@ -144,6 +144,10 @@ def _release_gpu_memory() -> None:
         torch.cuda.empty_cache()
 
 
+def _no_judge() -> LLM:
+    raise judge.JudgeUnavailable("no judge configured")
+
+
 @dataclass
 class Pipeline:
     """The pieces that touch the outside world; tests swap them for stubs."""
@@ -154,6 +158,7 @@ class Pipeline:
     make_llm: Callable[[], LLM | None]  # called only by run and summarize (may raise LlmError); None = no model
     fulltext_fetcher: Callable[[str], list[Section]]
     startup_errors: list[str] = field(default_factory=list)  # sources/plug-ins that failed to start
+    make_judge: Callable[[], LLM] = field(default=lambda: _no_judge())  # called only by gold draft (may raise JudgeUnavailable)
 
 
 def build_pipeline(config: Config) -> Pipeline:
@@ -177,6 +182,7 @@ def build_pipeline(config: Config) -> Pipeline:
         make_llm=lambda: build_llm(config, config.vault_path, log=_progress),
         fulltext_fetcher=fetch_fulltext,
         startup_errors=startup_errors,
+        make_judge=lambda: judge.make_judge(config),
     )
 
 
@@ -1194,6 +1200,84 @@ def gold_suggest(
     for s in picks:
         typer.echo(f"  {s.paper_id}  ~{s.tokens} tokens  {profile_edit.normalise_text(s.title)}")
     typer.echo("Pick the ones you know well, then: rpipe gold draft ID ...")
+
+
+@gold_app.command("draft")
+def gold_draft(
+    ids: Annotated[list[str], typer.Argument(help="One or more arXiv ids to draft key facts for.")],
+    vault: VaultOption = None,
+) -> None:
+    """Draft key facts for papers with the cloud judge, then review them one by one."""
+    ctx = _open(vault)
+    pipeline = build_pipeline(ctx.config)
+    try:
+        llm = pipeline.make_judge()
+    except judge.JudgeUnavailable as exc:
+        raise _fail(f"The judge is not available: {exc}") from exc
+    with _clean_errors():
+        existing = load_gold(ctx.vault)
+    typer.echo("The paper text is sent to Claude to draft the facts. You review every one before it is saved.")
+    for number, paper_id in enumerate(ids, 1):
+        paper_id = paper_id.strip()
+        if has_gold(existing, paper_id):
+            typer.echo(f"{paper_id} is already in your gold set. Add facts with: rpipe gold add-fact {paper_id} \"...\"")
+            continue
+        try:
+            # The stage covers only the waiting work; review prompts happen after it closes.
+            with _reporter() as reporter, stage(reporter, "gold draft", total=len(ids), label=paper_id) as handle:
+                found = pipeline.seed_fetcher([paper_id])
+                if not found:
+                    handle.step(paper_id, current=number, outcome="not found")
+                    drafted = None
+                else:
+                    try:
+                        sections = ensure_usable(pipeline.fulltext_fetcher(found[0].id))
+                    except FullTextUnavailable:
+                        handle.step(paper_id, current=number, outcome="no full text")
+                        drafted = []
+                    else:
+                        drafted = judge.draft_facts(llm, found[0].title, sections)
+                        handle.step(paper_id, current=number)
+        except judge.JudgeUnavailable as exc:
+            raise _fail(f"The judge is not available: {exc}") from exc
+        except (LlmError, SourceError) as exc:
+            typer.echo(f"Could not draft facts for {paper_id}: {exc}. Add it by hand with `rpipe gold add {paper_id}`.")
+            continue
+        if drafted is None:
+            typer.echo(f"No paper found for {paper_id} on arXiv.")
+            continue
+        if not drafted:
+            typer.echo(f"There is no HTML full text for {paper_id}; add it by hand with `rpipe gold add {paper_id}`.")
+            continue
+        title = found[0].title
+        try:
+            facts = _review_drafted(drafted, profile_edit.normalise_text(title))
+        except (typer.Abort, KeyboardInterrupt, EOFError):
+            typer.echo(f"\nStopped. Nothing was saved for {paper_id}.")
+            return
+        if not facts:
+            typer.echo(f"No facts kept, so nothing was saved for {paper_id}.")
+            continue
+        add_gold(ctx.vault, GoldPaper(paper_id=found[0].id, title=title, key_facts=facts))
+        existing = load_gold(ctx.vault)
+        typer.echo(f"Added {paper_id} with {len(facts)} fact(s).")
+
+
+def _review_drafted(drafted: list[str], title: str) -> list[str]:
+    """Walk the drafted facts (keep, edit or drop each), then ask for extra ones."""
+    typer.echo(f"\n{title}")
+    kept: list[str] = []
+    for n, fact in enumerate(drafted, 1):
+        typer.echo(f"  {n}. {fact}")
+        choice = ""
+        while choice not in ("k", "e", "d"):
+            choice = typer.prompt("Keep, edit or drop? [k/e/d]", default="k", show_default=False).strip().lower()
+        if choice == "k":
+            kept.append(fact)
+        elif choice == "e":
+            new = profile_edit.normalise_text(typer.prompt("New text (empty keeps the draft)", default="", show_default=False))
+            kept.append(new or fact)
+    return kept + _ask_facts()
 
 
 @gold_app.command("remove")

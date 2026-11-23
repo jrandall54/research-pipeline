@@ -19,8 +19,8 @@ from research_pipeline.prompts import (
     build_critique_prompt,
     build_summary_prompt,
     citation_feedback,
-    fit_to_budget,
 )
+from research_pipeline.pruning import fit_to_budget
 from research_pipeline.sources.base import SourceError
 from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
 
@@ -80,7 +80,8 @@ def summarize_paper(
     basis: Literal["full_text", "abstract"] = "full_text"
     if sections is None:
         sections, basis = [Section(title="Abstract", text=abstract)], "abstract"
-    fitted, truncated = fit_to_budget(sections, num_ctx)
+    fit = fit_to_budget(sections, num_ctx)
+    fitted = fit.sections
     titles = [s.title for s in fitted]
 
     def phase(name: str) -> Callable[[], None] | None:
@@ -100,7 +101,8 @@ def summarize_paper(
         summary=summary,
         critique=critique,
         basis=basis,
-        truncated=truncated,
+        body_cut=fit.body_cut,
+        dropped=fit.dropped,
         unverified=bad_s + bad_c,
     )
 
@@ -154,7 +156,7 @@ def run_summarize(
         set_status,
     )
 
-    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "truncated": 0, "summary_failed": 0}
+    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "body_cut": 0, "summary_failed": 0}
     errors: list[str] = []
     today = today or date.today()
     if paper_ids is not None:
@@ -223,7 +225,7 @@ def run_summarize(
                 else:
                     set_status(conn, pid, Status.summarized)  # commits the summary rows too
                 counts["summarized"] += 1
-                counts["truncated"] += int(result.truncated)
+                counts["body_cut"] += int(result.body_cut)
                 report("done")
             except LlmLimitReached:
                 # Not the paper's fault: no retry is burned, it stays queued for the next run.

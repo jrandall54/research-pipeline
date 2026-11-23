@@ -14,7 +14,8 @@ from research_pipeline.backends.claude_code import (
 from research_pipeline.llm import LLM, LlmError
 from research_pipeline.models import Config, Section
 from research_pipeline.profile_edit import normalise_text
-from research_pipeline.prompts import defuse, fit_to_budget, paper_block
+from research_pipeline.prompts import defuse, paper_block
+from research_pipeline.pruning import fit_to_budget
 from research_pipeline.summary_models import PaperSummary
 
 MAX_FACTS = 5
@@ -71,7 +72,7 @@ def make_judge(config: Config) -> LLM:
 
 
 def _fitted_paper(judge: LLM, title: str, sections: list[Section]) -> str:
-    fitted, _ = fit_to_budget(sections, judge.num_ctx)
+    fitted = fit_to_budget(sections, judge.num_ctx).sections
     return paper_block(title, fitted)
 
 

@@ -17,6 +17,7 @@ from research_pipeline.gold import GoldPaper, load_gold
 from research_pipeline.judge import FactVerdict, is_self_graded, judge_summary
 from research_pipeline.llm import LLM, LlmLimitReached
 from research_pipeline.models import Section
+from research_pipeline.profile_edit import normalise_text
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import PROMPT_VERSION
 from research_pipeline.summarize import Claim, PaperSummary, summarize_paper
@@ -155,7 +156,10 @@ def _entry_md(entry: EvalEntry, gold: GoldPaper | None, sections: list[Section])
         return "\n".join(lines)
     s = entry.summary
     basis = "full text" if s.basis == "full_text" else "ABSTRACT ONLY (no full text was available)"
-    lines += [f"Basis: {basis}" + (" (truncated to fit the context)" if s.truncated else ""), ""]
+    lines += [f"Basis: {basis}" + (" (body cut to fit the context)" if s.body_cut else ""), ""]
+    if s.dropped:
+        left_out = ", ".join(f"{normalise_text(d.title)} ({d.chars:,} chars)" for d in s.dropped)
+        lines += [f"Left out: {left_out}", ""]
     lines += [f"**{s.summary.one_line}**", ""]
     for label, claim in (
         ("Problem", s.summary.problem),

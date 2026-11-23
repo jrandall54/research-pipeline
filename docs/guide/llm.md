@@ -10,7 +10,7 @@ Ollama is one of three backends (`ollama`, `claude-code`, `none`); how to choose
 
 One call, step by step:
 
-1. The client builds a request to `POST {llm_url}/api/chat` with the system text, the user text and these settings: `stream: false` (one complete answer, not a trickle), `think: false` (no hidden reasoning), `options.num_ctx` (the context window), `options.temperature: 0`, and `format` (the JSON schema of the Pydantic class you want back).
+1. The client builds a request to `POST {llm_url}/api/chat` with the system text, the user text and these settings: `stream: false` (one complete answer, not a trickle), `think: false` (no hidden reasoning), `options.num_ctx` (the context window), `options.temperature: 0`, `options.num_predict: 4096` (an output limit, below), and `format` (the JSON schema of the Pydantic class you want back).
 2. Ollama answers with `message.content`, a JSON string.
 3. The client parses it with Pydantic. If it is not valid, it asks **once more**, appending the validation error to the user text so the model can correct itself. A second failure raises `LlmError`.
 
@@ -26,6 +26,7 @@ Failures become `LlmError`: server not running (hint: `ollama serve`), model not
 
 - **Context window: `auto`, or a number you pin (`llm_num_ctx`).** The context window is how much text (in tokens, roughly word pieces) the model can read at once, prompt and answer together. Ollama's default is much smaller and silently cuts off the rest, which would make a summary of a long paper quietly miss its second half, so we always send an explicit window (a pinned 32768 fits most papers; `auto` finds the largest your card holds). A pinned number must be at least 8192: the prompt budget is `(num_ctx - 4000) * 3` characters (see `summaries.md`), and at a smaller window almost nothing is left for the paper, so smaller values are rejected.
 - **JSON schema instead of parsing free text.** Asking for "a summary" in prose and then scraping it with patterns breaks whenever the model rephrases. With a schema the server constrains the output to the shape we validate, so code can rely on fields existing. Rejected: free-text parsing.
+- **An output limit (`num_predict`, 4096 tokens).** A model that never stops writing would hold up the whole night's run. A summary or a critique is about 2,000 tokens at most, so the limit is a wide margin that only a runaway answer reaches. If it does, the JSON is cut off, the client sees invalid output twice and raises `LlmError` (that paper is retried on a later run) instead of hanging. It is a constant (`NUM_PREDICT` in `llm.py`), not a setting, because no user has a reason to change it.
 - **Thinking off and temperature 0.** Qwen3 models can write a long hidden "thinking" section first; it costs time and can leak into the answer. Temperature 0 makes the model pick its most likely word each time, so the same paper gives the same summary, which matters when we measure accuracy.
 - **Local, not a cloud API.** Papers and your profile stay on your machine, there is no per-call cost and no key to manage. The price is needing a decent computer. Rejected: a cloud API.
 - **One retry, then fail.** A second try fixes most formatting slips; a third rarely does and wastes minutes.
@@ -117,6 +118,25 @@ rpipe model set qwen3:8b   # pin a smaller model for less memory (rpipe model se
 rpipe model set-url http://gpu-box:11434   # a different Ollama server (must start with http:// or https://)
 rpipe model set-context 16384   # pin the context in tokens, at least 8192, or `auto`; invalid values are refused and the file is left alone
 ```
+
+**Check that prefix caching works.** The summary and the critique start with identical text (see `summaries.md`), so Ollama should read the paper once. After every reply the client keeps Ollama's own timing numbers in `client.last_stats` (`prompt_eval_count`: the prompt's length in tokens, which this Ollama counts in full even when part of it came from the cache; `prompt_eval_duration` and `eval_duration` in nanoseconds, where the cache shows up; `eval_count`: tokens written; `None` when Ollama sends none). To see it on one paper:
+
+```
+uv run python - <<'PY'
+from research_pipeline.llm import OllamaClient
+from research_pipeline.prompts import build_summary_prompt, build_critique_prompt
+from research_pipeline.summary_models import Summary, Critique
+from research_pipeline.models import Section
+secs = [Section(title="1 Introduction", text="We study X. " * 2000)]  # use a real paper's sections for a real test
+c = OllamaClient("http://localhost:11434", "YOUR_MODEL", 32768)
+c.generate(*build_summary_prompt("T", secs, "full_text"), Summary)
+print("summary read", c.last_stats["prompt_eval_duration"] / 1e9, "s")
+c.generate(*build_critique_prompt("T", secs, "full_text"), Critique)
+print("critique read", c.last_stats["prompt_eval_duration"] / 1e9, "s")
+PY
+```
+
+Working caching shows the second time far smaller than the first (only the task text is read again). Measured 2026-11-22 on the owner machine (27B model, 76,000-character paper, about 24,800 prompt tokens): with separate system prompts both calls spent about 15.5 s reading the prompt; with the shared layout the summary still took 15.7 s and the critique 0.5 s, so the critique call went from 42 s to 16 s overall. If both times are about equal, the server is not reusing its reading (another model was loaded in between, Ollama was restarted, or the options differ).
 
 `rpipe model check` (which resolves `auto` first, so with `auto` settings it may probe the GPU and be slow the first time) compares names with the tag spelled out, so `llama3.2` matches the `llama3.2:latest` that Ollama lists. It uses a 10-second timeout (generating has a much longer one), so a hung server fails fast. It exits 1 with a fix hint if the server is down or the model is missing. Tests use a fake client, so `uv run pytest -q` needs no Ollama.
 

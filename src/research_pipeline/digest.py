@@ -57,7 +57,7 @@ def render_summary(ps: PaperSummary) -> list[str]:
     notes = []
     if ps.basis == "abstract":
         notes.append("Summary based on the abstract only (full text unavailable)")
-    if ps.truncated:
+    if ps.body_cut:
         notes.append("the paper was too long for the model, so part of it was left out")
     if notes:
         lines += [f"_{'; '.join(notes)}._", ""]

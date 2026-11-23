@@ -4,7 +4,7 @@ from conftest import SECTIONS, FakeLLM, critique, summary
 from research_pipeline.llm import LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section
 from research_pipeline.progress import ListReporter
-from research_pipeline.prompts import build_critique_prompt, build_summary_prompt, fit_to_budget
+from research_pipeline.prompts import build_critique_prompt, build_summary_prompt
 from research_pipeline.summarize import (
     Claim,
     Critique,
@@ -27,7 +27,7 @@ def test_summarize_happy_path():
     assert result.summary == summary()
     assert result.critique == critique()
     assert result.basis == "full_text"
-    assert result.truncated is False
+    assert result.body_cut is False
     assert result.unverified == []
 
 
@@ -110,36 +110,7 @@ def test_claim_needs_a_citation():
         Claim(text="uncited", sections=[])
 
 
-def test_fit_to_budget_drops_references_first_then_trims():
-    num_ctx = 32768
-    budget = (num_ctx - 4000) * 3
-    big = [
-        Section(title="Abstract", text="a" * 1000),
-        Section(title="1 Introduction", text="i" * 100_000),
-        Section(title="2 Method", text="m" * 100_000),
-        Section(title="References", text="r" * 60_000),
-        Section(title="Acknowledgements", text="k" * 5_000),
-        Section(title="Appendix A Proofs", text="p" * 34_000),
-    ]
-    fitted, truncated = fit_to_budget(big, num_ctx)
-    assert truncated is True
-    assert sum(len(s.title) + len(s.text) for s in fitted) <= budget
-    assert [s.title for s in fitted] == ["Abstract", "1 Introduction", "2 Method"]
-    # trimmed proportionally: the two equal sections stay equal
-    assert len(fitted[1].text) == len(fitted[2].text)
-
-    fitted, truncated = fit_to_budget(SECTIONS, num_ctx)
-    assert truncated is False
-    assert fitted == SECTIONS
-
-
-def test_fit_to_budget_drops_back_matter_only_when_needed():
-    secs = SECTIONS + [Section(title="References", text="[1] A. Author.")]
-    fitted, truncated = fit_to_budget(secs, 32768)
-    assert (fitted, truncated) == (secs, False)
-
-
-def test_long_paper_summarised_with_truncated_flag():
+def test_long_paper_sets_body_cut():
     big = [Section(title="Abstract", text="a" * 200_000), Section(title="2 Method", text="m")]
     s = summary()
     s.problem.sections = ["Abstract"]
@@ -147,7 +118,7 @@ def test_long_paper_summarised_with_truncated_flag():
     c = critique(cite="Abstract")
     llm = FakeLLM([s, c])
     result = summarize_paper(llm, "Paper T", "", big, 32768)
-    assert result.truncated is True
+    assert result.body_cut is True
     assert result.unverified == []
 
 
@@ -191,7 +162,7 @@ def test_run_summarize_happy_path(conn):
     add_triaged(conn, "2501.00002")
     llm = FakeLLM([summary(), critique(), summary(), critique()])
     counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
-    assert counts == {"fetched": 2, "summarized": 2, "abstract_only": 0, "truncated": 0, "summary_failed": 0}
+    assert counts == {"fetched": 2, "summarized": 2, "abstract_only": 0, "body_cut": 0, "summary_failed": 0}
     assert errors == []
     for pid in ("2501.00001", "2501.00002"):
         assert get_paper(conn, pid)["status"] == "summarized"
@@ -298,7 +269,7 @@ def test_prior_day_in_digest_paper_is_not_touched(conn):
     add_triaged(conn, "2501.00001")
     mark_in_digest(conn, ["2501.00001"], TODAY - timedelta(days=1))
     counts, errors = run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, today=TODAY)
-    assert counts == {"fetched": 0, "summarized": 0, "abstract_only": 0, "truncated": 0, "summary_failed": 0}
+    assert counts == {"fetched": 0, "summarized": 0, "abstract_only": 0, "body_cut": 0, "summary_failed": 0}
     assert errors == [] and get_summary(conn, "2501.00001") is None
 
 
@@ -670,3 +641,12 @@ def test_refetch_without_html_and_nothing_stored_uses_abstract(conn):
 def test_refetch_needs_explicit_ids(conn):
     with pytest.raises(ValueError, match="paper ids"):
         run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, refetch=True)
+
+
+def test_references_dropped_is_not_body_cut():
+    secs = SECTIONS + [Section(title="References", text="[1] A. Author. A paper.")]
+    s = summary()
+    llm = FakeLLM([s, critique()])
+    result = summarize_paper(llm, "Paper T", "We study X.", secs, 32768)
+    assert result.body_cut is False
+    assert [d.title for d in result.dropped] == ["References"]

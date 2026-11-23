@@ -84,11 +84,17 @@
 
 **Hallucination** — when a language model states something fluent and confident that is not in its source (or not true at all), for example a result the paper never reports. See `summaries.md`.
 
+**Prompt prefix caching** — a model server remembering how it read the start of a long prompt, so that a second prompt beginning with the same text skips re-reading it. We send the summary and the critique with an identical start (system prompt, then the paper) and different endings, so the paper is read once per paper instead of twice. See `summaries.md`.
+
 **Grounding** — tying each statement a model makes to the source text it came from, so a reader (or code) can check it. Our summaries are grounded by citing paper sections. See `summaries.md`.
 
 **Citation check** — code comparing every section title a summary claim cites with the paper's real section titles. A title that matches none triggers one retry; if it is still wrong the claim is flagged "unverified". It proves the section exists, not that it says what the claim says. See `summaries.md`.
 
-**Truncation** — cutting text so it fits the model's context window. We drop references and appendices first, then trim every section by the same fraction, and mark the summary `truncated`. See `summaries.md`.
+**Body cut** — trimming core paper text (not just references or appendices) so it fits the model's context window. It happens only as a last resort: non-paper text is always dropped, appendices go first when space is short, then the long method and related-work sections are shortened, then everything proportionally. The summary is marked `body_cut`; old stored rows said `truncated`, which is read as `body_cut`. See `summaries.md`.
+
+**Non-paper text** — the parts of a paper page that are not the paper's argument: references, acknowledgements, funding, author contributions, competing interests, ethics statements, short availability statements and the like. Always dropped before the model reads, and listed on the summary as `dropped`. See `summaries.md`.
+
+**Appendix class** — appendices and supplementary material. Kept when the paper fits (a critique should not call an ablation missing when it sits there) and dropped first when space is short. See `summaries.md`.
 
 **abstract-only summary** — a summary written from the abstract because the paper has no arXiv HTML full text. The digest says so under the summary and the health line counts them as `abstract-only N`. See `digest.md`.
 
@@ -212,7 +218,7 @@
 
 **Token** — the small piece of text a language model reads and writes at a time: a short word or part of a longer one (roughly three-quarters of an English word). Context windows, prompt budgets and usage limits are all counted in tokens. See `llm.md`.
 
-**Prompt / system prompt** — the text sent to a language model to tell it what to do. The system prompt is the fixed instructions (for us, "summarize this paper and cite sections"); the rest is the material it works on, such as the paper. See `summaries.md`.
+**Prompt / system prompt** — the text sent to a language model to tell it what to do. The system prompt is the fixed instructions (for us, "summarize this paper and cite sections"); the rest is the material it works on, such as the paper. In our layout the task (summarise or critique) comes after the paper. See `summaries.md`.
 
 **Pydantic** — a Python library for describing the shape of data (which fields, what types) and checking it. We use it for the profile, the config and the model's JSON answers, so bad data is rejected with a clear error. See `llm.md`.
 
@@ -255,3 +261,5 @@
 **Pass bar (eval)** — the rule for a judged run versus the previous one: facts covered drop by at most 1, contradictions and unverified citations do not rise. See `evaluation.md`, Comparing runs.
 
 **Unreviewed (gold paper)** — a gold paper whose key facts Claude drafted and saved with `rpipe gold auto` without a person checking them. The report says so, because the score then compares runs with each other instead of proving accuracy. See `evaluation.md`, Filling the set with no questions.
+
+**num_predict** — the Ollama option that caps how many tokens the model may write in one answer. We send 4096 with every call so a runaway answer cannot stall a night's run. See `llm.md`.

@@ -1,4 +1,4 @@
-"""Prompt builders for summaries and critiques, and the context budget that keeps papers in.
+"""Prompt builders for summaries and critiques. What goes into them is decided in pruning.py.
 
 Paper text is untrusted data. It always sits inside one ``<paper>...</paper>`` block, any
 tag-like ``<paper>``/``</paper>`` text inside it is defused, and the system prompt tells
@@ -10,22 +10,10 @@ import re
 
 from research_pipeline.models import Section
 
-# Stamped on every stored summary (its provenance). Bump it whenever SUMMARY_SYSTEM or
-# CRITIQUE_SYSTEM change, so old summaries can be told apart from new ones.
-PROMPT_VERSION = "2026-11-p4"
+# Stamped on every stored summary (its provenance). Bump it whenever SHARED_SYSTEM or
+# the task texts change, so old summaries can be told apart from new ones.
+PROMPT_VERSION = "2026-11-p6"
 
-# Tokens kept free for the instructions and the model's answer.
-RESERVED_TOKENS = 4000
-# A conservative estimate: English text averages about 4 characters per token; 3 leaves room.
-CHARS_PER_TOKEN = 3
-TRIM_MARK = " [...]"
-
-# References, Bibliography, Acknowledgements, Appendix (optionally numbered: "7 References",
-# "A Appendix", "Appendix B Proofs").
-_BACK_MATTER = re.compile(
-    r"^(?:(?:\d+(?:\.\d+)*|[A-Z])\.?\s+)?(references|bibliography|acknowledg|appendi)",
-    re.IGNORECASE,
-)
 _PAPER_TAG = re.compile(r"<(/?)(paper)", re.IGNORECASE)
 
 _SHARED_RULES = """\
@@ -40,57 +28,36 @@ Rules:
   infer or guess it, and cite the section you checked.
 - Answer with JSON only, in the required schema."""
 
-SUMMARY_SYSTEM = f"""\
-You summarise research papers for a busy reader.
-Fill these fields: one_line (one sentence on what the paper does), problem, approach, results,
-limitations. Each of the last four is a claim: a short text plus the sections it comes from.
-Limitations are the ones the paper itself states; if it states none, say so.
-Length limits: one_line is one sentence. Each claim text is at most two sentences.
+# One system prompt for both calls, so the summary call and the critique call begin with the
+# same text and a model server can reuse its reading of the paper for the second call.
+SHARED_SYSTEM = f"""\
+You read research papers carefully and answer one task per request.
+The task comes after the paper; fill only that task's fields.
 
-{_SHARED_RULES}"""
+Summary task fields: one_line (one sentence on what the paper does), problem, approach,
+results, limitations. Each of the last four is a claim: a short text plus the sections it
+comes from. Limitations are the ones the paper itself states; if it states none, say so.
 
-CRITIQUE_SYSTEM = f"""\
-You are a careful, fair peer reviewer.
-Fill these fields: strengths and weaknesses (lists of claims, each a short text plus the
+Critique task fields: strengths and weaknesses (lists of claims, each a short text plus the
 sections it is based on) and questions (open questions a reader should ask the authors).
 Base every strength and weakness on what the paper shows or fails to show.
-Length limits: give 3 to 5 strengths, 3 to 5 weaknesses and 3 to 5 questions. Each claim text is at most two sentences.
 
 {_SHARED_RULES}"""
 
-
-def _size(sections: list[Section]) -> int:
-    return sum(len(s.title) + len(s.text) for s in sections)
-
-
-def is_back_matter(title: str) -> bool:
-    return bool(_BACK_MATTER.match(title.strip()))
-
-
-def fit_to_budget(sections: list[Section], num_ctx: int) -> tuple[list[Section], bool]:
-    """Fit sections into ``(num_ctx - 4000) * 3`` characters; the bool says if anything was cut.
-
-    Back matter (references, bibliography, acknowledgements, appendices) is dropped first.
-    If that is not enough, every remaining section's text is cut by the same fraction.
-    """
-    budget = max(0, (num_ctx - RESERVED_TOKENS) * CHARS_PER_TOKEN)
-    if _size(sections) <= budget:
-        return list(sections), False
-
-    kept = [s for s in sections if not is_back_matter(s.title)]
-    if _size(kept) <= budget:
-        return kept, True
-
-    title_chars = sum(len(s.title) for s in kept)
-    text_chars = sum(len(s.text) for s in kept)
-    room = max(0, budget - title_chars - len(TRIM_MARK) * len(kept))
-    ratio = room / text_chars if text_chars else 0.0
-    trimmed = []
-    for s in kept:
-        keep = int(len(s.text) * ratio)
-        text = s.text if keep >= len(s.text) else s.text[:keep].rstrip() + TRIM_MARK
-        trimmed.append(Section(title=s.title, text=text))
-    return trimmed, True
+# The task text goes after the paper (models pay most attention to the end of a long prompt),
+# and the reminder repeats the rules that matter most.
+REMINDER = (
+    'Reminder: use only the paper above, cite section titles exactly as written in its "## " '
+    "headings, answer with JSON only."
+)
+SUMMARY_TASK = f"""\
+Task: summarise the paper above.
+Length limits: one_line is one sentence. Each claim text is at most two sentences.
+{REMINDER}"""
+CRITIQUE_TASK = f"""\
+Task: critique the paper above.
+Length limits: give 3 to 5 strengths, 3 to 5 weaknesses and 3 to 5 questions. Each claim text is at most two sentences.
+{REMINDER}"""
 
 
 def defuse(text: str) -> str:
@@ -116,17 +83,18 @@ def _basis_note(basis: str) -> str:
 
 
 def _user(task: str, title: str, sections: list[Section], basis: str) -> str:
-    return f"{task} {_basis_note(basis)}\n\n{paper_block(title, sections)}"
+    """Basis note and paper first (identical for both tasks), the task last."""
+    return f"{_basis_note(basis)}\n\n{paper_block(title, sections)}\n\n{task}"
 
 
 def build_summary_prompt(title: str, sections: list[Section], basis: str) -> tuple[str, str]:
     """(system, user) asking for a `Summary` of the paper."""
-    return SUMMARY_SYSTEM, _user("Summarise the paper below.", title, sections, basis)
+    return SHARED_SYSTEM, _user(SUMMARY_TASK, title, sections, basis)
 
 
 def build_critique_prompt(title: str, sections: list[Section], basis: str) -> tuple[str, str]:
     """(system, user) asking for a `Critique` of the paper."""
-    return CRITIQUE_SYSTEM, _user("Critique the paper below.", title, sections, basis)
+    return SHARED_SYSTEM, _user(CRITIQUE_TASK, title, sections, basis)
 
 
 def citation_feedback(bad: list[str], valid: list[str]) -> str:

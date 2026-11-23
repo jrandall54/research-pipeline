@@ -352,8 +352,8 @@ def health_line(
     extras = ""
     if counts.get("abstract_only"):
         extras += f" · abstract-only {counts['abstract_only']}"
-    if counts.get("truncated"):
-        extras += f" · truncated {counts['truncated']}"
+    if counts.get("body_cut"):
+        extras += f" · body cut {counts['body_cut']}"
     if counts.get("summary_failed"):
         extras += f" · summary failures {counts['summary_failed']}"
     if counts.get("summaries_off"):

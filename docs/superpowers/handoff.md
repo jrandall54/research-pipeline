@@ -36,6 +36,23 @@ Plans: `plans/2026-11-22-part-b2-strict-pruning.md`, `plans/2026-11-22-part-b3-p
 - **Quality check is weak, not a proof.** Answer key: 2 unreviewed papers (only 3 papers in the vault have stored full text). p4 -> p5: PASS but only 1 paper comparable (facts were redrafted). p5 -> p6: PASS, facts covered 2 -> 2 of 10, 0 contradicted, 0 unverified. 2 of 10 is a low absolute score: the auto-drafted facts are long and number-heavy and the summaries short, so the key barely moves. Before trusting B.2/B.3 on quality, build a larger key (`rpipe gold auto` once more papers have full text, then ideally review a few).
 - Left from the plans: nothing in code. Owner decisions: merge the branch, and whether to widen the answer key first.
 
+## Model comparison and rate limits (2026-11-22, late)
+
+Results are in the owner's vault (`model-comparison-2026-11-23/README.md`), not the repo. Answer key: 10 papers, Claude-drafted, unreviewed (`rpipe gold auto`), so read scores as comparisons.
+
+| Model | Facts covered | Unverified citations | Time, 10 papers |
+|---|---|---|---|
+| q3.8-27b-34k, 57K ctx, fully on GPU | 19 of 50 | 0 | 8m55s |
+| Qwen3.6-35B-A3B UD-IQ3_S, 49K ctx, ~95% on GPU | 16 of 50 | 5 (one paper) | 4m43s |
+| Gemma4-26B-A4B UD-IQ4_XS (3 papers only) | 6 of 15 (27B: 5) | 2 | 2m16s |
+
+- **Decision: the 27B stays the default** (Qwen 3.6 fails the pass rule: covered -3, unverified +5). Owner's `rpipe model` is **pinned to `q3.8-27b-34k:latest`** (not `auto`): with the two new models installed, `auto` could have switched the nightly run untested. `rpipe model set auto` undoes it.
+- **The fit gate only accepts models 100% on the GPU**, so `rpipe model fit` refuses Gemma and Qwen 3.6 (both ~93-96% on GPU at these sizes). To test them, pin model and context in a throwaway vault: copy `config.yaml`, `profile.yaml` and `gold/gold.json` to a temp folder, set `llm_model` and `llm_num_ctx` there, run `rpipe eval run --judge --vault TEMPDIR`. The real config is never touched. This is the case B.5 (RAM-spill reruns) is meant to serve; it also argues for letting B.4 recommend spill-tolerant mixture-of-experts models. Unload the previous model first (`ollama stop NAME`), or the next fit probe sees a busy GPU.
+- **Untried:** Qwen3.6 `UD-IQ4_XS` (17.7 GB, more spill); Qwen 3.5 35B-A3B; smaller quants of Gemma that fit fully (`UD-Q3_K_M` 12.7 GB, `UD-IQ3_S` 11.3 GB). Exact Hub file sizes come from the Hugging Face API (`/api/models/REPO/tree/main`). The Google guide's Q3_K_M size for the 35B models (~14.2 GB) was wrong (really 16.4-16.6 GB); its claims on layer counts were checked against the models' config files (Qwen3.6: 30 of 40 layers linear attention; Gemma 4: 25 of 30 sliding-window, `num_kv_shared_layers = 0`).
+- **arXiv API returned HTTP 429** during `gold auto`. Fixed: `gold auto` takes titles from the vault (no metadata API call), and the API and HTML fetches now retry 429/503 (15 s, 45 s, 120 s or `Retry-After`, three retries, announced in progress). `gold draft` and `gold add` still need the metadata API.
+- **Vault state:** 13 papers summarized (backlog run), gold set 10 of 10. The first collect run (2026-11-21) pulled 1,028 papers, kept 15 and summarized none; later runs found nothing new (weekend).
+- **Next:** (1) optional: review a few gold facts by hand when there is time (`rpipe gold list`, `edit-fact`, `remove-fact`); (2) plan B.4 (scan, catalog, recommender), now with real data on spill-tolerant models; (3) refresh the Phase 7 plan and the master plan (Claude Docs still describes the old Part B); (4) check the nightly 03:00 run used the pinned 27B.
+
 ## Phase 6 check (real run, 2026-11-22, copy of the owner vault, ollama backend)
 `rpipe run --vault <copy> 2>&1 | cat` (stderr merged): plain lines, 0 escape codes, 0 carriage returns.
 ```

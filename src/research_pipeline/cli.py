@@ -61,6 +61,7 @@ from research_pipeline.gold import (
     load_gold,
     remove_fact,
     remove_gold,
+    suggest_papers,
 )
 from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
 from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
@@ -1172,6 +1173,27 @@ def gold_list(vault: VaultOption = None) -> None:
         typer.echo(f"\n{profile_edit.normalise_text(p.paper_id)}  {profile_edit.normalise_text(p.title)}")
         for n, fact in enumerate(p.key_facts, 1):
             typer.echo(f"  {n}. {profile_edit.normalise_text(fact)}")
+
+
+@gold_app.command("suggest")
+def gold_suggest(
+    count: Annotated[int, typer.Option("--count", min=1, help="How many papers to suggest.")] = GOLD_TARGET,
+    vault: VaultOption = None,
+) -> None:
+    """Suggest papers from your vault for the gold set, spread across short to long."""
+    ctx = _open(vault)
+    with _clean_errors():
+        picks = suggest_papers(ctx.conn, load_gold(ctx.vault), count)
+    if not picks:
+        typer.echo(
+            "No summarized papers with full text yet — run `rpipe run` first, "
+            "or add papers by hand with `rpipe gold add`."
+        )
+        return
+    typer.echo(f"{len(picks)} suggested paper(s), shortest to longest:")
+    for s in picks:
+        typer.echo(f"  {s.paper_id}  ~{s.tokens} tokens  {profile_edit.normalise_text(s.title)}")
+    typer.echo("Pick the ones you know well, then: rpipe gold draft ID ...")
 
 
 @gold_app.command("remove")

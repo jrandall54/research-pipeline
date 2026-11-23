@@ -5,12 +5,16 @@ Stored as `<vault>/gold/gold.json`. See docs/guide/evaluation.md.
 
 import json
 import os
+import sqlite3
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
+from research_pipeline.db import get_fulltext
 from research_pipeline.profile_edit import normalise_arxiv_id, normalise_text
+from research_pipeline.prompts import CHARS_PER_TOKEN, is_back_matter
 from research_pipeline.vault import ConfigError
 
 GOLD_TARGET = 10
@@ -144,3 +148,38 @@ def remove_fact(vault: Path, paper_id: str, number: int) -> str | None:
     old = p.key_facts.pop(i)
     _save(vault, papers)
     return old
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    paper_id: str
+    title: str
+    tokens: int  # approximate length of the text a summary is built from (back matter excluded)
+
+
+def suggest_papers(conn: sqlite3.Connection, gold: list[GoldPaper], count: int = GOLD_TARGET) -> list[Suggestion]:
+    """Pick `count` summarized papers with full text, spread evenly across lengths.
+
+    Always includes the shortest and the longest (when count >= 2); a single pick is the median.
+    """
+    rows = conn.execute(
+        "SELECT p.id, p.title FROM papers p"
+        " WHERE EXISTS (SELECT 1 FROM summaries s WHERE s.paper_id = p.id)"
+        " AND EXISTS (SELECT 1 FROM fulltexts f WHERE f.paper_id = p.id)"
+        " ORDER BY p.id"
+    ).fetchall()
+    candidates: list[Suggestion] = []
+    for row in rows:
+        if has_gold(gold, row["id"]):
+            continue
+        sections = get_fulltext(conn, row["id"]) or []
+        chars = sum(len(s.text) for s in sections if not is_back_matter(s.title))
+        candidates.append(Suggestion(row["id"], row["title"], chars // CHARS_PER_TOKEN))
+    candidates.sort(key=lambda s: (s.tokens, s.paper_id))
+    n = len(candidates)
+    if n <= count:
+        return candidates
+    if count == 1:
+        return [candidates[(n - 1) // 2]]
+    indices = sorted({round(i * (n - 1) / (count - 1)) for i in range(count)})
+    return [candidates[i] for i in indices]

@@ -55,6 +55,29 @@ Choose a mix, because each kind breaks summarizers differently:
 - one old paper with no arXiv HTML version (tests the abstract-only path);
 - one maths-heavy paper (equations are where models invent things).
 
+### Choosing papers
+
+**What it does.** `rpipe gold suggest` looks through the papers your vault has already summarized and proposes some for the gold set, picked so that they run from short to long.
+
+**How it works.**
+
+1. It takes every paper that has both a stored summary and stored full text and is not already in the gold set.
+2. It measures each one: the characters in all sections except back matter (references, acknowledgements, appendices), divided by 3 (the pipeline's rough characters-per-token ratio). This is the approximate length of the text the summarizer actually reads.
+3. It sorts by that length and picks `--count` papers (default 10) evenly along the list. The shortest and the longest are always included. With 9 candidates and `--count 3` you get the 1st, 5th and 9th. Fewer candidates than `--count` means you get all of them.
+
+**Why a spread of lengths.** Short papers fit the model's context window whole, so they are the easy case. Long papers are where the pipeline cuts text (truncation, and dropping back matter first; see `summaries.md`), which is exactly where a summary can silently lose facts. An answer key made only of short papers would never notice that failure.
+
+**How to run it.**
+
+```
+uv run rpipe gold suggest
+uv run rpipe gold suggest --count 5
+```
+
+It prints each id with `~N tokens` and the title, then reminds you of the next step, `rpipe gold draft ID ...`. With nothing summarized yet it says so and points you to `rpipe run` or `rpipe gold add`.
+
+**Where the code is.** `suggest_papers` and `Suggestion` in `src/research_pipeline/gold.py`, the `gold suggest` command in `src/research_pipeline/cli.py`, tests in `tests/test_gold.py`.
+
 ### What a good key fact looks like
 
 Specific and checkable: someone reading a summary can say yes or no without interpretation.

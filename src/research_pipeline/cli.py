@@ -1242,17 +1242,14 @@ def gold_auto(
     with _reporter() as reporter, stage(reporter, "gold auto", total=len(picks)) as handle:
         for number, pick in enumerate(picks, 1):
             try:
-                found = pipeline.seed_fetcher([pick.paper_id])
-                if not found:
-                    handle.step(pick.paper_id, current=number, outcome="not found")
-                    continue
-                sections = ensure_usable(pipeline.fulltext_fetcher(found[0].id))
-                facts = [profile_edit.normalise_text(f) for f in judge.draft_facts(llm, found[0].title, sections)]
+                # The title is already in the vault, so only the HTML page is fetched (no arXiv API call).
+                sections = ensure_usable(pipeline.fulltext_fetcher(pick.paper_id))
+                facts = [profile_edit.normalise_text(f) for f in judge.draft_facts(llm, pick.title, sections)]
                 facts = [f for f in facts if f]
                 if not facts:
                     handle.step(pick.paper_id, current=number, outcome="no facts")
                     continue
-                add_gold(ctx.vault, GoldPaper(paper_id=found[0].id, title=found[0].title, key_facts=facts, unreviewed=True))
+                add_gold(ctx.vault, GoldPaper(paper_id=pick.paper_id, title=pick.title, key_facts=facts, unreviewed=True))
                 added += 1
                 handle.step(pick.paper_id, current=number)
             except FullTextUnavailable:

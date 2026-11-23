@@ -127,8 +127,8 @@ Added 2307.15043 with 2 fact(s).
 1. It builds the judge first. If Claude Code is missing or not logged in it stops with one error before fetching anything.
 2. It works out how many papers to add: `--count N` if you gave it, otherwise enough to reach 10 (the `GOLD_TARGET`). A set that already has 10 says "nothing to add".
 3. It picks papers with the same function as `rpipe gold suggest` (summarized, full text stored, arXiv id, not already in the set, spread from short to long). With no candidates it tells you to run `rpipe run`.
-4. For each pick, with progress (stage `gold auto`, one step per paper), it fetches the title and full text from arXiv and asks Claude for key facts, exactly like `gold draft`. Then it saves the paper with `unreviewed: true`. No question is asked.
-5. A paper with no arXiv record, no HTML text or a failed draft is skipped and the rest carry on. If Claude's usage limit is reached it stops and keeps what was saved. Papers already in the set (including ones you wrote by hand) are never touched.
+4. For each pick, with progress (stage `gold auto`, one step per paper), it takes the title from your vault (so no call to the arXiv metadata API, which rate-limits with HTTP 429 when used heavily), fetches the full text from arXiv's HTML page and asks Claude for key facts, like `gold draft`. Then it saves the paper with `unreviewed: true`. No question is asked.
+5. A paper with no HTML text or a failed draft is skipped and the rest carry on. If Claude's usage limit is reached it stops and keeps what was saved. Papers already in the set (including ones you wrote by hand) are never touched.
 
 **What "unreviewed" changes.**
 

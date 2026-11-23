@@ -51,7 +51,7 @@ def test_auto_default_fills_up_to_target_and_skips_existing(vault, monkeypatch):
     assert result.exit_code == 0, result.output
     ids = [p.paper_id for p in load_gold(vault)]
     assert ids.count("2401.00001") == 1 and len(ids) == 3  # only 2 candidates left in the vault
-    assert "2401.00001" not in [i for call in calls.seeds for i in call]
+    assert "2401.00001" not in calls.texts
     assert load_gold(vault)[0].unreviewed is False  # the hand-made paper is untouched
 
 
@@ -62,7 +62,7 @@ def test_auto_does_nothing_when_set_is_full(vault, monkeypatch):
     result = auto(vault)
     assert result.exit_code == 0
     assert "nothing to add" in result.output
-    assert calls.seeds == []
+    assert calls.texts == []
 
 
 def test_auto_judge_unavailable_exits_1_before_fetching(vault, monkeypatch):
@@ -72,7 +72,7 @@ def test_auto_judge_unavailable_exits_1_before_fetching(vault, monkeypatch):
     calls = install(monkeypatch, factory)
     result = auto(vault)
     assert result.exit_code == 1 and "log in" in result.output
-    assert calls.seeds == [] and load_gold(vault) == []
+    assert calls.texts == [] and load_gold(vault) == []
 
 
 def test_auto_skips_paper_without_full_text_and_goes_on(vault, monkeypatch):
@@ -127,3 +127,11 @@ def test_report_warns_when_key_is_unreviewed(vault):
 
 def test_report_has_no_warning_for_a_reviewed_key(vault):
     assert "Unreviewed answer key" not in _judged_report(vault, False)
+
+
+def test_auto_never_calls_the_arxiv_metadata_api(vault, monkeypatch):
+    calls = install(monkeypatch, lambda: facts_llm(3))
+    result = auto(vault, "--count", "3")
+    assert result.exit_code == 0, result.output
+    assert calls.seeds == [] and len(calls.texts) == 3
+    assert {p.title for p in load_gold(vault)} == {"Paper 2401.00001", "Paper 2401.00002", "Paper 2401.00003"}

@@ -281,3 +281,11 @@
 **Prompt reading vs writing** — the two phases of a model call. Reading (also "prompt evaluation") takes in the paper; writing (also "generation") produces the summary. Ollama times them separately, which is what `rpipe model bench` uses.
 
 **Benchmark** — a short, repeatable test that measures speed on your own machine, so time estimates come from a measurement and not a guess. See `rpipe model bench` in `hardware.md`.
+
+**Flash attention** — a faster, more memory-frugal way of computing the "attention" step where a model looks back over the text. Ollama turns it on with `OLLAMA_FLASH_ATTENTION=1`; it is needed before the KV cache can be stored in smaller numbers. See `hardware.md`, Server settings.
+
+**KV cache type (`q8_0`)** — how the KV cache numbers are stored. The default keeps 16 bits per number; `q8_0` keeps 8, so the cache takes about half the memory and a longer context fits, with a very small quality cost. Set with `OLLAMA_KV_CACHE_TYPE=q8_0`. See `hardware.md`, Server settings.
+
+**Parallel slots** — how many requests Ollama serves at once (`OLLAMA_NUM_PARALLEL`). Each slot reserves its own context memory, so more slots mean a shorter context for each. `rpipe` sends one paper at a time, so 1 is enough. See `hardware.md`, Server settings.
+
+**sudo** — a Linux command that runs another command with administrator rights after asking for your password. `rpipe model tune` runs its commands through `sudo` in your own terminal and never sees the password. See `hardware.md`, Server settings.

@@ -92,6 +92,7 @@ Just want to use it? Follow the quickstart in the top-level `README.md` (install
 - `registry.py`: built-in and installed plug-ins.
 - `machine.py`: looks at your computer and recommends a backend.
 - `scan.py`: the probes behind `rpipe model scan` (CPU, memory, disk, every GPU, Ollama server settings).
+- `ollama_tune.py`: the settings and commands behind `rpipe model tune` ([hardware.md](hardware.md), Server settings).
 - `run_lock.py`: stops two `rpipe run`s working on one vault at once.
 - `progress.py`: progress events (data objects) that stages emit instead of printing; no package imports, so it can be shared.
 - `progress_render.py`: turns progress events into stderr output (a live spinner on a terminal, plain lines otherwise); see [running.md](running.md).

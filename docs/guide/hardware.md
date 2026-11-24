@@ -9,7 +9,7 @@
 3. **Tune**: turn on Ollama settings that let a model use a longer context in the same memory, after showing you the exact change and how to undo it.
 4. **Bench**: time a real summary so the "how long per paper" figure comes from your machine, not a guess.
 
-This page grows with each step. For now it covers the scan, the catalog and the speed benchmark.
+This page grows with each step. For now it covers the scan, the catalog, the speed benchmark and the server settings.
 
 ## How it works: the scan
 
@@ -86,6 +86,34 @@ uv run pytest tests/test_bench.py -q
 
 **Where the code is.** `src/research_pipeline/bench.py` (`run_bench`, `estimate_seconds`, `median_paper_tokens`, `load_benches`, `save_bench`), the `model bench` command in `src/research_pipeline/cli.py`, tests in `tests/test_bench.py`.
 
+## Server settings
+
+**What it does.** `rpipe model tune` offers Ollama settings that let a model use a longer context in the same video memory. It changes nothing until you say yes, shows the exact commands first, checks afterwards that the settings are live, and `rpipe model tune --undo` takes them out again. It needs a terminal because it uses `sudo`.
+
+**How it works.**
+1. It scans the server (the same scan as `rpipe model scan`) and compares three settings with what `rpipe` wants:
+   - `OLLAMA_FLASH_ATTENTION=1`: a leaner way of reading long text.
+   - `OLLAMA_KV_CACHE_TYPE=q8_0`: stores the model's working memory (KV cache) in 8-bit numbers, half the space. Measured on a 24 GB card: the 27B model's context grew from 32,768 to 57,344 tokens, and the 14B model's from 141,312 to 223,232.
+   - `OLLAMA_NUM_PARALLEL=1`: offered only when the current value is above 1, because each parallel slot reserves its own context memory and `rpipe` sends one paper at a time.
+2. Settings that already have the right value are skipped. If all three are fine it says "already has the recommended settings", names the file each one comes from (for example `kv-cache.conf`) and exits without touching anything.
+3. If Ollama is not the system service (a user service, started by hand, Docker, the desktop app) it prints the exact instructions for that setup and stops: `rpipe` only edits the system service itself.
+4. If the service listens on a different port from the one `rpipe` uses (`llm_url`), it warns that the change would not affect the server `rpipe` talks to, and asks `Continue anyway? [y/N]` (default no).
+5. It shows each setting (what it does, why, old value -> new), the file it would write, the commands and the undo, then asks `Apply? [y/N]`. The file goes to a temporary directory first; the commands are `sudo install -m 644 TEMP /etc/systemd/system/ollama.service.d/rpipe.conf`, `sudo systemctl daemon-reload`, `sudo systemctl restart ollama`. They run in your own terminal so `sudo` asks you for the password; `rpipe` never sees it. The first failing command stops the run and is named; later ones do not run.
+6. It waits up to 30 seconds for Ollama to answer (shown as an "ollama restart" stage), re-scans, and confirms each value is live. With the `ollama` backend it then re-runs the fit and prints `context: before -> after`.
+
+**Undo.** `rpipe model tune --undo` removes only `rpipe.conf` (other drop-in files are never touched), reloads and restarts, then waits for Ollama. If `rpipe.conf` does not exist it says "Nothing to undo".
+
+**Why it's built this way.** Changing a system service is the riskiest thing `rpipe` does, so: consent before anything runs, exact commands on screen, argument lists instead of shell strings, a separate file instead of editing yours, verification after, and one command to undo. Rejected alternatives: editing `ollama.service` directly (hard to undo, lost on upgrades), and running `sudo` silently or storing a password.
+
+**How to run / check it.**
+```
+rpipe model tune
+rpipe model tune --undo
+uv run pytest tests/test_ollama_tune.py -q
+```
+
+**Where the code is.** `src/research_pipeline/ollama_tune.py` (`advise`, `render_dropin`, `apply_commands`, `undo_commands`, `manual_instructions`, `wait_ready`, `run_tty`), the `model tune` command in `src/research_pipeline/cli.py`, tests in `tests/test_ollama_tune.py`.
+
 ## Why it's built this way
 
 - **Every probe is injected.** Commands go through a runner and `/proc` files through a reader, so tests never run `nvidia-smi` or `systemctl` and the scan is checked offline.
@@ -108,5 +136,6 @@ The setup walkthrough (`rpipe model setup`) also shows the new facts (free memor
 - `src/research_pipeline/machine.py`: `MachineInfo` and `detect_machine`, which call the scan.
 - `src/research_pipeline/cli.py`: `model scan` and the report text.
 - `tests/test_scan.py`: the tests.
+- `src/research_pipeline/ollama_tune.py`: the settings advice, drop-in text and commands (see Server settings).
 
 Sharing measurements between users (opt-in) is not built; it is a possible later feature.

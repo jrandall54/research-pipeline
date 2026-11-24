@@ -22,7 +22,7 @@ import typer
 
 from research_pipeline import bench as bench_mod
 from research_pipeline import catalog as catalog_mod
-from research_pipeline import categories, judge, ollama_fit, onboarding, profile_edit, registry, schedule
+from research_pipeline import categories, judge, ollama_fit, ollama_tune, onboarding, profile_edit, registry, schedule
 from research_pipeline import serve as serve_mod
 from research_pipeline.backends.claude_code import LOGIN_HINT, find_claude, logged_in, resolve_model
 from research_pipeline.collect import run_collect
@@ -82,7 +82,7 @@ from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_r
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
 from research_pipeline.run_lock import RunLocked, run_lock
-from research_pipeline.scan import setting_source
+from research_pipeline.scan import detect_ollama_server, setting_source, system_cmd
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
@@ -1743,6 +1743,121 @@ def model_bench(vault: VaultOption = None) -> None:
         f"about {result.seconds_per_paper:.0f} s per paper ({result.paper_tokens:,}-token paper), "
         f"about {result.seconds_per_paper * 15 / 60:.0f} min for 15 papers"
     )
+
+
+def _scan_server(url: str):
+    return detect_ollama_server(url, system_cmd)
+
+
+def _run_plan(commands: list[list[str]]) -> bool:
+    """Run each command in the user's terminal; stop at the first failure and say so."""
+    for argv in commands:
+        typer.echo(f"$ {' '.join(argv)}")
+        if ollama_tune.run_tty(argv) != 0:
+            typer.echo(f"Failed: {' '.join(argv)}. The commands after it did not run.")
+            return False
+    return True
+
+
+def _wait_for_ollama(url: str) -> bool:
+    with _reporter() as reporter, stage(reporter, "ollama restart", label="waiting for Ollama") as handle:
+        handle.note("waiting up to 30 s for the server to answer")
+        return ollama_tune.wait_ready(url)
+
+
+def _tune_undo(url: str) -> None:
+    if not ollama_tune.DROPIN.exists():
+        typer.echo(f"Nothing to undo: {ollama_tune.DROPIN} does not exist.")
+        return
+    commands = ollama_tune.undo_commands()
+    typer.echo("This removes only rpipe's own settings file; other files are untouched. Commands:")
+    for argv in commands:
+        typer.echo("  " + " ".join(argv))
+    if not typer.confirm("Undo now?", default=False):
+        typer.echo("Nothing was changed.")
+        return
+    if not _run_plan(commands):
+        raise typer.Exit(code=1)
+    if not _wait_for_ollama(url):
+        raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`")
+    typer.echo("Done: rpipe's settings are removed and Ollama is running again.")
+
+
+@model_app.command("tune")
+def model_tune(
+    undo: Annotated[bool, typer.Option("--undo", help="Remove the settings rpipe added.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Offer Ollama settings that fit longer contexts in GPU memory; asks first, verifies, can be undone."""
+    if not _is_tty():
+        raise _fail("rpipe model tune is interactive (it asks before using sudo); run it in a terminal")
+    ctx = _open(vault)
+    cfg = ctx.config
+    url = cfg.llm_url
+    if undo:
+        _tune_undo(url)
+        return
+    with _reporter() as reporter, stage(reporter, "scan", label="the Ollama server"):
+        server = _scan_server(url)
+    settings = ollama_tune.advise(server)
+    if not settings:
+        typer.echo("Ollama already has the recommended settings; nothing to change.")
+        for key in (ollama_tune.FLASH, ollama_tune.KV_TYPE, ollama_tune.PARALLEL):
+            if key in server.env:
+                source = setting_source(server, key)
+                typer.echo(f"  {key}={server.env[key]}" + (f" (set in {source})" if source else ""))
+        return
+    if server.how != "systemd":
+        typer.echo(ollama_tune.manual_instructions(server, settings))
+        return
+    if server.host_matches is False:
+        typer.echo(f"Warning: the Ollama service listens on {server.env.get('OLLAMA_HOST')} but rpipe talks to "
+                   f"{url}. Changing the service would not change the server rpipe uses.")
+        if not typer.confirm("Continue anyway?", default=False):
+            typer.echo("Nothing was changed.")
+            return
+    for s in settings:
+        typer.echo(f"{s.name}: {s.current or 'not set'} -> {s.value}\n  what: {s.what}\n  why: {s.why}")
+    content = ollama_tune.render_dropin(settings)
+    tmp_dir = Path(tempfile.mkdtemp())
+    tmp = tmp_dir / "rpipe.conf"
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        commands = ollama_tune.apply_commands(tmp)
+        typer.echo(f"\nThis writes {ollama_tune.DROPIN}:\n{content}\nCommands (sudo will ask for your password):")
+        for argv in commands:
+            typer.echo("  " + " ".join(argv))
+        typer.echo(f"To undo later: {ollama_tune.UNDO_COMMAND}")
+        if not typer.confirm("Apply?", default=False):
+            typer.echo("Nothing was changed.")
+            return
+        before = None
+        if cfg.llm_backend == "ollama":
+            try:
+                before = ollama_fit.cached_fit(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
+            except (LlmError, OSError, ValueError):
+                before = None
+        if not _run_plan(commands):
+            raise typer.Exit(code=1)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    if not _wait_for_ollama(url):
+        raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`")
+    after = _scan_server(url)
+    missing = [s for s in settings if after.env.get(s.name) != s.value]
+    if missing:
+        raise _fail("restarted, but these are not live: " + ", ".join(s.name for s in missing))
+    typer.echo("All settings are live: " + ", ".join(f"{s.name}={s.value}" for s in settings))
+    if cfg.llm_backend == "ollama":
+        typer.echo("Re-measuring the context that fits (this probes the GPU and can take a few minutes).")
+        try:
+            with _reporter() as reporter, stage(reporter, "model fit") as handle:
+                fit = ollama_fit.resolve(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True,
+                                         log=handle.note)
+        except (LlmError, OSError, ValueError) as exc:
+            raise _fail(str(exc)) from exc
+        old = f"{before.num_ctx:,}" if before else "not measured before"
+        typer.echo(f"context: {old} -> {fit.num_ctx:,} tokens ({fit.model})")
 
 
 @model_app.command("check")

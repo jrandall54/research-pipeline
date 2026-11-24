@@ -81,15 +81,15 @@ Code: `src/research_pipeline/catalog.py`, the shipped list in `src/research_pipe
 
 1. **On the GPU** (`gpu`): if the model file is smaller than `vram`, the leftover memory is filled with context: `leftover / KV per token`, rounded down to a multiple of 1,024, and no more than the model's trained context or 131,072 (`CONTEXT_CEILING`). At least 16,384 tokens counts as a fit.
 2. **Partly in RAM** (`spill`, mixture-of-experts models only, on a machine with at least 4 GB of GPU memory): if the model plus a 32,768-token context fits in `vram` + free RAM - 4 GB. Only a few experts work on each token, so the part sitting in RAM slows things down modestly; a dense model in the same spot would crawl, so dense models never spill.
-3. **On the CPU** (`cpu`, machines with less than 4 GB of GPU memory): if the model has at most 15 billion active parameters (`CPU_MAX_ACTIVE_B`; bigger ones are too slow for one night) and the model plus a 32,768-token context fits in total RAM - 4 GB (`RAM_SAFETY_GB`).
+3. **On the CPU** (`cpu`, machines with less than 8 GB of GPU memory, i.e. the `cpu` and `small` bands; checked after the GPU and spill steps, so a small card still gets CPU options when nothing fits on it): if the model has at most 15 billion active parameters (`CPU_MAX_ACTIVE_B`; bigger ones are too slow for one night) and the model plus a 32,768-token context fits in total RAM - 4 GB (`RAM_SAFETY_GB`).
 4. Otherwise the model is not shown.
 
-Order: GPU first, then spill, then CPU; inside each, models the catalog lists for this machine's band first, then bigger models (quality first), then ones already installed. The top five are shown.
+Order: GPU first, then spill, then CPU; inside each, models the catalog lists for this machine's band first, then bigger models by **dense-equivalent size** (quality first), then ones already installed. The top five are shown. Dense-equivalent size is the parameter count for a dense model and `sqrt(total x active)` for a mixture of experts, so a 35B model with 3B active counts as about 10.2B and ranks below a 27B dense model.
 
 Worked example (16 GB card counted as 15.9 GB, flash attention and `q8_0` on): the 12 GB Qwen3.6 27B has `vram` 14.9 GB, so 2.9 GB is left; at 62.5 MiB per 1,000 tokens halved to 31.25, that is about 95,000 tokens, shown as "about 95K tokens of context (estimate; rpipe model fit measures it)". A 22 GB model would not fit on the card; if it is a mixture of experts and 20 GB of RAM is free, it is shown as a spill.
 
 **Picking one.**
-- Not installed: it shows `download X GB; free disk where Ollama keeps models: Y GB`. If X + 2 GB is more than Y it refuses (`not enough free disk`) and changes nothing. Otherwise it asks `Download NAME now? [y/N]` and downloads with progress.
+- Not installed: it shows `download X GB; free disk where Ollama keeps models: Y GB`. If X + 2 GB is more than Y it refuses (`not enough free disk`) and changes nothing. Otherwise it asks `Download NAME now (X GB)? [y/N]` (default no) and downloads with progress. The setup walkthrough uses the same check and question.
 - It sets the model (switching the backend to `ollama` first if needed, and saying so). On the GPU the context is set to `auto` and measured right away with the same probe as `rpipe model fit`, which prints the real context. On spill or CPU both model and context (32,768) are pinned, because the automatic choice only accepts models that sit fully in GPU memory.
 - It offers `Measure its speed now (about 1-5 minutes)? [y/N]` (the same benchmark as `rpipe model bench`).
 - It prints how to go back, for example `To go back: rpipe model set auto, then rpipe model set-context auto`.
@@ -99,7 +99,8 @@ The setup walkthrough (`rpipe model setup`, see [setup.md](setup.md)) uses the s
 **Why it's built this way.**
 - **Estimate, then measure.** The context figure is arithmetic from catalog numbers, so it is labelled an estimate; the real figure comes from loading the model (`rpipe model fit`), which only makes sense for an installed model. Rejected: downloading models just to measure them.
 - **No invented speed.** Time per paper appears only when measured on this machine. Rejected: speed constants per GPU, which one machine's data cannot support.
-- **Quality first within a placement.** A bigger model that fits usually writes better summaries; the GPU-first order already protects speed.
+- **Quality first within a placement, by dense-equivalent size.** A bigger model that fits usually writes better summaries; the GPU-first order already protects speed. A mixture-of-experts model uses only a few experts per token, so its total size overstates its quality; the common rule of thumb `sqrt(total x active)` corrects for that. The owner's 10-paper test agreed: the 35B-A3B model covered 16 of 50 key facts against 19 for the 27B dense model, and produced unverified citations. Rejected: ranking by raw total parameters, which put the 35B first. The rule of thumb is only a starting order; measuring with `rpipe eval` on your own papers stays the final word.
+- **Small GPUs still get CPU options.** A 4-8 GB card is too small for most summary models, but the machine's RAM may hold one on the CPU; without this, a small GPU would leave a machine worse off than no GPU at all.
 - **4 GB of RAM kept free and 2 GB of disk to spare,** so the rest of the computer keeps working and a download never fills the disk.
 - **Nothing changes without a yes**, and the go-back commands are printed every time.
 

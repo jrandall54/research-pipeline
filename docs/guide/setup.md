@@ -20,10 +20,10 @@
 
 1. A catalog model fits on the GPU (fully, or a mixture-of-experts model partly in RAM): `ollama`. The reason names the GPU memory. It says to install Ollama if it is missing, and if no text-writing model is pulled yet (embedding-only models, with "embed" in the name, do not count) it proposes the top-ranked model.
 2. Otherwise, if you are logged in to Claude Code, it recommends `claude-code`.
-3. Otherwise, if a small model fits in memory (RAM) on the CPU: `ollama`, with the reason "no GPU found; a small model runs on the CPU overnight (slow)", proposing the top-ranked CPU model.
-4. Otherwise `none` (abstracts only), saying what would unlock more: a GPU plus Ollama, more memory for a model on the CPU, or a Claude Code login.
+3. Otherwise, if a small model fits in memory (RAM) on the CPU (machines with no GPU or a GPU under 8 GB): `ollama`, with the reason "no GPU found; a small model runs on the CPU overnight (slow)" (or "the GPU's 4.0 GB is too little for a model; ..."), proposing the top-ranked CPU model.
+4. Otherwise `none` (abstracts only), saying that no catalog model fits this computer's GPU memory or RAM and what would unlock more: a bigger GPU plus Ollama, more memory for a model on the CPU, or a Claude Code login.
 
-The other two backends always stay on the menu. Which models can be proposed, and their download sizes, come from the catalog (`defaults/model_catalog.yaml`; `rpipe model catalog show` lists it). With the shipped catalog (2026-11-24), a 16 GB card is offered the 13.7 GB Qwen3.6 35B mixture-of-experts model; a computer with no GPU and 16 GB of memory is offered `qwen3:8b` (5.2 GB) on the CPU; with 8 GB of memory or less nothing fits and the answer is Claude Code or `none`.
+The other two backends always stay on the menu. Which models can be proposed, and their download sizes, come from the catalog (`defaults/model_catalog.yaml`; `rpipe model catalog show` lists it). With the shipped catalog (2026-11-24), a 16 GB card is offered the 12 GB Qwen3.6 27B dense model; a computer with no GPU, or with a GPU under 8 GB, and 16 GB of memory is offered `qwen3:8b` (5.2 GB) on the CPU; with 8 GB of memory or less nothing fits and the answer is Claude Code or `none`.
 
 Install hints shown when Ollama is missing (`OLLAMA_INSTALL`): Linux `curl -fsSL https://ollama.com/install.sh | sh`; macOS `brew install ollama` or the download page; Windows the download page.
 
@@ -31,7 +31,7 @@ Install hints shown when Ollama is missing (`OLLAMA_INSTALL`): Linux `curl -fsSL
 
 1. **What was found.** One line each: operating system and memory (shown as "GB" but counted in GiB, 1024 x 1024 x 1024 bytes, so it can read slightly lower than the box says), the GPU (name and memory, or "no GPU found"), Ollama (installed, running, models pulled), Claude Code (found, logged in).
 2. **The recommendation and its reasons**, then a numbered menu that always lists all three built-ins: the recommended one first, marked `[recommended]` (the default, just press Enter), then the other two in the order Ollama, Claude Code, abstracts only. You can pick one the machine is not ready for yet; the "not installed" and "not logged in" re-check loops below then run, so you can fix it and carry on.
-3. **If you pick `ollama`.** Ollama missing: the install command for your OS is printed and you are asked "Installed it? Check again"; yes re-detects, no moves on (the final check will then say what is missing). If the recommendation proposed a model: "Pull NAME now (X GB download)?" (default yes), with progress on stderr while it downloads (a live bar that follows the download percent on a terminal; in a log, `model pull…`, a line about every 10% such as `  qwen3:14b 43%`, then `model pull done (...)`). The final check prints `model check…` / `model check done (...)` on stderr before the `Ready:` line. Then the backend is saved.
+3. **If you pick `ollama`.** Ollama missing: the install command for your OS is printed and you are asked "Installed it? Check again"; yes re-detects, no moves on (the final check will then say what is missing). If the recommendation proposed a model: the download size and the free disk where Ollama keeps models are shown (`download X GB; free disk where Ollama keeps models: Y GB`); if X + 2 GB is more than Y the download is refused (`not enough free disk`), otherwise "Download NAME now (X GB)? [y/N]" (default no; the same check and question as `rpipe model recommend`), with progress on stderr while it downloads (a live bar that follows the download percent on a terminal; in a log, `model pull…`, a line about every 10% such as `  qwen3:14b 43%`, then `model pull done (...)`). The final check prints `model check…` / `model check done (...)` on stderr before the `Ready:` line. Then the backend is saved.
 4. **If you pick `claude-code`.** Not logged in: "Run `claude` once in a terminal and log in, then come back", with the same re-check loop. Then it explains the trade: paper text goes to Anthropic, about 30 calls a night come out of your plan's usage quota, your shelf (`my_work/`) never leaves the machine, and `haiku` uses less quota than `sonnet`. You pick `sonnet` (default), `haiku` or `opus`. The backend is saved with the path of the `claude` program, so the nightly timer finds it even though it has no `~/.local/bin` on its PATH.
 5. **If you pick `none`.** Saved; digests show abstracts only.
 6. **The final check.** The saved backend is built and tested exactly as a run would. `Ready: <what was checked>` means done. `Not ready yet: <reason>` plus "Fix it, then run rpipe model setup" means your choice is saved but something is missing; the command exits 1. `none` is always ready.
@@ -51,7 +51,8 @@ Recommended: ollama
   2. Claude Code (your login)
   3. no summaries (abstracts only)
 Choice [1]:
-Pull hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S now (13.7 GB download)? [Y/n]:
+download 12 GB; free disk where Ollama keeps models: 120 GB
+Download hf.co/unsloth/Qwen3.6-27B-GGUF:UD-IQ3_XXS now (12 GB)? [y/N]: y
   pulling manifest ... downloading 42% ... success
 Ready: Ollama is running at http://localhost:11434 and model ... is installed.
 ```
@@ -75,7 +76,8 @@ Recommended: ollama
   - no GPU found; a small model runs on the CPU overnight (slow)
   1. a model on this computer (Ollama)  [recommended]
   ...
-Pull qwen3:8b now (5.2 GB download)? [Y/n]:
+download 5.2 GB; free disk where Ollama keeps models: 120 GB
+Download qwen3:8b now (5.2 GB)? [y/N]: y
 Model qwen3:8b and a context of 32,768 tokens are both pinned: the automatic choice (auto) only accepts models that sit fully in GPU memory, and this one does not.
 ```
 
@@ -100,7 +102,7 @@ Without a terminal the command refuses ("rpipe model setup is interactive; use `
 - **A CPU model before giving up.** A night has hours to spare, so a small model on the CPU is better than no summaries. A Claude Code login still comes first because it is far faster. Machines too small even for that get `none`.
 - **Backend first in `rpipe init`.** The describe step asks the model to propose topics, so the model has to exist before it. Rejected: asking last, which would make the first model call fail on every fresh install.
 - **Save, then check.** The choice is written before the final check, so a missing model or login leaves you with the right setting and one thing to fix, not a half-finished setup. Rejected: saving only on success, which loses the choice on every hiccup.
-- **A yes/no before any download.** A pull is gigabytes; it needs your yes.
+- **A yes before any download, after seeing size against free disk.** A pull is gigabytes; it needs your yes (the default is no) and is refused when the disk would be left with less than 2 GB.
 - **Catalog in a data file** so new models can be added without code changes (`rpipe model catalog update`).
 
 ## How to run / check it

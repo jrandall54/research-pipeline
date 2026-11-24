@@ -15,6 +15,7 @@ from research_pipeline.recommender import (
     CPU_CTX,
     TOP_N,
     band_for,
+    dense_equivalent_b,
     kv_factor,
     place,
     rank,
@@ -108,6 +109,44 @@ def test_cpu_only_ranks_small_models_by_ram():
     assert "runs on the CPU: slow but fine overnight" in ranked[0].reasons
     big = [c.entry.id for c in rank(machine(ram=32.0), CATALOG, {})]
     assert "moe35" in big and "d32" not in big and "d27" not in big
+
+
+def test_small_gpu_with_ram_gets_cpu_models():
+    ranked = rank(machine(vram=4.0, ram=16.0, free=12.0), CATALOG, {})
+    assert [(c.entry.id, c.placement) for c in ranked] == [("d8", "cpu"), ("d14", "cpu")]  # small band first
+
+
+def test_small_gpu_with_shipped_catalog_offers_a_cpu_model():
+    from research_pipeline.machine import recommend
+    info = machine(vram=4.0, ram=16.0, free=12.0)
+    shipped = catalog_mod.shipped_catalog()
+    ranked = rank(info, shipped, {})
+    assert ranked and all(c.placement == "cpu" for c in ranked)
+    assert any(c.entry.pull == "qwen3:8b" for c in ranked)
+    rec = recommend(info, shipped)
+    assert rec.backend == "ollama" and rec.pull is not None
+    assert rec.reasons == ["the GPU's 4.0 GB is too little for a model; a small model runs on the CPU overnight (slow)"]
+
+
+def test_none_reason_does_not_blame_ram_it_did_not_check():
+    from research_pipeline.machine import recommend
+    rec = recommend(machine(ram=4.0), CATALOG)
+    assert rec.backend == "none"
+    assert rec.reasons[0].startswith("no model in the catalog fits this computer's GPU memory or its memory (RAM)")
+
+
+def test_dense_equivalent_b():
+    assert dense_equivalent_b(D27) == 27.0
+    assert dense_equivalent_b(MOE) == pytest.approx(math.sqrt(35 * 3))  # about 10.2
+    no_active = MOE.model_copy(update={"active_b": None})
+    assert dense_equivalent_b(no_active) == 35.0
+
+
+def test_rank_puts_dense_27b_above_moe_35b_a3b():
+    moe = MOE.model_copy(update={"bands": ["mid"], "download_gb": 10.0})
+    cat = Catalog(version=1, updated=date(2026, 11, 24), entries=[moe, D27])
+    ranked = rank(machine(vram=16.0, env=FA_Q8), cat, {})
+    assert [(c.entry.id, c.placement) for c in ranked] == [("d27", "gpu"), ("moe35", "gpu")]
 
 
 def test_cpu_only_tiny_ram_gets_nothing():
@@ -285,5 +324,5 @@ def test_recommend_non_tty_prints_only(vault, monkeypatch):
 def test_recommend_nothing_fits_says_so(vault, monkeypatch):
     result, _, _ = recommend_run(vault, monkeypatch, machine(ram=4.0), "")
     assert result.exit_code == 0, result.output
-    assert "No catalog model fits this computer" in result.output
+    assert "No model in the catalog fits this computer's GPU memory or its memory (RAM)." in result.output
     assert "Use one?" not in result.output

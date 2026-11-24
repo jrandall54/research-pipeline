@@ -86,7 +86,7 @@ def place(entry: CatalogEntry, info: MachineInfo) -> tuple[Placement, int] | Non
        model's trained context and CONTEXT_CEILING. At least MIN_USEFUL_CTX -> ("gpu", ctx).
     3. Spill (mixture-of-experts models only, on a machine with a GPU band): if the weights plus
        a CPU_CTX context fit in vram + free RAM - RAM_SAFETY_GB -> ("spill", CPU_CTX).
-    4. CPU (machines in the "cpu" band): if the active parameters (all parameters for a dense
+    4. CPU (machines in the "cpu" or "small" band, i.e. under 8 GB of GPU memory): if the active parameters (all parameters for a dense
        model) are at most CPU_MAX_ACTIVE_B and the weights plus a CPU_CTX context fit in
        total RAM - RAM_SAFETY_GB -> ("cpu", CPU_CTX).
     5. Otherwise None.
@@ -103,10 +103,21 @@ def place(entry: CatalogEntry, info: MachineInfo) -> tuple[Placement, int] | Non
     if entry.arch == "moe" and band != "cpu":
         if need <= vram + (info.ram_free_gb or 0) - RAM_SAFETY_GB:
             return "spill", CPU_CTX
-    if band == "cpu" and info.ram_gb is not None:
+    if band in ("cpu", "small") and info.ram_gb is not None:
         if (entry.active_b or entry.params_b) <= CPU_MAX_ACTIVE_B and need <= info.ram_gb - RAM_SAFETY_GB:
             return "cpu", CPU_CTX
     return None
+
+
+def dense_equivalent_b(entry: CatalogEntry) -> float:
+    """Roughly how big a dense model this one writes like, in billions of parameters.
+
+    Dense: its own size. Mixture of experts: sqrt(total x active), a common rule of thumb
+    (35B with 3B active is about 10.2B). The owner's 10-paper test agreed: a 35B-A3B model
+    covered fewer key facts than a 27B dense one. Measuring with `rpipe eval` stays the final word."""
+    if entry.arch == "moe" and entry.active_b:
+        return math.sqrt(entry.params_b * entry.active_b)
+    return entry.params_b
 
 
 def _norm(name: str) -> str:
@@ -140,7 +151,8 @@ def rank(info: MachineInfo, catalog: Catalog, benches: dict[str, Bench]) -> list
     """The best TOP_N catalog models for this machine.
 
     Order: on the GPU, then partly in RAM (spill), then on the CPU; within each, models listed
-    for this machine's band first, then bigger models (quality first), then installed ones."""
+    for this machine's band first, then bigger models by dense-equivalent size (quality first),
+    then installed ones."""
     band = band_for(info)
     installed = _installed(info)
     measured = {_norm(name): b for name, b in benches.items()}
@@ -160,7 +172,7 @@ def rank(info: MachineInfo, catalog: Catalog, benches: dict[str, Bench]) -> list
             reasons.append(entry.notes)
         reasons.append(_speed_reason(bench))
         out.append(Candidate(entry, placement, ctx, is_installed, reasons, bench))
-    out.sort(key=lambda c: (_ORDER[c.placement], band not in c.entry.bands, -c.entry.params_b, not c.installed))
+    out.sort(key=lambda c: (_ORDER[c.placement], band not in c.entry.bands, -dense_equivalent_b(c.entry), not c.installed))
     return out[:TOP_N]
 
 

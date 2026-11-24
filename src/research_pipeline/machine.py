@@ -163,16 +163,18 @@ def recommend(info: MachineInfo, catalog: Catalog) -> Recommendation:
         reasons = [f"{who} {vram:.1f} GB of GPU memory, enough to run a model locally"]
         return Recommendation("ollama", pull, install, _others("ollama"), reasons)
     gpu = info.gpu
-    no_gpu = "no GPU found" if gpu is None else f"the GPU has only {total_vram(info):.1f} GB"
+    vram = total_vram(info)
     if info.claude_logged_in:
         why = ("no GPU was found" if gpu is None
-               else f"no catalog model fits the GPU's {total_vram(info):.1f} GB")
+               else f"no catalog model fits the GPU's {vram:.1f} GB")
         return Recommendation("claude-code", None, False, _others("claude-code"),
                               [f"{why}, but you are logged in to Claude Code"])
     if ranked:
+        where = "no GPU found" if gpu is None else f"the GPU's {vram:.1f} GB is too little for a model"
         return Recommendation("ollama", pull, install, _others("ollama"),
-                              [f"{no_gpu}; a small model runs on the CPU overnight (slow)"])
+                              [f"{where}; a small model runs on the CPU overnight (slow)"])
     return Recommendation("none", None, False, _others("none"), [
-        f"{no_gpu}, no Claude Code login, and too little memory (RAM) to run a model on the CPU",
-        "a GPU plus Ollama, more memory for a model on the CPU, or a Claude Code login would unlock summaries",
+        "no model in the catalog fits this computer's GPU memory or its memory (RAM), "
+        "and there is no Claude Code login",
+        "a bigger GPU plus Ollama, more memory for a model on the CPU, or a Claude Code login would unlock summaries",
     ])

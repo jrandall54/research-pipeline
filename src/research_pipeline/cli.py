@@ -2100,24 +2100,29 @@ def _go_back_hint(backend: str, model: str, num_ctx: int | str) -> None:
 
 
 def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
-    """Show size against free disk, refuse when it does not fit, else ask and pull. True if pulled."""
+    """Show size against free disk, refuse when it does not fit, else ask (default no) and pull.
+
+    True only when the model was downloaded; every other outcome is explained on screen.
+    Used by `rpipe model recommend` and the setup walkthrough."""
     free = info.disk_free_gb
     typer.echo(f"download {entry.download_gb:g} GB; free disk where Ollama keeps models: "
                + (f"{free:.0f} GB" if free is not None else "unknown"))
     if free is not None and entry.download_gb + 2 > free:
-        raise _fail(f"not enough free disk: {entry.pull} needs {entry.download_gb:g} GB plus 2 GB to spare. "
-                    "Free some space or pick another model. Nothing was changed.")
+        typer.echo(f"not enough free disk: {entry.pull} needs {entry.download_gb:g} GB plus 2 GB to spare. "
+                   "Free some space or pick another model.")
+        return False
     if not info.ollama_running:
-        raise _fail(f"Ollama is not running, so nothing can be downloaded. Start it (or install it: "
-                    f"{OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}) and run rpipe model recommend "
-                    "again. Nothing was changed.")
-    if not typer.confirm(f"Download {entry.pull} now?", default=False):
+        typer.echo("Ollama is not running, so nothing can be downloaded. Start it (or install it: "
+                   f"{OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}) and try again.")
+        return False
+    if not typer.confirm(f"Download {entry.pull} now ({entry.download_gb:g} GB)?", default=False):
         return False
     try:
         with _reporter() as reporter, stage(reporter, "model pull", total=100, label=entry.pull) as handle:
             pull_model(cfg.llm_url, entry.pull, _pull_progress(handle, entry.pull))
     except LlmError as exc:
-        raise _fail(f"Download failed: {exc}. Nothing was changed.") from exc
+        typer.echo(f"Download failed: {exc}")
+        return False
     return True
 
 
@@ -2187,8 +2192,7 @@ def model_recommend(vault: VaultOption = None) -> None:
             for reason in cand.reasons:
                 typer.echo(f"     - {reason}")
     else:
-        typer.echo("No catalog model fits this computer: not enough GPU memory, and not enough memory (RAM) "
-                   "to run one on the CPU.")
+        typer.echo("No model in the catalog fits this computer's GPU memory or its memory (RAM).")
     for name in recommender.uncatalogued(info, catalog):
         typer.echo(f"installed, not in the catalog: {name} (rpipe model fit measures any installed model)")
     if info.claude_logged_in:
@@ -2221,14 +2225,8 @@ def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> No
                     lambda i: i.ollama_installed, "Installed it? Check again")
     pulled = None
     if rec.pull is not None and rec.backend == "ollama" and info.ollama_installed:
-        name = rec.pull.pull
-        if typer.confirm(f"Pull {name} now ({rec.pull.download_gb:g} GB download)?", default=True):
-            try:
-                with _reporter() as reporter, stage(reporter, "model pull", total=100, label=name) as handle:
-                    pull_model(config.llm_url, name, _pull_progress(handle, name))
-                pulled = rec.pull
-            except LlmError as exc:
-                typer.echo(f"Pull failed: {exc}")
+        if _download(config, info, rec.pull):
+            pulled = rec.pull
     profile_edit.set_llm_backend(vault, "ollama", known)
     where = recommender.place(pulled, info) if pulled is not None else None
     if where is not None and where[0] != "gpu":

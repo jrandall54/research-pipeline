@@ -150,9 +150,23 @@ def test_wizard_cpu_only_without_cloud_recommends_cpu_model(vault, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "Recommended: ollama" in result.output
     assert "no GPU found; a small model runs on the CPU overnight (slow)" in result.output
-    assert "Pull qwen3:4b now (2.5 GB download)?" in result.output
+    assert "Download qwen3:4b now (2.5 GB)? [y/N]" in result.output
     c = cfg(vault)
     assert pulled == ["qwen3:4b"] and (c.llm_backend, c.llm_model, c.llm_num_ctx) == ("ollama", "qwen3:4b", 32768)
+
+
+def test_wizard_refuses_download_without_disk(vault, monkeypatch):
+    m = machine(gpu=GPU16, gpus=[GPU16], ollama_installed=True, ollama_running=True, disk_free_gb=10.0)
+    result, pulled = setup_run(vault, monkeypatch, [m], "1\n", check=LlmError("model not installed"))
+    assert "download 9.3 GB; free disk where Ollama keeps models: 10 GB" in result.output
+    assert "not enough free disk" in result.output
+    assert pulled == [] and cfg(vault).llm_backend == "ollama"
+
+
+def test_wizard_download_defaults_to_no(vault, monkeypatch):
+    m = machine(gpu=GPU16, gpus=[GPU16], ollama_installed=True, ollama_running=True)
+    result, pulled = setup_run(vault, monkeypatch, [m], "1\n\n", check=LlmError("model not installed"))
+    assert "[y/N]" in result.output and pulled == []
 
 
 def test_wizard_gpu_pull_leaves_model_auto(vault, monkeypatch):

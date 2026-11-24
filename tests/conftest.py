@@ -117,3 +117,9 @@ def pinned_machine_and_os(monkeypatch):
         os="Linux", ram_gb=4.0, gpu=None, ollama_installed=False, ollama_running=False,
         ollama_models=[], claude_path=None, claude_logged_in=False))
     monkeypatch.setattr(cli, "_platform", lambda: "Linux", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_machine_probe(monkeypatch):
+    """The fit cache key asks about the machine (nvidia-smi, systemctl); tests never run those."""
+    monkeypatch.setattr("research_pipeline.ollama_fit.machine_key", lambda url: {})

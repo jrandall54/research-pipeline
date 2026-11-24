@@ -199,6 +199,32 @@ def ollama_version(url: str) -> str | None:
         return None
 
 
+MACHINE_KEY_SETTINGS = ("OLLAMA_FLASH_ATTENTION", "OLLAMA_KV_CACHE_TYPE", "OLLAMA_NUM_PARALLEL")
+
+
+def machine_key(url: str, run: CmdRunner = system_cmd) -> dict:
+    """What a measured context depends on: Ollama version, memory-affecting settings, GPUs.
+
+    Cheap (one /api/version call, a few `systemctl` calls, `nvidia-smi`/`rocm-smi`) and never
+    raises: anything that cannot be read is left out, so the key just stays the same.
+    """
+    version: str | None = None
+    env: dict[str, str] = {}
+    gpus: list[str] = []
+    try:
+        server = detect_ollama_server(url, run, version=ollama_version)
+        version = server.version
+        env = {k: server.env[k] for k in MACHINE_KEY_SETTINGS if k in server.env}
+    except Exception:  # a key must never stop a run
+        pass
+    try:
+        gpus = sorted(f"{g.name}:{round(g.vram_gb, 1)}"
+                      for g in all_gpus(run, platform.system(), platform.machine()))
+    except Exception:
+        pass
+    return {"ollama": version, "env": env, "gpus": gpus}
+
+
 def parse_systemd_env(line: str) -> dict[str, str]:
     """`Environment=A=1 "B=x y"` -> {"A": "1", "B": "x y"}, keeping only OLLAMA_* names."""
     text = line.strip()

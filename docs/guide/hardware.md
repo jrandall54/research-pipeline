@@ -162,6 +162,12 @@ uv run pytest tests/test_ollama_tune.py -q
 
 **Where the code is.** `src/research_pipeline/ollama_tune.py` (`advise`, `render_dropin`, `apply_commands`, `undo_commands`, `manual_instructions`, `wait_ready`, `run_tty`), the `model tune` command in `src/research_pipeline/cli.py`, tests in `tests/test_ollama_tune.py`.
 
+## When the machine changes
+
+The context window `rpipe model fit` measures depends on the machine, so the saved choice is only reused while the machine looks the same. Its key includes the Ollama version, the three server settings that change memory use (`OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`, `OLLAMA_NUM_PARALLEL`) and the GPUs (name and memory). After an Ollama upgrade, an `rpipe model tune` change or a new graphics card, the next `rpipe run` or `rpipe model fit` measures again (about 1-3 minutes) instead of reusing a context that may no longer fit, or that is smaller than it needs to be. The first run after this was added probes once because the key changed.
+
+Rejected alternative: re-probing every night, which costs minutes for no gain on a machine that did not change. Code: `scan.machine_key`, `ollama_fit._cache_key`.
+
 ## Why it's built this way
 
 - **Every probe is injected.** Commands go through a runner and `/proc` files through a reader, so tests never run `nvidia-smi` or `systemctl` and the scan is checked offline.

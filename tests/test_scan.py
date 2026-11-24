@@ -123,3 +123,28 @@ def test_model_scan_command_prints_sections(tmp_path, monkeypatch):
     for text in ("GPU", "memory", "CPU", "Ollama", "flash attention: on (set in kv-cache.conf)",
                  "free disk", "q8_0", "parallel slots: 1", "port 11436 but rpipe talks to localhost:11434"):
         assert text in out
+
+
+def test_machine_key_collects_version_settings_and_gpus(monkeypatch):
+    from research_pipeline import scan
+    monkeypatch.setattr(scan, "ollama_version", lambda url: "0.6.0")
+    run = fake_run({
+        "systemctl is-active ollama": (0, "active\n"),
+        "systemctl show ollama --property=Environment": (0, ENV_LINE + "\n"),
+        "systemctl show ollama --property=DropInPaths": (0, DROP + "\n"),
+        "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits": (0, "RTX 4090, 24564\n"),
+    })
+    key = scan.machine_key("http://x", run)
+    assert key["ollama"] == "0.6.0"
+    assert key["env"] == {"OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "q8_0",
+                          "OLLAMA_NUM_PARALLEL": "1"}
+    assert key["gpus"] == ["RTX 4090:24.0"]
+
+
+def test_machine_key_never_raises(monkeypatch):
+    from research_pipeline import scan
+
+    def boom(*a, **k):
+        raise RuntimeError("nope")
+    monkeypatch.setattr(scan, "ollama_version", boom)
+    assert scan.machine_key("http://x", fake_run({})) == {"ollama": None, "env": {}, "gpus": []}

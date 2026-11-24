@@ -17,6 +17,7 @@ import httpx
 from pydantic import BaseModel
 
 from research_pipeline.llm import LlmError
+from research_pipeline.scan import machine_key
 
 CONTEXT_CEILING = 131072
 UNLOAD_TIMEOUT = 30.0
@@ -320,10 +321,17 @@ def _read_cache(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _cache_key(url: str, model: str, num_ctx: int | str, models: list[ModelInfo]) -> str:
+def _default_machine(url: str) -> dict:
+    # Looked up at call time so tests can replace `machine_key` and never run real commands.
+    return machine_key(url)
+
+
+def _cache_key(url: str, model: str, num_ctx: int | str, models: list[ModelInfo],
+               machine: dict | None = None) -> str:
     return json.dumps(
         {"url": url, "model": model, "num_ctx": num_ctx,
-         "installed": sorted([m.name, m.digest] for m in models)},
+         "installed": sorted([m.name, m.digest] for m in models),
+         "machine": machine or {}},
         sort_keys=True,
     )
 
@@ -359,7 +367,8 @@ def _cached(vault: Path, key: str, models: list[ModelInfo],
 
 
 def cached_fit(url: str, vault: Path, model: str, num_ctx: int | str,
-               deadline: float | None = SHOW_DEADLINE) -> Fit | None:
+               deadline: float | None = SHOW_DEADLINE,
+               machine: Callable[[str], dict] = _default_machine) -> Fit | None:
     """The cached choice, only if it is still valid for these settings and installed models.
 
     Returns None when there is none, when it is stale, or when Ollama cannot be asked.
@@ -371,7 +380,8 @@ def cached_fit(url: str, vault: Path, model: str, num_ctx: int | str,
         raise
     except LlmError:
         return None
-    hit = _cached(vault, _cache_key(url, model, num_ctx, models), models, floor=num_ctx == "auto")
+    hit = _cached(vault, _cache_key(url, model, num_ctx, models, machine(url)), models,
+                  floor=num_ctx == "auto")
     return hit if isinstance(hit, Fit) else None
 
 
@@ -383,6 +393,7 @@ def resolve(
     force: bool = False,
     log: Callable[[str], None] = lambda s: None,
     deadline: float | None = FIT_DEADLINE,
+    machine: Callable[[str], dict] = _default_machine,
 ) -> Fit:
     """Turn the config values (`auto` or explicit) into a concrete model and context.
 
@@ -396,7 +407,7 @@ def resolve(
         return Fit(model=model, num_ctx=int(num_ctx))
     session = ProbeSession(deadline, log)
     models = list_models(url, log=log, session=session)
-    key = _cache_key(url, model, num_ctx, models)
+    key = _cache_key(url, model, num_ctx, models, machine(url))
     path = vault / "cache" / CACHE_NAME
     if not force:
         hit = _cached(vault, key, models, log, floor=num_ctx == "auto")

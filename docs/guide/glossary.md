@@ -108,11 +108,11 @@
 
 **Pass mark** — the share of gold papers that must be graded accurate for the model to pass the accuracy check: 90% (`PASS_MARK`), so 9 of 10. Ungraded papers count as not accurate. See `evaluation.md`.
 
-**VRAM** — the memory on your graphics card. Models run fast when everything they need is in VRAM. See "Choosing the model and context automatically" in `llm.md`.
+**VRAM (GPU memory)** — the memory on a graphics card (GPU). A model runs fast when everything it needs (weights plus KV cache) is in VRAM; one that spills into ordinary RAM is much slower. `rpipe model recommend` and `rpipe model setup` compare the VRAM free at scan time with the size of each catalog model. See "Choosing the model and context automatically" in `llm.md` and "Recommendations" in `hardware.md`.
 
 **GPU offload** — how much of a model Ollama keeps on the graphics card versus the CPU. "Fully offloaded" means all of it is on the GPU; a partial offload spills the rest to the CPU and is many times slower. See `llm.md`.
 
-**KV cache** — the working memory a model builds while reading the prompt (a "key" and "value" for each token so far). It grows with the context window, which is why a bigger context can stop a model fitting in VRAM.  The catalog records how much it needs per 1,000 tokens (`kv_mib_per_1k`). See `llm.md`.
+**KV cache** — the working memory a model builds while reading the prompt (a "key" and "value" for each token so far). It grows with the context window, which is why a bigger context can stop a model fitting in VRAM. The catalog records how much it needs per 1,000 tokens (`kv_mib_per_1k`). See `llm.md`.
 
 **`auto`** — the default for `llm_model` and `llm_num_ctx`: the pipeline picks the largest installed model that fits fully on the GPU and the largest context it can hold, caches the answer, and re-checks with `rpipe model fit`. See `llm.md`.
 
@@ -196,8 +196,6 @@
 
 **Abstracts-only mode** — running with the `none` backend: no summary model is used, so the digest shows each paper's abstract instead of a summary. The health line says `summaries off (abstracts-only mode)`. See `backends.md`.
 
-**VRAM** — the memory on a graphics card (GPU). A model must fit in it to run fast; `rpipe model recommend` and `rpipe model setup` compare it with the size of each catalog model. See `hardware.md`.
-
 **Unified memory** — Apple Silicon's single memory pool shared by CPU and GPU. rpipe counts 66% of it as GPU memory. See `setup.md`.
 
 **Pull (a model)** — downloading a model's files into Ollama so it can run locally (`ollama pull NAME`). `rpipe model setup` offers to do it for you, after a yes/no, and shows download progress. See `setup.md`.
@@ -267,8 +265,6 @@
 **CPU vector instructions (AVX2, AVX512, NEON)** — extra processor instructions that do the same arithmetic on many numbers at once. Model software uses them to run much faster on a CPU; `rpipe model scan` lists which ones your CPU has (NEON is the Apple/ARM equivalent). See `hardware.md`, How it works.
 
 **Systemd drop-in file** — a small `.conf` file in a folder like `/etc/systemd/system/ollama.service.d/` that adds to or overrides a service's settings without editing the service file itself. Ollama's `OLLAMA_*` settings are often kept in one. See `hardware.md`, How it works.
-
-**VRAM (GPU memory)** — the memory on the graphics card. A model that fits entirely in VRAM runs fast; one that spills into ordinary RAM is much slower. See `hardware.md`.
 
 **Quantization** — storing a model's numbers with fewer bits (for example 4 instead of 16) so the file and its memory use shrink a lot, at a small cost in quality. Names like `Q4_K_M` or `UD-IQ3_S` say how it was done. See `hardware.md`.
 

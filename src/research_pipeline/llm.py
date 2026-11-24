@@ -13,6 +13,7 @@ SERVE_HINT = "start it with `ollama serve` (and check the server address with `r
 
 
 CHECK_TIMEOUT = 10.0  # seconds; listing models is quick, unlike generating
+CALL_TIMEOUT = 600.0  # seconds one Ollama model call may take (a slow CPU can exceed it on a long paper)
 # Output token limit sent with every Ollama call: a guard against a model that never stops
 # writing. A summary or critique is about 2,000 tokens at most, so this is a wide margin.
 NUM_PREDICT = 4096
@@ -71,7 +72,7 @@ class OllamaClient:
     local = True
 
     def __init__(
-        self, url: str, model: str, num_ctx: int, timeout: float = 600.0, num_predict: int = NUM_PREDICT
+        self, url: str, model: str, num_ctx: int, timeout: float = CALL_TIMEOUT, num_predict: int = NUM_PREDICT
     ) -> None:
         self.url = url.rstrip("/")
         self.model_name = model

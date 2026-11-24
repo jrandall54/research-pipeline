@@ -231,6 +231,7 @@ def recommend_run(vault, monkeypatch, info, input="", tty=True, fit=None):
         return fit or ollama_fit.Fit(model=model, num_ctx=57344)
 
     monkeypatch.setattr(ollama_fit, "resolve", resolve)
+    monkeypatch.setattr(ollama_fit, "cached_fit", lambda *a, **k: fit or ollama_fit.Fit(model="m", num_ctx=57344))
     result = runner.invoke(cli.app, ["model", "recommend", "--vault", str(vault)], input=input)
     return result, pulled, fits
 
@@ -376,3 +377,18 @@ def test_recommend_says_when_it_cannot_read_settings(vault, monkeypatch):
     result, _, _ = recommend_run(vault, monkeypatch, info, tty=False)
     assert "rpipe cannot read this server's settings" in result.output
     assert "now: not set" not in result.output
+
+
+def test_recommend_warns_when_a_paper_would_outlast_the_call_limit(vault, monkeypatch):
+    slow = Bench(model="test:14b", num_ctx=32768, read_tps=20.0, write_tps=3.0, seconds_per_paper=1933.0,
+                 paper_tokens=22000, measured_at=datetime(2026, 11, 24, 12))
+    bench_mod.save_bench(vault, slow)
+    result, _, _ = recommend_run(vault, monkeypatch, machine(ram=16.0, models=["test:14b"]), "1\nn\n")
+    assert result.exit_code == 0, result.output
+    assert "1,100 s" in result.output and "600-second limit" in result.output
+
+
+def test_recommend_no_limit_warning_for_fast_model(vault, monkeypatch):
+    bench_mod.save_bench(vault, make_bench("test:14b"))  # 1000 tokens/s: 22 s to read
+    result, _, _ = recommend_run(vault, monkeypatch, machine(ram=16.0, models=["test:14b"]), "1\nn\n")
+    assert "600-second limit" not in result.output

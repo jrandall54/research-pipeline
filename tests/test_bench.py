@@ -99,6 +99,7 @@ def test_bench_command_refuses_cloud_backend(vault):
 
 
 def test_bench_command_saves(vault, monkeypatch):
+    monkeypatch.setattr(ollama_fit, "cached_fit", lambda *a, **k: ollama_fit.Fit(model="m", num_ctx=32768))
     monkeypatch.setattr(ollama_fit, "resolve", lambda *a, **k: ollama_fit.Fit(model="m", num_ctx=32768))
     monkeypatch.setattr(bench, "run_bench", lambda *a, **k: make_bench("m"))
     r = runner.invoke(cli.app, ["model", "bench", "--vault", str(vault)])
@@ -107,3 +108,20 @@ def test_bench_command_saves(vault, monkeypatch):
     assert "72 s per paper" in r.output
     assert "m" in bench.load_benches(vault)
     assert "llm_model: m" not in (vault / "config.yaml").read_text()
+
+
+def test_bench_says_context_is_measured_first_when_not_cached(vault, monkeypatch):
+    monkeypatch.setattr(ollama_fit, "cached_fit", lambda *a, **k: None)
+    monkeypatch.setattr(ollama_fit, "resolve", lambda *a, **k: ollama_fit.Fit(model="m", num_ctx=32768))
+    monkeypatch.setattr(bench, "run_bench", lambda *a, **k: make_bench("m"))
+    r = runner.invoke(cli.app, ["model", "bench", "--vault", str(vault)])
+    assert r.exit_code == 0, r.output
+    assert "first measures the context that fits" in r.output and "up to 15 minutes" in r.output
+
+
+def test_bench_skips_context_note_when_cached(vault, monkeypatch):
+    monkeypatch.setattr(ollama_fit, "cached_fit", lambda *a, **k: ollama_fit.Fit(model="m", num_ctx=32768))
+    monkeypatch.setattr(ollama_fit, "resolve", lambda *a, **k: ollama_fit.Fit(model="m", num_ctx=32768))
+    monkeypatch.setattr(bench, "run_bench", lambda *a, **k: make_bench("m"))
+    r = runner.invoke(cli.app, ["model", "bench", "--vault", str(vault)])
+    assert "up to 15 minutes" not in r.output

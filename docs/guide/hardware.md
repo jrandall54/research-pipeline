@@ -93,6 +93,8 @@ Because free memory is read at scan time, an app holding GPU memory when you run
 3. **On the CPU** (`cpu`, machines with less than 8 GB of GPU memory, i.e. the `cpu` and `small` bands; checked after the GPU and spill steps, so a small card still gets CPU options when nothing fits on it): if the model has at most 15 billion active parameters (`CPU_MAX_ACTIVE_B`; bigger ones are too slow for one night) and the model plus a 32,768-token context fits in total RAM - 4 GB (`RAM_SAFETY_GB`).
 4. Otherwise the model is not shown.
 
+**The CPU tier has a time limit today.** Each model call may take at most 600 seconds (`CALL_TIMEOUT` in `llm.py`). On a slow CPU, reading a long paper alone can take longer than that: at 20 tokens/s a 22,000-token paper needs about 1,100 s. Such a call times out and that paper falls back to its abstract in the digest, so "slow but fine overnight" holds only for papers short enough to finish inside the limit. Run `rpipe model bench` to see your machine's reading speed. Parts B.5/B.6 will lift this limit.
+
 Order: GPU first, then spill, then CPU; inside each, models the catalog lists for this machine's band first, then bigger models by **dense-equivalent size** (quality first), then the bigger download (for two quantizations of the same model, the larger one keeps more detail, so a 16.8 GB Q4_K_M ranks above a 12 GB IQ3_XXS of the same 27B model when both fit), then ones already installed. The top five are shown. Dense-equivalent size is the parameter count for a dense model and `sqrt(total x active)` for a mixture of experts, so a 35B model with 3B active counts as about 10.2B and ranks below a 27B dense model.
 
 Worked example (the owner's card: 16 GB RTX 5070 Ti, 15,364 MiB = 15.0 GiB free, flash attention and `q8_0` on): `vram` = 15.0 - 2.0 = 13.0 GiB. The 13.7 GB Qwen3.6-35B-A3B has 12.76 GiB of weights, so 0.25 GiB is left; at 19.5 MiB per 1,000 tokens halved to 9.75, that is 0.25 x 1024 x 1000 / 9.75 = about 25,700 tokens, rounded down to 25,600 and shown as "about 26K tokens of context (estimate; rpipe model fit measures it)". That matches the measurement: it fit fully at 16K and spilled at 49K. A 22 GB model would not fit on the card; if it is a mixture of experts and 20 GB of RAM is free, it is shown as a spill.
@@ -101,6 +103,7 @@ Worked example (the owner's card: 16 GB RTX 5070 Ti, 15,364 MiB = 15.0 GiB free,
 - Not installed: it shows `download X GB; free disk where Ollama keeps models: Y GB`. If X + 2 GB is more than Y it refuses (`not enough free disk`) and changes nothing. Otherwise it asks `Download NAME now (X GB)? [y/N]` (default no) and downloads with progress. The setup walkthrough uses the same check and question.
 - It sets the model (switching the backend to `ollama` first if needed, and saying so). On the GPU the context is set to `auto` and measured right away with the same probe as `rpipe model fit`, which prints the real context. On spill or CPU both model and context (32,768) are pinned, because the automatic choice only accepts models that sit fully in GPU memory.
 - It offers `Measure its speed now (about 1-5 minutes)? [y/N]` (the same benchmark as `rpipe model bench`).
+- If a speed measurement exists for that model (just now or earlier) and reading a typical paper would take longer than the 600-second call limit (`paper_tokens / reading speed > 600`), it warns with the numbers, for example `Warning: at the measured 20 tokens/s, reading a 22,000-token paper takes about 1,100 s, more than the 600-second limit each model call has today. Long papers will time out and fall back to their abstracts. ...`
 - It prints how to go back, for example `To go back: rpipe model set auto, then rpipe model set-context auto`.
 
 The setup walkthrough (`rpipe model setup`, see [setup.md](setup.md)) uses the same ranking to choose which model to offer.
@@ -121,14 +124,14 @@ rpipe model recommend
 uv run pytest tests/test_recommender.py -q
 ```
 
-**Where the code is.** `src/research_pipeline/recommender.py` (`band_for`, `usable_vram`, `weights_gib`, `kv_factor`, `server_kv_factor`, `place`, `rank`, `uncatalogued`), the `model recommend` command and `_use_candidate` in `src/research_pipeline/cli.py`, `recommend` in `src/research_pipeline/machine.py` (the walkthrough's backend choice), tests in `tests/test_recommender.py`.
+**Where the code is.** `src/research_pipeline/recommender.py` (`band_for`, `usable_vram`, `weights_gib`, `kv_factor`, `server_kv_factor`, `place`, `rank`, `uncatalogued`), the `model recommend` command, `_use_candidate` and `_warn_call_limit` in `src/research_pipeline/cli.py`, `recommend` in `src/research_pipeline/machine.py` (the walkthrough's backend choice), tests in `tests/test_recommender.py`.
 
 ## Measuring speed
 
 **What it does.** `rpipe model bench` times your chosen model on your machine and prints how many tokens per second it reads and writes, plus an estimate of the time per paper and for a 15-paper night. Recommendations show this measured time instead of a guess. It needs the `ollama` backend (the cloud backend's speed is the provider's) and takes about 1-3 minutes on a GPU, up to 5 on a CPU.
 
 **How it works.**
-1. It resolves the model and context the same way `rpipe model fit` does (so a pinned model is used as is).
+1. It resolves the model and context the same way `rpipe model fit` does (so a pinned model is used as is). When the context is `auto` and no measured context is saved yet, it says first that it will measure the context that fits before the speed, which loads and unloads models and can take up to 15 minutes, so a long wait is expected rather than looking frozen.
 2. It sends one request to Ollama with a built-in text of about 3,000 tokens and asks for at most 200 tokens back, at temperature 0. The text starts with a random marker so Ollama cannot reuse reading work from an earlier run. The model is unloaded afterwards.
 3. Ollama reports how long it spent reading the prompt and writing the answer (in nanoseconds). Reading speed is prompt tokens divided by reading time; writing speed is written tokens divided by writing time.
 4. The estimate for one paper is `paper_tokens / read_speed + 2500 / write_speed`: the paper is read once (the critique reuses the cached paper) and about 2,500 tokens of summary and critique are written. `paper_tokens` is the median size of the full texts already in your vault (characters / 4), or 22,000 (the median of 40 recent papers) when fewer than 5 are stored.

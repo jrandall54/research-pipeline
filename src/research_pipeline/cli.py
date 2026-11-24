@@ -84,7 +84,7 @@ from research_pipeline.gold import (
     remove_gold,
     suggest_papers,
 )
-from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
+from research_pipeline.llm import CALL_TIMEOUT, LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
 from research_pipeline.machine import OLLAMA_INSTALL, _generation_models, detect_machine, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
@@ -1741,8 +1741,19 @@ def model_bench(vault: VaultOption = None) -> None:
         raise _fail(str(exc)) from exc
 
 
+def _fit_cached(cfg: Config, vault: Path) -> bool:
+    """Whether the context for the configured model is already measured (False if unknown)."""
+    try:
+        return ollama_fit.cached_fit(cfg.llm_url, vault, cfg.llm_model, cfg.llm_num_ctx) is not None
+    except (LlmError, OSError, ValueError):
+        return False
+
+
 def _measure_speed(vault: Path, conn: sqlite3.Connection, cfg: Config) -> None:
     """Time the configured Ollama model, save the result and print it (raises LlmError on failure)."""
+    if cfg.llm_num_ctx == "auto" and not _fit_cached(cfg, vault):
+        typer.echo("The context that fits is not measured yet, so this first measures the context that fits "
+                   "(it loads and unloads models and can take up to 15 minutes), then the speed.")
     typer.echo("Measuring speed: this loads the model and takes about 1-3 minutes on a GPU, "
                "up to 5 on a CPU.")
     with _reporter() as reporter, stage(reporter, "model bench") as handle:
@@ -2141,6 +2152,19 @@ def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
     return True
 
 
+def _warn_call_limit(bench: bench_mod.Bench | None) -> None:
+    """Warn when reading a typical paper alone would take longer than one model call may last."""
+    if bench is None or bench.read_tps <= 0:
+        return
+    seconds = bench.paper_tokens / bench.read_tps
+    if seconds > CALL_TIMEOUT:
+        typer.echo(
+            f"Warning: at the measured {bench.read_tps:.0f} tokens/s, reading a {bench.paper_tokens:,}-token "
+            f"paper takes about {seconds:,.0f} s, more than the {CALL_TIMEOUT:.0f}-second limit each model "
+            "call has today. Long papers will time out and fall back to their abstracts. A later update "
+            "(B.5/B.6) lifts this limit; a smaller or faster model avoids it now.")
+
+
 def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
     """Download (with consent), set the model, measure its context or pin it, offer the speed test."""
     cfg = ctx.config
@@ -2177,6 +2201,7 @@ def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
             _measure_speed(ctx.vault, ctx.conn, new_cfg)
         except (LlmError, OSError, ValueError) as exc:
             typer.echo(f"Speed not measured: {exc}")
+    _warn_call_limit(bench_mod.load_benches(ctx.vault).get(entry.pull))
     _go_back_hint(*previous)
     if not ok:
         raise typer.Exit(code=1)

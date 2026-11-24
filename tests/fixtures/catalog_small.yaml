@@ -1,0 +1,35 @@
+version: 1
+updated: 2026-11-24
+entries:
+- id: small-dense-q4
+  family: Alpha
+  pull: alpha:4b
+  arch: dense
+  params_b: 4.0
+  quant: Q4_K_M
+  download_gb: 2.5
+  trained_ctx: 32768
+  kv_mib_per_1k: 100.0
+  bands: [cpu, small]
+- id: mid-moe-q4
+  family: Beta
+  pull: beta:30b
+  arch: moe
+  params_b: 30.0
+  active_b: 3.0
+  quant: Q4_K_M
+  download_gb: 18.0
+  trained_ctx: 131072
+  kv_mib_per_1k: 96.0
+  bands: [mid, high]
+  notes: Fast because few parameters are active.
+- id: big-dense-q3
+  family: Gamma
+  pull: hf.co/example/gamma-70b-GGUF:UD-IQ3_S
+  arch: dense
+  params_b: 70.0
+  quant: UD-IQ3_S
+  download_gb: 30.0
+  trained_ctx: 65536
+  kv_mib_per_1k: 320.0
+  bands: [very_large]

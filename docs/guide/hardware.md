@@ -32,6 +32,38 @@ Worked example. On a machine whose service has `Environment=PATH=/usr/bin OLLAMA
 
 The last line is the **host mismatch** check: if the service's port differs from the port in `llm_url`, the service rpipe could tune is not the server rpipe talks to, so changes would have no effect on your summaries.
 
+## How it works: the catalog
+
+The recommender needs a list of models to choose from. That list is the **catalog**: a versioned YAML file of candidate models, each with the facts needed to judge whether it fits a computer.
+
+Each entry records the exact `ollama pull` name, whether it is dense or a mixture of experts, total and active parameters, the quantization, the download size (also used as the memory its weights need), the context length it was trained for, how much KV cache it needs per 1,000 tokens of context, and which **bands** it suits (`cpu`, `small`, `mid`, `high`, `very_large`: roughly, what size of computer).
+
+Worked example: `qwen3:8b` is dense, Q4_K_M, about 5.2 GB. At about 140 MiB of KV cache per 1,000 tokens, a 32,000-token context adds about 4.4 GB, so it needs roughly 9.6 GB of video memory in total.
+
+Which catalog is used:
+
+1. The copy shipped in the package (`defaults/model_catalog.yaml`) has a `version`.
+2. `rpipe model catalog update` downloads the newest copy from the project's GitHub page, checks it, shows what changed (`+` added, `-` removed, `~` changed) and asks `Save this catalog? [y/N]`. Only a yes writes it to `VAULT/cache/model_catalog.yaml`.
+3. When loading, the fetched copy wins only if it is valid and its `version` is higher than the shipped one. Anything else (missing, garbled, older) is ignored and the shipped copy is used.
+
+`rpipe model catalog show` prints the catalog grouped by band.
+
+Why it's built this way:
+
+- **Versioned file, not code.** New models appear every month; a data file can be refreshed without a new release. Rejected alternative: hard-coding the list in Python.
+- **Version number decides, not file date.** A clock or copy mistake cannot make an old catalog win.
+- **A bad download never breaks anything.** It is validated before the prompt and ignored at load time if it later turns out invalid; the shipped copy is always there.
+- **Asks before saving, and needs a terminal.** Without one it prints the diff and exits with an error, like every command that changes state.
+- **Strict schema.** Unknown fields and duplicate ids are rejected, so a typo cannot silently drop a setting.
+
+```
+rpipe model catalog show
+rpipe model catalog update
+uv run pytest tests/test_catalog.py -q
+```
+
+Code: `src/research_pipeline/catalog.py`, the shipped list in `src/research_pipeline/defaults/model_catalog.yaml`, tests in `tests/test_catalog.py`.
+
 ## Why it's built this way
 
 - **Every probe is injected.** Commands go through a runner and `/proc` files through a reader, so tests never run `nvidia-smi` or `systemctl` and the scan is checked offline.

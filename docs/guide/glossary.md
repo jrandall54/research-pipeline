@@ -112,7 +112,7 @@
 
 **GPU offload** — how much of a model Ollama keeps on the graphics card versus the CPU. "Fully offloaded" means all of it is on the GPU; a partial offload spills the rest to the CPU and is many times slower. See `llm.md`.
 
-**KV cache** — the working memory a model builds while reading the prompt (a "key" and "value" for each token so far). It grows with the context window, which is why a bigger context can stop a model fitting in VRAM. See `llm.md`.
+**KV cache** — the working memory a model builds while reading the prompt (a "key" and "value" for each token so far). It grows with the context window, which is why a bigger context can stop a model fitting in VRAM.  The catalog records how much it needs per 1,000 tokens (`kv_mib_per_1k`). See `llm.md`.
 
 **`auto`** — the default for `llm_model` and `llm_num_ctx`: the pipeline picks the largest installed model that fits fully on the GPU and the largest context it can hold, caches the answer, and re-checks with `rpipe model fit`. See `llm.md`.
 
@@ -269,3 +269,9 @@
 **Systemd drop-in file** — a small `.conf` file in a folder like `/etc/systemd/system/ollama.service.d/` that adds to or overrides a service's settings without editing the service file itself. Ollama's `OLLAMA_*` settings are often kept in one. See `hardware.md`, How it works.
 
 **VRAM (GPU memory)** — the memory on the graphics card. A model that fits entirely in VRAM runs fast; one that spills into ordinary RAM is much slower. See `hardware.md`.
+
+**Quantization** — storing a model's numbers with fewer bits (for example 4 instead of 16) so the file and its memory use shrink a lot, at a small cost in quality. Names like `Q4_K_M` or `UD-IQ3_S` say how it was done. See `hardware.md`.
+
+**Mixture of experts (MoE) and active parameters** — a model made of many specialist sub-networks where each token uses only a few. "30B total, 3B active" means all 30 billion must fit in memory, but only 3 billion do work per token, so it runs about as fast as a small model. See `hardware.md`.
+
+**Trained context** — the longest text (in tokens) a model was trained to handle. Asking for more than this makes quality drop, so the catalog records it and the recommender never goes past it. See `hardware.md`.

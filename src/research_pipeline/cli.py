@@ -20,6 +20,7 @@ from typing import Annotated
 
 import typer
 
+from research_pipeline import catalog as catalog_mod
 from research_pipeline import categories, judge, ollama_fit, onboarding, profile_edit, registry, schedule
 from research_pipeline import serve as serve_mod
 from research_pipeline.backends.claude_code import LOGIN_HINT, find_claude, logged_in, resolve_model
@@ -1978,6 +1979,54 @@ def _check_backend(vault: Path) -> bool:
         return False
     typer.echo(f"Ready: {line}")
     return True
+
+
+catalog_app = typer.Typer(help="The list of models rpipe can recommend: show it or fetch a newer one.", no_args_is_help=True)
+model_app.add_typer(catalog_app, name="catalog")
+
+
+@catalog_app.command("show")
+def catalog_show(vault: VaultOption = None) -> None:
+    """List the candidate models, grouped by the size of computer they suit."""
+    ctx = _open(vault)
+    cat = catalog_mod.load_catalog(ctx.vault)
+    typer.echo(f"Model catalog version {cat.version} (updated {cat.updated}), {len(cat.entries)} models")
+    for band in catalog_mod.BANDS:
+        rows = [e for e in cat.entries if band in e.bands]
+        if not rows:
+            continue
+        typer.echo(f"\n{band}")
+        for e in rows:
+            kind = f"MoE ({e.active_b:g} active of {e.params_b:g} B)" if e.arch == "moe" and e.active_b else (
+                "MoE" if e.arch == "moe" else "dense")
+            typer.echo(f"  {e.pull} — {e.family}, {kind}, {e.quant}, {e.download_gb:g} GB, "
+                       f"trained context {e.trained_ctx:,}")
+
+
+@catalog_app.command("update")
+def catalog_update(vault: VaultOption = None) -> None:
+    """Fetch the newest model catalog, show what changed and, after a yes, keep it in your vault."""
+    ctx = _open(vault)
+    current = catalog_mod.load_catalog(ctx.vault)
+    try:
+        with _reporter() as reporter, stage(reporter, "catalog update", label=catalog_mod.CATALOG_URL):
+            text = catalog_mod.fetch_catalog_text()
+            fetched = catalog_mod.parse_catalog(text)
+    except ValueError as exc:
+        raise _fail(f"Catalog not updated: {exc}") from exc
+    if fetched.version <= current.version:
+        typer.echo(f"The catalog is already up to date (version {current.version}).")
+        return
+    typer.echo(f"Catalog version {current.version} -> {fetched.version}:")
+    for line in catalog_mod.diff_catalogs(current, fetched) or ["(no model changes)"]:
+        typer.echo(f"  {line}")
+    if not _is_tty():
+        raise _fail("Nothing saved: run in a terminal to confirm.")
+    if not typer.confirm("Save this catalog?", default=False):
+        typer.echo("Not saved.")
+        return
+    catalog_mod.save_fetched(ctx.vault, text)
+    typer.echo(f"Saved to {ctx.vault / 'cache' / catalog_mod.FETCHED_NAME}")
 
 
 @model_app.command("setup")

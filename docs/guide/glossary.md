@@ -275,3 +275,9 @@
 **Mixture of experts (MoE) and active parameters** — a model made of many specialist sub-networks where each token uses only a few. "30B total, 3B active" means all 30 billion must fit in memory, but only 3 billion do work per token, so it runs about as fast as a small model. See `hardware.md`.
 
 **Trained context** — the longest text (in tokens) a model was trained to handle. Asking for more than this makes quality drop, so the catalog records it and the recommender never goes past it. See `hardware.md`.
+
+**Tokens per second** — how fast a model works: how many tokens (small pieces of words) it processes each second. Reading speed (prompt tokens per second) is usually much higher than writing speed (generated tokens per second), because reading can be done in parallel and writing one token depends on the previous one. See `hardware.md`.
+
+**Prompt reading vs writing** — the two phases of a model call. Reading (also "prompt evaluation") takes in the paper; writing (also "generation") produces the summary. Ollama times them separately, which is what `rpipe model bench` uses.
+
+**Benchmark** — a short, repeatable test that measures speed on your own machine, so time estimates come from a measurement and not a guess. See `rpipe model bench` in `hardware.md`.

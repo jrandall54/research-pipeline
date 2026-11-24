@@ -20,6 +20,7 @@ from typing import Annotated
 
 import typer
 
+from research_pipeline import bench as bench_mod
 from research_pipeline import catalog as catalog_mod
 from research_pipeline import categories, judge, ollama_fit, onboarding, profile_edit, registry, schedule
 from research_pipeline import serve as serve_mod
@@ -1715,6 +1716,33 @@ def model_fit(vault: VaultOption = None) -> None:
     except (LlmError, OSError, ValueError) as exc:
         raise _fail(str(exc)) from exc
     typer.echo(f"Using model {fit.model} with a context of {fit.num_ctx} tokens")
+
+
+@model_app.command("bench")
+def model_bench(vault: VaultOption = None) -> None:
+    """Measure how fast the chosen model reads and writes, and estimate the time per paper."""
+    ctx = _open(vault)
+    cfg = ctx.config
+    if cfg.llm_backend != "ollama":
+        raise _fail("the benchmark measures local models; the cloud backend's speed is the "
+                    "provider's. Nothing was measured.")
+    try:
+        typer.echo("Measuring speed: this loads the model and takes about 1-3 minutes on a GPU, "
+                   "up to 5 on a CPU.")
+        with _reporter() as reporter, stage(reporter, "model bench") as handle:
+            fit = ollama_fit.resolve(cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx,
+                                     log=handle.note)
+            tokens = bench_mod.median_paper_tokens(ctx.conn)
+            handle.note(f"timing {fit.model} at {fit.num_ctx} tokens")
+            result = bench_mod.run_bench(cfg.llm_url, fit.model, fit.num_ctx, tokens)
+        bench_mod.save_bench(ctx.vault, result)
+    except (LlmError, OSError, ValueError) as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(
+        f"{fit.model}: reads {result.read_tps:.0f} tokens/s, writes {result.write_tps:.0f} tokens/s; "
+        f"about {result.seconds_per_paper:.0f} s per paper ({result.paper_tokens:,}-token paper), "
+        f"about {result.seconds_per_paper * 15 / 60:.0f} min for 15 papers"
+    )
 
 
 @model_app.command("check")

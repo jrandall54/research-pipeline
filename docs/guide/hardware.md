@@ -9,7 +9,7 @@
 3. **Tune**: turn on Ollama settings that let a model use a longer context in the same memory, after showing you the exact change and how to undo it.
 4. **Bench**: time a real summary so the "how long per paper" figure comes from your machine, not a guess.
 
-This page grows with each step. For now it covers the scan.
+This page grows with each step. For now it covers the scan, the catalog and the speed benchmark.
 
 ## How it works: the scan
 
@@ -63,6 +63,28 @@ uv run pytest tests/test_catalog.py -q
 ```
 
 Code: `src/research_pipeline/catalog.py`, the shipped list in `src/research_pipeline/defaults/model_catalog.yaml`, tests in `tests/test_catalog.py`.
+
+## Measuring speed
+
+**What it does.** `rpipe model bench` times your chosen model on your machine and prints how many tokens per second it reads and writes, plus an estimate of the time per paper and for a 15-paper night. Recommendations show this measured time instead of a guess. It needs the `ollama` backend (the cloud backend's speed is the provider's) and takes about 1-3 minutes on a GPU, up to 5 on a CPU.
+
+**How it works.**
+1. It resolves the model and context the same way `rpipe model fit` does (so a pinned model is used as is).
+2. It sends one request to Ollama with a built-in text of about 3,000 tokens and asks for at most 200 tokens back, at temperature 0. The text starts with a random marker so Ollama cannot reuse reading work from an earlier run. The model is unloaded afterwards.
+3. Ollama reports how long it spent reading the prompt and writing the answer (in nanoseconds). Reading speed is prompt tokens divided by reading time; writing speed is written tokens divided by writing time.
+4. The estimate for one paper is `paper_tokens / read_speed + 2500 / write_speed`: the paper is read once (the critique reuses the cached paper) and about 2,500 tokens of summary and critique are written. `paper_tokens` is the median size of the full texts already in your vault (characters / 4), or 22,000 (the median of 40 recent papers) when fewer than 5 are stored.
+
+Worked example: reads 1,000 tokens/s, writes 50 tokens/s, 22,000-token paper: 22 s + 50 s = 72 s per paper, so about 18 min for 15 papers.
+
+**Why it's built this way.** One short call measures the machine as it is now, with no download. Rejected alternatives: timing a real paper (needs a download and varies with the paper), and using fixed speed constants per GPU (we have one machine's data, too little to be honest about others). The result is kept per model in `VAULT/cache/bench.json`; the command never changes `config.yaml`.
+
+**How to run / check it.**
+```
+rpipe model bench
+uv run pytest tests/test_bench.py -q
+```
+
+**Where the code is.** `src/research_pipeline/bench.py` (`run_bench`, `estimate_seconds`, `median_paper_tokens`, `load_benches`, `save_bench`), the `model bench` command in `src/research_pipeline/cli.py`, tests in `tests/test_bench.py`.
 
 ## Why it's built this way
 

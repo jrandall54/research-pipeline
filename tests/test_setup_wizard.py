@@ -276,3 +276,19 @@ def test_setup_interrupted_says_stopped_and_changes_nothing(vault, monkeypatch):
     result, pulled = setup_run(vault, monkeypatch, [m], "")  # input ends at the first question
     assert result.exit_code == 130 and "Stopped. Nothing further was changed" in result.output
     assert pulled == [] and cfg(vault) == before
+
+
+def test_wizard_cpu_only_with_model_installed_pins_it(vault, monkeypatch):
+    m = machine(ram_gb=16.0, ollama_installed=True, ollama_running=True, ollama_models=["qwen3:4b"])
+    result, pulled = setup_run(vault, monkeypatch, [m], "1\n")
+    assert result.exit_code == 0, result.output
+    c = cfg(vault)
+    assert pulled == [] and (c.llm_backend, c.llm_model, c.llm_num_ctx) == ("ollama", "qwen3:4b", 32768)
+    assert "pinned" in result.output
+
+
+def test_wizard_cpu_only_declined_download_says_how_to_pick(vault, monkeypatch):
+    m = machine(ram_gb=16.0, ollama_installed=True, ollama_running=True)
+    result, pulled = setup_run(vault, monkeypatch, [m], "1\nn\n", check=LlmError("model not installed"))
+    assert pulled == [] and cfg(vault).llm_model == "auto"
+    assert "run `rpipe model recommend` to pick and pin a model that runs on this computer" in result.output

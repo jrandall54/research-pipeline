@@ -2253,9 +2253,22 @@ def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> No
         if _download(config, info, rec.pull):
             pulled = rec.pull
     profile_edit.set_llm_backend(vault, "ollama", known)
-    where = recommender.place(pulled, info) if pulled is not None else None
-    if where is not None and where[0] != "gpu":
-        _pin_off_gpu(vault, pulled.pull)
+    # The automatic choice (auto) only accepts models that sit fully in GPU memory, so when the
+    # best option here runs (partly) outside the GPU, a model must be pinned or nothing will run.
+    ranked = recommender.rank(info, catalog_mod.load_catalog(vault), {}, top=None)
+    if not ranked or ranked[0].placement == "gpu":
+        return
+    if pulled is not None:
+        where = recommender.place(pulled, info)
+        if where is not None and where[0] != "gpu":
+            _pin_off_gpu(vault, pulled.pull)
+            return
+    usable = next((c for c in ranked if c.installed and c.placement != "gpu"), None)
+    if usable is not None:
+        _pin_off_gpu(vault, usable.entry.pull)
+    else:
+        typer.echo("No model that runs on this computer is installed yet: "
+                   "run `rpipe model recommend` to pick and pin a model that runs on this computer.")
 
 
 def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:

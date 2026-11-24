@@ -178,8 +178,8 @@ def _speed_reason(bench: Bench | None) -> str:
     return f"measured here: about {s:.0f} s per paper, about {s * 15 / 60:.0f} min for 15 papers"
 
 
-def rank(info: MachineInfo, catalog: Catalog, benches: dict[str, Bench]) -> list[Candidate]:
-    """The best TOP_N catalog models for this machine.
+def rank(info: MachineInfo, catalog: Catalog, benches: dict[str, Bench], top: int | None = TOP_N) -> list[Candidate]:
+    """The best `top` catalog models for this machine (all that fit when `top` is None).
 
     Order: on the GPU, then partly in RAM (spill), then on the CPU; within each, models listed
     for this machine's band first, then bigger models by dense-equivalent size (quality first),
@@ -205,7 +205,7 @@ def rank(info: MachineInfo, catalog: Catalog, benches: dict[str, Bench]) -> list
         out.append(Candidate(entry, placement, ctx, is_installed, reasons, bench))
     out.sort(key=lambda c: (_ORDER[c.placement], band not in c.entry.bands, -dense_equivalent_b(c.entry),
                             -c.entry.download_gb, not c.installed))
-    return out[:TOP_N]
+    return out if top is None else out[:top]
 
 
 def uncatalogued(info: MachineInfo, catalog: Catalog) -> list[str]:

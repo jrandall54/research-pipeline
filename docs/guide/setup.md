@@ -109,7 +109,15 @@ Without a terminal the command refuses ("rpipe model setup is interactive; use `
 
 `rpipe model setup` (any time; it is safe to re-run), or let `rpipe init` run it. When a config already exists the first question is "Keep current backend (X)? [Y/n]": Enter keeps the backend and any model you pinned with `rpipe model set`, skips the menu and only re-runs the final check; `n` walks the menu (choosing a different backend resets the model to `auto`, because names differ per backend; choosing the same one again keeps it). Tests: `uv run pytest -q tests/test_machine.py tests/test_setup_wizard.py` (offline: machine detection, the model pull and the `claude` program are all faked; they also cover the probe timeout (exit code 124), `ollama_tags`, and Ctrl-C at a question, which prints "Stopped. Nothing further was changed" and exits 130).
 
-After the wizard pulls a model for the GPU, the configured model stays `auto` on purpose: the list of installed models is part of the fit cache key, so the next `rpipe model fit` or `rpipe run` notices the new model, re-probes and can pick it (see `llm.md`); pin one with `rpipe model set NAME` if you want a specific model. A model pulled to run on the CPU or partly in RAM is different: its name and a 32,768-token context are pinned, because `auto` only accepts models that fit fully in GPU memory. To choose among more models (installed or not) later, use `rpipe model recommend`.
+After the wizard pulls a model for the GPU, the configured model stays `auto` on purpose: the list of installed models is part of the fit cache key, so the next `rpipe model fit` or `rpipe run` notices the new model, re-probes and can pick it (see `llm.md`); pin one with `rpipe model set NAME` if you want a specific model. A model pulled to run on the CPU or partly in RAM is different: its name and a 32,768-token context are pinned, because `auto` only accepts models that fit fully in GPU memory. Left on `auto`, such a machine would have no model `rpipe` accepts, and every night would fall back to abstracts.
+
+The same applies when nothing is downloaded on a machine whose best option is the CPU or a spill (no GPU, a small GPU): step by step,
+
+1. If a model was just downloaded, it is pinned as above.
+2. Otherwise, if a catalog model that runs on this machine is already installed, the best-ranked installed one is pinned (model plus 32,768 tokens), with the same message. Example: no GPU, 16 GB of memory, `qwen3:4b` already pulled: the walkthrough asks no download question and pins `qwen3:4b`.
+3. Otherwise (you declined the download, or the disk was too full) it says `No model that runs on this computer is installed yet: run `rpipe model recommend` to pick and pin a model that runs on this computer.` The final check then says what is missing.
+
+On a machine where the best option fits fully on the GPU, nothing is pinned: `auto` finds it. To choose among more models (installed or not) later, use `rpipe model recommend`.
 
 ## Where the code is
 

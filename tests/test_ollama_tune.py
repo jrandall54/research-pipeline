@@ -166,3 +166,43 @@ def test_tune_refuses_without_terminal(env):
     result = tune(env)
     assert result.exit_code != 0
     assert env.calls == []
+
+
+MISMATCH = {"OLLAMA_HOST": "127.0.0.1:11436"}
+
+
+def test_service_url_rules():
+    assert ollama_tune.service_url(server(MISMATCH, host_matches=False), "http://localhost:11434") == "http://127.0.0.1:11436"
+    assert ollama_tune.service_url(server({"OLLAMA_HOST": "0.0.0.0:9"}, host_matches=False), "u") == "http://127.0.0.1:9"
+    assert ollama_tune.service_url(server({"OLLAMA_HOST": ":9"}, host_matches=False), "u") == "http://127.0.0.1:9"
+    assert ollama_tune.service_url(server({}, host_matches=True), "http://localhost:11434") == "http://localhost:11434"
+
+
+def test_mismatch_apply_waits_on_service_and_skips_refit(env):
+    from test_cli_model import set_config
+
+    from research_pipeline import ollama_fit
+    set_config(env.vault, llm_backend="ollama")
+    waited = []
+    env.mp.setattr(ollama_tune, "wait_ready", lambda url, *a, **k: waited.append(url) or True)
+    scans = iter([server(MISMATCH, host_matches=False),
+                  server({**MISMATCH, **GOOD}, host_matches=False)])
+    env.mp.setattr(cli, "_scan_server", lambda url: next(scans))
+    refit = []
+    env.mp.setattr(ollama_fit, "resolve", lambda *a, **k: refit.append(a))
+    env.mp.setattr(ollama_fit, "cached_fit", lambda *a, **k: refit.append(a))
+    result = tune(env, input="y\ny\n")
+    assert result.exit_code == 0, result.output
+    assert waited == ["http://127.0.0.1:11436"]
+    assert refit == []
+    assert "Skipping the context re-measure" in result.output
+
+
+def test_mismatch_undo_waits_on_service(env):
+    env.drop.write_text("x")
+    waited = []
+    env.mp.setattr(ollama_tune, "wait_ready", lambda url, *a, **k: waited.append(url) or True)
+    env.mp.setattr(cli, "_scan_server", lambda url: server(MISMATCH, host_matches=False))
+    result = tune(env, "--undo", input="y\n")
+    assert result.exit_code == 0, result.output
+    assert waited == ["http://127.0.0.1:11436"]

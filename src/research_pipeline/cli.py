@@ -1769,6 +1769,7 @@ def _tune_undo(url: str) -> None:
     if not ollama_tune.DROPIN.exists():
         typer.echo(f"Nothing to undo: {ollama_tune.DROPIN} does not exist.")
         return
+    wait_url = ollama_tune.service_url(_scan_server(url), url)
     commands = ollama_tune.undo_commands()
     typer.echo("This removes only rpipe's own settings file; other files are untouched. Commands:")
     for argv in commands:
@@ -1778,7 +1779,7 @@ def _tune_undo(url: str) -> None:
         return
     if not _run_plan(commands):
         raise typer.Exit(code=1)
-    if not _wait_for_ollama(url):
+    if not _wait_for_ollama(wait_url):
         raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`")
     typer.echo("Done: rpipe's settings are removed and Ollama is running again.")
 
@@ -1832,7 +1833,7 @@ def model_tune(
             typer.echo("Nothing was changed.")
             return
         before = None
-        if cfg.llm_backend == "ollama":
+        if cfg.llm_backend == "ollama" and server.host_matches is not False:
             try:
                 before = ollama_fit.cached_fit(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
             except (LlmError, OSError, ValueError):
@@ -1841,13 +1842,17 @@ def model_tune(
             raise typer.Exit(code=1)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    if not _wait_for_ollama(url):
+    if not _wait_for_ollama(ollama_tune.service_url(server, url)):
         raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`")
     after = _scan_server(url)
     missing = [s for s in settings if after.env.get(s.name) != s.value]
     if missing:
         raise _fail("restarted, but these are not live: " + ", ".join(s.name for s in missing))
     typer.echo("All settings are live: " + ", ".join(f"{s.name}={s.value}" for s in settings))
+    if server.host_matches is False:
+        typer.echo("Skipping the context re-measure: it would measure the server rpipe uses, "
+                   "which is not the service that changed.")
+        return
     if cfg.llm_backend == "ollama":
         typer.echo("Re-measuring the context that fits (this probes the GPU and can take a few minutes).")
         try:

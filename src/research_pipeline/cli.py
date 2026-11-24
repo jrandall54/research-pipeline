@@ -1762,12 +1762,17 @@ def _scan_server(url: str):
     return detect_ollama_server(url, system_cmd)
 
 
-def _run_plan(commands: list[list[str]]) -> bool:
-    """Run each command in the user's terminal; stop at the first failure and say so."""
-    for argv in commands:
+def _run_plan(commands: list[list[str]], undo_hint: bool = False) -> bool:
+    """Run each command in the user's terminal; stop at the first failure and say so.
+
+    With `undo_hint`, a failure after the first command (which wrote the file) also prints the
+    undo command, since the settings file may now be in place."""
+    for i, argv in enumerate(commands):
         typer.echo(f"$ {' '.join(argv)}")
         if ollama_tune.run_tty(argv) != 0:
             typer.echo(f"Failed: {' '.join(argv)}. The commands after it did not run.")
+            if undo_hint and i > 0:
+                typer.echo(f"To undo: {ollama_tune.UNDO_COMMAND}")
             return False
     return True
 
@@ -1782,7 +1787,11 @@ def _tune_undo(url: str) -> None:
     if not ollama_tune.DROPIN.exists():
         typer.echo(f"Nothing to undo: {ollama_tune.DROPIN} does not exist.")
         return
-    wait_url = ollama_tune.service_url(_scan_server(url), url)
+    server = _scan_server(url)
+    note = ollama_tune.host_note(server, url)
+    if note:
+        typer.echo(note)
+    wait_url = ollama_tune.service_url(server, url)
     commands = ollama_tune.undo_commands()
     typer.echo("This removes only rpipe's own settings file; other files are untouched. Commands:")
     for argv in commands:
@@ -1813,6 +1822,9 @@ def model_tune(
         return
     with _reporter() as reporter, stage(reporter, "scan", label="the Ollama server"):
         server = _scan_server(url)
+    note = ollama_tune.host_note(server, url)
+    if note:
+        typer.echo(note)
     settings = ollama_tune.advise(server)
     if not settings:
         typer.echo("Ollama already has the recommended settings; nothing to change.")
@@ -1825,20 +1837,21 @@ def model_tune(
         typer.echo(ollama_tune.manual_instructions(server, settings))
         return
     if server.host_matches is False:
-        typer.echo(f"Warning: the Ollama service listens on {server.env.get('OLLAMA_HOST')} but rpipe talks to "
-                   f"{url}. Changing the service would not change the server rpipe uses.")
+        typer.echo("Warning: changing the service would not change the server rpipe uses.")
         if not typer.confirm("Continue anyway?", default=False):
             typer.echo("Nothing was changed.")
             return
     for s in settings:
         typer.echo(f"{s.name}: {s.current or 'not set'} -> {s.value}\n  what: {s.what}\n  why: {s.why}")
-    content = ollama_tune.render_dropin(settings)
+    written = ollama_tune.owned(server)
+    content = ollama_tune.render_dropin(written)
     tmp_dir = Path(tempfile.mkdtemp())
     tmp = tmp_dir / "rpipe.conf"
     try:
         tmp.write_text(content, encoding="utf-8")
         commands = ollama_tune.apply_commands(tmp)
-        typer.echo(f"\nThis writes {ollama_tune.DROPIN}:\n{content}\nCommands (sudo will ask for your password):")
+        typer.echo(f"\nThis writes {ollama_tune.DROPIN} (it always lists all three of rpipe's settings, so a "
+                   f"later re-tune never drops one set earlier):\n{content}\nCommands (sudo will ask for your password):")
         for argv in commands:
             typer.echo("  " + " ".join(argv))
         typer.echo(f"To undo later: {ollama_tune.UNDO_COMMAND}")
@@ -1851,17 +1864,19 @@ def model_tune(
                 before = ollama_fit.cached_fit(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
             except (LlmError, OSError, ValueError):
                 before = None
-        if not _run_plan(commands):
+        if not _run_plan(commands, undo_hint=True):
             raise typer.Exit(code=1)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
     if not _wait_for_ollama(ollama_tune.service_url(server, url)):
-        raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`")
+        raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`. "
+                    f"To undo: {ollama_tune.UNDO_COMMAND}")
     after = _scan_server(url)
-    missing = [s for s in settings if after.env.get(s.name) != s.value]
+    missing = [s for s in written if after.env.get(s.name) != s.value]
     if missing:
-        raise _fail("restarted, but these are not live: " + ", ".join(s.name for s in missing))
-    typer.echo("All settings are live: " + ", ".join(f"{s.name}={s.value}" for s in settings))
+        raise _fail("restarted, but these are not live: " + ", ".join(s.name for s in missing)
+                    + f". To undo: {ollama_tune.UNDO_COMMAND}")
+    typer.echo("All settings are live: " + ", ".join(f"{s.name}={s.value}" for s in written))
     if server.host_matches is False:
         typer.echo("Skipping the context re-measure: it would measure the server rpipe uses, "
                    "which is not the service that changed.")

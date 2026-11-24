@@ -64,6 +64,29 @@ def advise(server: OllamaServer) -> list[Setting]:
     return out
 
 
+def owned(server: OllamaServer) -> list[Setting]:
+    """Every setting rpipe owns, at its recommended value: what rpipe.conf always holds.
+
+    Writing all three every time (not just the ones `advise` found missing) means a re-tune never
+    drops a value an earlier tune put in rpipe.conf: the new file replaces the old one whole."""
+    advised = {s.name: s for s in advise(server)}
+    env = server.env
+    return [
+        advised.get(FLASH) or Setting(FLASH, "1", env.get(FLASH), "", ""),
+        advised.get(KV_TYPE) or Setting(KV_TYPE, "q8_0", env.get(KV_TYPE), "", ""),
+        advised.get(PARALLEL) or Setting(PARALLEL, "1", env.get(PARALLEL), "", ""),
+    ]
+
+
+def host_note(server: OllamaServer, rpipe_url: str) -> str | None:
+    """One line for when the service rpipe can read is not the server rpipe talks to."""
+    if server.host_matches is not False:
+        return None
+    return (f"Note: the Ollama service listens on {server.env.get('OLLAMA_HOST') or 'its default address'} "
+            f"but rpipe talks to {rpipe_url}. The settings shown belong to the service; rpipe could not "
+            "read the settings of the server it uses.")
+
+
 def render_dropin(settings: list[Setting]) -> str:
     lines = [
         "# Written by rpipe (rpipe model tune). Remove with: " + UNDO_COMMAND,

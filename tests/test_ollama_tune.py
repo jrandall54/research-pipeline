@@ -206,3 +206,82 @@ def test_mismatch_undo_waits_on_service(env):
     result = tune(env, "--undo", input="y\n")
     assert result.exit_code == 0, result.output
     assert waited == ["http://127.0.0.1:11436"]
+
+
+# ---- final-review fixes: host note, keep earlier rpipe settings, undo hint ----
+
+NOTE = "The settings shown belong to the service; rpipe could not read the settings of the server it uses"
+
+
+def test_already_set_with_host_mismatch_prints_note_first(env):
+    env.mp.setattr(cli, "_scan_server", lambda url: server({**GOOD, **MISMATCH}, host_matches=False))
+    result = tune(env)
+    assert result.exit_code == 0, result.output
+    assert NOTE in result.output
+    assert result.output.index(NOTE) < result.output.index("already has the recommended settings")
+    assert env.calls == []
+
+
+def test_undo_with_host_mismatch_prints_note(env):
+    env.drop.write_text("x")
+    env.mp.setattr(cli, "_scan_server", lambda url: server(MISMATCH, host_matches=False))
+    result = tune(env, "--undo", input="n\n")
+    assert NOTE in result.output
+
+
+def test_retune_keeps_earlier_rpipe_settings(env):
+    env.drop.write_text('[Service]\nEnvironment="OLLAMA_FLASH_ATTENTION=1"\nEnvironment="OLLAMA_KV_CACHE_TYPE=q8_0"\n')
+    written = []
+
+    def run(argv):
+        env.calls.append(argv)
+        if argv[1] == "install":
+            written.append(Path(argv[4]).read_text())
+        return 0
+
+    env.mp.setattr(ollama_tune, "run_tty", run)
+    scans = iter([server({**GOOD, "OLLAMA_NUM_PARALLEL": "4"}), server(GOOD)])
+    env.mp.setattr(cli, "_scan_server", lambda url: next(scans))
+    result = tune(env, input="y\n")
+    assert result.exit_code == 0, result.output
+    (content,) = written
+    for line in ('Environment="OLLAMA_FLASH_ATTENTION=1"', 'Environment="OLLAMA_KV_CACHE_TYPE=q8_0"',
+                 'Environment="OLLAMA_NUM_PARALLEL=1"'):
+        assert line in content
+
+
+def test_verify_checks_every_written_value(env):
+    scans = iter([server({"OLLAMA_NUM_PARALLEL": "4", "OLLAMA_FLASH_ATTENTION": "1", "OLLAMA_KV_CACHE_TYPE": "q8_0"}),
+                  server({"OLLAMA_NUM_PARALLEL": "1"})])
+    env.mp.setattr(cli, "_scan_server", lambda url: next(scans))
+    result = tune(env, input="y\n")
+    assert result.exit_code != 0
+    assert "not live: OLLAMA_FLASH_ATTENTION, OLLAMA_KV_CACHE_TYPE" in result.output
+
+
+@pytest.mark.parametrize("failing", [2, 3])
+def test_failure_after_first_command_prints_undo(env, failing):
+    seen = []
+    env.mp.setattr(ollama_tune, "run_tty", lambda argv: seen.append(argv) or (1 if len(seen) == failing else 0))
+    env.mp.setattr(cli, "_scan_server", lambda url: server({}))
+    result = tune(env, input="y\n")
+    assert result.exit_code == 1
+    assert "To undo: rpipe model tune --undo" in result.output
+
+
+def test_failed_first_command_needs_no_undo(env):
+    env.mp.setattr(ollama_tune, "run_tty", lambda argv: 1)
+    env.mp.setattr(cli, "_scan_server", lambda url: server({}))
+    result = tune(env, input="y\n")
+    assert result.exit_code == 1
+    assert "To undo:" not in result.output
+
+
+def test_not_live_and_no_answer_print_undo(env):
+    scans = iter([server({}), server({})])
+    env.mp.setattr(cli, "_scan_server", lambda url: next(scans))
+    assert "To undo: rpipe model tune --undo" in tune(env, input="y\n").output
+    env.mp.setattr(cli, "_scan_server", lambda url: server({}))
+    env.mp.setattr(ollama_tune, "wait_ready", lambda url, *a, **k: False)
+    result = tune(env, input="y\n")
+    assert "did not answer" in result.output and "To undo: rpipe model tune --undo" in result.output

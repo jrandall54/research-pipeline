@@ -91,7 +91,7 @@ def test_models_dir_prefers_env():
 
 
 def test_all_gpus_lists_every_card():
-    run = fake_run({"nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits":
+    run = fake_run({"nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits":
                     (0, "RTX 3060, 12288\nRTX 5070 Ti, 16303\n")})
     gpus = all_gpus(run, "Linux", "x86_64")
     assert [g.name for g in gpus] == ["RTX 3060", "RTX 5070 Ti"]
@@ -132,7 +132,7 @@ def test_machine_key_collects_version_settings_and_gpus(monkeypatch):
         "systemctl is-active ollama": (0, "active\n"),
         "systemctl show ollama --property=Environment": (0, ENV_LINE + "\n"),
         "systemctl show ollama --property=DropInPaths": (0, DROP + "\n"),
-        "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits": (0, "RTX 4090, 24564\n"),
+        "nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits": (0, "RTX 4090, 24564\n"),
     })
     key = scan.machine_key("http://x", run)
     assert key["ollama"] == "0.6.0"
@@ -148,3 +148,27 @@ def test_machine_key_never_raises(monkeypatch):
         raise RuntimeError("nope")
     monkeypatch.setattr(scan, "ollama_version", boom)
     assert scan.machine_key("http://x", fake_run({})) == {"ollama": None, "env": {}, "gpus": []}
+
+
+def test_all_gpus_reads_free_memory_when_given():
+    run = fake_run({"nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits":
+                    (0, "RTX 5070 Ti, 16303, 15364\nOld, Card, 8192, 100\n")})
+    first, second = all_gpus(run, "Linux", "x86_64")
+    assert (first.name, round(first.vram_gb, 2), round(first.free_gb, 2)) == ("RTX 5070 Ti", 15.92, 15.0)
+    assert second.name == "Old, Card" and second.free_gb == 100 / 1024
+    two_fields = fake_run({"nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits":
+                           (0, "RTX 3060, 12288\n")})
+    (only,) = all_gpus(two_fields, "Linux", "x86_64")
+    assert only.vram_gb == 12.0 and only.free_gb is None
+
+
+def test_scan_display_treats_true_as_flash_on(tmp_path, monkeypatch):
+    from research_pipeline.vault import init_vault
+    vault = tmp_path / "vault"
+    init_vault(vault, topics=["x"])
+    server = OllamaServer("0.34.0", "systemd", {"OLLAMA_FLASH_ATTENTION": "true"}, [], True)
+    machine = MachineInfo(os="Linux", ram_gb=32.0, gpu=None, ollama_installed=True, ollama_running=True,
+                          ollama_models=[], claude_path=None, claude_logged_in=False, ollama=server)
+    monkeypatch.setattr(cli, "detect_machine", lambda config: machine)
+    out = CliRunner().invoke(cli.app, ["model", "scan", "--vault", str(vault)]).output
+    assert "flash attention: on" in out

@@ -150,7 +150,7 @@ def test_detect_machine_nothing_installed(tmp_path):
 
 
 def test_recommend_gpu_with_ollama_no_models_offers_pull():
-    rec = recommend(info(gpu=Gpu("x", 8.0, "nvidia"), ollama_installed=True), TABLE)
+    rec = recommend(info(gpu=Gpu("x", 10.0, "nvidia"), ollama_installed=True), TABLE)
     assert rec.backend == "ollama" and rec.pull.pull == "small:8b" and not rec.install_ollama
     assert rec.alternatives == ["claude-code", "none"]
 
@@ -175,7 +175,7 @@ def test_embedding_only_models_do_not_suppress_the_pull():
 
 
 def test_recommend_gpu_without_ollama_says_install():
-    rec = recommend(info(gpu=Gpu("x", 8.0, "nvidia")), TABLE)
+    rec = recommend(info(gpu=Gpu("x", 10.0, "nvidia")), TABLE)
     assert rec.backend == "ollama" and rec.install_ollama
 
 

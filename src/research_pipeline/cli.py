@@ -92,7 +92,7 @@ from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_r
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
 from research_pipeline.run_lock import RunLocked, run_lock
-from research_pipeline.scan import detect_ollama_server, setting_source, system_cmd
+from research_pipeline.scan import detect_ollama_server, flash_on, setting_source, system_cmd
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
@@ -2031,7 +2031,7 @@ def _describe_ollama_server(server, llm_url: str) -> None:
         return f" (set in {found})" if found else ""
 
     flash = server.env.get("OLLAMA_FLASH_ATTENTION")
-    typer.echo("  flash attention: " + (f"on{source('OLLAMA_FLASH_ATTENTION')}" if flash == "1" else "off"))
+    typer.echo("  flash attention: " + (f"on{source('OLLAMA_FLASH_ATTENTION')}" if flash_on(flash) else "off"))
     typer.echo(f"  context memory type (KV cache): {server.env.get('OLLAMA_KV_CACHE_TYPE', 'f16 (default)')}"
                + (source("OLLAMA_KV_CACHE_TYPE") if "OLLAMA_KV_CACHE_TYPE" in server.env else ""))
     typer.echo(f"  parallel slots: {server.env.get('OLLAMA_NUM_PARALLEL', 'automatic (default)')}")
@@ -2193,8 +2193,18 @@ def model_recommend(vault: VaultOption = None) -> None:
     candidates = recommender.rank(info, catalog, bench_mod.load_benches(ctx.vault))
     _machine_summary(info)
     if info.ollama is not None and info.ollama.how != "unknown":
+        note = ollama_tune.host_note(info.ollama, cfg.llm_url)
+        if note:
+            typer.echo(note + " The context estimates below assume its default settings.")
         settings = ollama_tune.advise(info.ollama)
-        if settings:
+        readable = info.ollama.how in ("systemd", "systemd-user") or bool(info.ollama.env)
+        if settings and not readable:
+            typer.echo("\nrpipe cannot read this server's settings. If these are not set yet, they would fit "
+                       "a longer context in the same memory:")
+            for st in settings:
+                typer.echo(f"  {st.name}={st.value}: {st.what}")
+            typer.echo("Run rpipe model tune for how to set them")
+        elif settings:
             typer.echo("\nOllama settings that would fit a longer context in the same memory:")
             for st in settings:
                 typer.echo(f"  {st.name}={st.value} (now: {st.current or 'not set'}): {st.what}")

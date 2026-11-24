@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
-from research_pipeline.scan import OllamaServer, ollama_version
+from research_pipeline.scan import OllamaServer, flash_on, ollama_version
 
 DROPIN = Path("/etc/systemd/system/ollama.service.d/rpipe.conf")  # read at call time (tests patch it)
 UNDO_COMMAND = "rpipe model tune --undo"
@@ -31,10 +31,6 @@ class Setting:
     why: str
 
 
-def _flash_on(value: str | None) -> bool:
-    return value is not None and value.strip().lower() in ("1", "true")
-
-
 def _above_one(value: str | None) -> bool:
     try:
         return value is not None and int(value) > 1
@@ -46,7 +42,7 @@ def advise(server: OllamaServer) -> list[Setting]:
     """The settings worth changing: only those whose current value differs from the recommendation."""
     env = server.env
     out: list[Setting] = []
-    if not _flash_on(env.get(FLASH)):
+    if not flash_on(env.get(FLASH)):
         out.append(Setting(
             FLASH, "1", env.get(FLASH),
             "uses a faster, leaner way of reading long text (flash attention)",

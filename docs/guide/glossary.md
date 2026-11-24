@@ -293,3 +293,5 @@
 **Band (size class)** — a rough label for how big a computer is for running models, from its total GPU memory: `cpu` (under 4 GB), `small` (under 8 GB), `mid` (up to about 16 GB), `high` (up to about 24 GB), `very_large` (more). Each catalog model lists the bands it suits, and the recommender puts those models first. See "Recommendations" in `hardware.md`.
 
 **Spill / offload to RAM** — running a model that does not fit in GPU memory with part of it in the computer's ordinary memory (RAM). The CPU then does that part, which is slower. For a mixture-of-experts model only a few experts work per token, so the slowdown is modest; for a dense model it is severe, so rpipe only suggests spilling mixture-of-experts models. See "Recommendations" in `hardware.md`.
+
+**GB vs GiB** — two units for memory. A GB is 1,000,000,000 bytes; a GiB is 2^30 = 1,073,741,824 bytes, about 7% more. Download sizes are usually in GB, while `nvidia-smi` and Ollama report GPU memory in GiB (often labelled "GB" anyway). The recommender converts download sizes to GiB before comparing them with GPU memory. See "Recommendations" in `hardware.md`.

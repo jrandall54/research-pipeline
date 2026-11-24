@@ -35,8 +35,9 @@ CmdRunner = Callable[[list[str], float], tuple[int, str]]
 @dataclass
 class Gpu:
     name: str
-    vram_gb: float
+    vram_gb: float  # total GPU memory, GiB
     kind: Literal["nvidia", "amd", "apple"]
+    free_gb: float | None = None  # free at scan time, GiB (NVIDIA only; None = unknown)
 
 
 @dataclass
@@ -68,19 +69,26 @@ def system_cmd(argv: list[str], timeout: float) -> tuple[int, str]:
 # ---- GPUs ----
 
 def _nvidia_all(run: CmdRunner) -> list[Gpu]:
-    code, out = run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+    code, out = run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"],
                     PROBE_TIMEOUT)
     if code != 0:
         return []
     gpus: list[Gpu] = []
     for line in out.splitlines():
-        name, _, mem = line.rpartition(",")
-        try:
-            gb = float(mem.strip()) / 1024  # MiB -> GiB
-        except ValueError:
+        parts = [p.strip() for p in line.split(",")]
+        numbers: list[float] = []
+        while len(parts) > 1 and len(numbers) < 2:  # up to two numbers at the end: total, free (MiB)
+            try:
+                numbers.insert(0, float(parts[-1]))
+            except ValueError:
+                break
+            parts.pop()
+        name = ", ".join(parts)  # a card name may itself contain a comma
+        if not numbers or not name:
             continue
-        if name.strip():
-            gpus.append(Gpu(name.strip(), gb, "nvidia"))
+        total = numbers[0] / 1024  # MiB -> GiB
+        free = numbers[1] / 1024 if len(numbers) == 2 else None
+        gpus.append(Gpu(name, total, "nvidia", free))
     return gpus
 
 
@@ -197,6 +205,11 @@ def ollama_version(url: str) -> str | None:
         return str(version) if version else None
     except (httpx.HTTPError, ValueError, AttributeError):
         return None
+
+
+def flash_on(value: str | None) -> bool:
+    """Ollama reads OLLAMA_FLASH_ATTENTION as on for "1" or "true" (any case)."""
+    return value is not None and value.strip().lower() in ("1", "true")
 
 
 MACHINE_KEY_SETTINGS = ("OLLAMA_FLASH_ATTENTION", "OLLAMA_KV_CACHE_TYPE", "OLLAMA_NUM_PARALLEL")

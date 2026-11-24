@@ -35,22 +35,22 @@ def entry(id, pull, gb, params, arch="dense", active=None, kv=64.0, bands=("mid"
 
 D27 = entry("d27", "hf.co/test/Dense-27B-GGUF:IQ3", 12.0, 27.0, bands=("mid", "high"), notes="Strong writer.")
 D14 = entry("d14", "test:14b", 9.0, 14.0, bands=("cpu", "mid"))
-MOE = entry("moe35", "hf.co/test/MoE-35B-A3B-GGUF:IQ3", 14.0, 35.0, arch="moe", active=3.0, bands=("high",))
+MOE = entry("moe35", "hf.co/test/MoE-35B-A3B-GGUF:IQ3", 13.7, 35.0, arch="moe", active=3.0, bands=("high",))
 D8 = entry("d8", "test:8b", 5.0, 8.0, bands=("cpu", "small"))
 D32 = entry("d32", "test:32b", 20.0, 32.0, bands=("high",))
 CATALOG = Catalog(version=1, updated=date(2026, 11, 24), entries=[D27, D14, MOE, D8, D32])
 
 
-def server(env=None):
-    return OllamaServer("0.13.0", "systemd", dict(env or {}), [], True)
+def server(env=None, host_matches=True, how="systemd"):
+    return OllamaServer("0.13.0", how, dict(env or {}), [], host_matches)
 
 
-def machine(vram=None, gpus=None, ram=32.0, free=None, env=None, models=(), **kw):
+def machine(vram=None, gpus=None, ram=32.0, free=None, env=None, models=(), host_matches=True, **kw):
     gpu_list = gpus if gpus is not None else ([Gpu("Test GPU", vram, "nvidia")] if vram else [])
     base = dict(os="Linux", ram_gb=ram, gpu=max(gpu_list, key=lambda g: g.vram_gb) if gpu_list else None,
                 ollama_installed=True, ollama_running=True, ollama_models=list(models),
                 claude_path=None, claude_logged_in=False, gpus=gpu_list, ram_free_gb=free,
-                disk_free_gb=100.0, ollama=server(env))
+                disk_free_gb=100.0, ollama=server(env, host_matches))
     base.update(kw)
     return MachineInfo(**base)
 
@@ -80,7 +80,9 @@ def test_kv_factor():
 
 def test_place_gpu_context_estimate():
     info = machine(vram=15.92, env=FA_Q8)
-    expected = math.floor((14.92 - 12) / (64 * 0.5 / 1000 / 1024)) // 1024 * 1024
+    # no free-memory reading: usable = total - 0.5 - 2.0 GiB; 12 GB of weights = 12e9 / 2^30 GiB
+    usable = 15.92 - 0.5 - 2.0
+    expected = math.floor((usable - 12e9 / 2**30) / (64 * 0.5 / 1000 / 1024)) // 1024 * 1024
     assert place(D27, info) == ("gpu", expected)
     short = D27.model_copy(update={"trained_ctx": 32768})
     assert place(short, info) == ("gpu", 32768)
@@ -326,3 +328,51 @@ def test_recommend_nothing_fits_says_so(vault, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "No model in the catalog fits this computer's GPU memory or its memory (RAM)." in result.output
     assert "Use one?" not in result.output
+
+
+# ---- final-review fixes: calibration, quant tie-break, host mismatch ----
+
+def test_place_matches_owner_measurement():
+    """Measured 2026-11-24 on a 16 GB RTX 5070 Ti, 15364 MiB free: the 13.7 GB Qwen3.6-35B-A3B IQ3_S fit
+    fully at 16K and spilled at 49K. The estimate must land between."""
+    card = Gpu("RTX 5070 Ti", 16303 / 1024, "nvidia", free_gb=15364 / 1024)
+    qwen = entry("q35", "q35", 13.7, 35.0, arch="moe", active=3.0, kv=19.5, bands=("mid",))
+    placement, ctx = place(qwen, machine(gpus=[card], env=FA_Q8))
+    assert placement == "gpu" and ctx == 25600
+    assert 16384 < ctx < 49152
+
+
+def test_place_uses_free_memory_when_known():
+    busy = Gpu("Busy", 16.0, "nvidia", free_gb=10.0)  # another app holds 6 GB
+    assert place(D27, machine(gpus=[busy], env=FA_Q8)) is None
+    assert place(D27, machine(gpus=[Gpu("Idle", 16.0, "nvidia")], env=FA_Q8))[0] == "gpu"
+
+
+def test_rank_prefers_bigger_quant_of_same_model():
+    iq3 = entry("q27-iq3", "q27:iq3", 12.0, 27.0, bands=("high",))
+    q4 = entry("q27-q4", "q27:q4", 16.8, 27.0, bands=("high",))
+    cat = Catalog(version=1, updated=date(2026, 11, 24), entries=[iq3, q4])
+    ranked = rank(machine(vram=24.0, env=FA_Q8, models=["q27:iq3"]), cat, {})
+    assert [(c.entry.id, c.placement) for c in ranked] == [("q27-q4", "gpu"), ("q27-iq3", "gpu")]
+
+
+def test_mismatched_server_ignores_service_kv_settings():
+    from research_pipeline.recommender import server_kv_factor
+    assert server_kv_factor(machine(vram=16.0, env=FA_Q8)) == 0.5
+    assert server_kv_factor(machine(vram=16.0, env=FA_Q8, host_matches=False)) == 1.0
+    lean = place(D27, machine(vram=16.0, env=FA_Q8))
+    plain = place(D27, machine(vram=16.0, env=FA_Q8, host_matches=False))
+    assert plain[1] < lean[1]
+
+
+def test_recommend_prints_host_note(vault, monkeypatch):
+    info = machine(vram=16.0, env={**FA_Q8, "OLLAMA_HOST": "127.0.0.1:11436"}, host_matches=False)
+    result, _, _ = recommend_run(vault, monkeypatch, info, tty=False)
+    assert "rpipe could not read the settings of the server it uses" in result.output
+
+
+def test_recommend_says_when_it_cannot_read_settings(vault, monkeypatch):
+    info = machine(vram=16.0, ollama=server({}, host_matches=None, how="manual"))
+    result, _, _ = recommend_run(vault, monkeypatch, info, tty=False)
+    assert "rpipe cannot read this server's settings" in result.output
+    assert "now: not set" not in result.output

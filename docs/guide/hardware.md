@@ -15,7 +15,7 @@ This page covers all four: the scan, the catalog, the recommendations, the speed
 
 `rpipe model scan` shows its progress as a "scan" stage, then prints one plain-words report. Behind it, `detect_machine` fills a `MachineInfo` record; the new facts are:
 
-- **Every GPU**, not just the biggest (`all_gpus`). NVIDIA cards come from `nvidia-smi`, AMD from `rocm-smi`, Apple Silicon from `sysctl`. `MachineInfo.gpu` is still the single best card, so older code is unchanged.
+- **Every GPU**, not just the biggest (`all_gpus`). NVIDIA cards come from `nvidia-smi`, AMD from `rocm-smi`, Apple Silicon from `sysctl`. `MachineInfo.gpu` is still the single best card, so older code is unchanged. For NVIDIA cards the scan also reads how much GPU memory is **free right now** (`memory.free`); the recommender uses it. AMD and Apple report only the total, so for them free memory is "unknown".
 - **Memory free right now** (Linux: `MemAvailable` in `/proc/meminfo`). Total memory says what the machine could do; free memory says what it can do at this moment.
 - **CPU**: thread count and which vector instructions it has (`avx2`, `avx512`, `neon`; see the glossary). These decide how fast a model runs when it has to use the CPU.
 - **Free disk where Ollama keeps models** (`ollama_models_dir`): `OLLAMA_MODELS` if the server sets it, else `/usr/share/ollama/.ollama/models` for a system service, else `~/.ollama/models`. A big model download must fit there.
@@ -29,6 +29,8 @@ Worked example. On a machine whose service has `Environment=PATH=/usr/bin OLLAMA
   parallel slots: automatic (default)
   note: the Ollama service listens on port 11436 but rpipe talks to localhost:11434; ...
 ```
+
+Flash attention counts as on when the value is `1` or `true` (any case), the rule Ollama itself uses; the scan, the recommender and `rpipe model tune` share that one check (`scan.flash_on`).
 
 The last line is the **host mismatch** check: if the service's port differs from the port in `llm_url`, the service rpipe could tune is not the server rpipe talks to, so changes would have no effect on your summaries.
 
@@ -69,24 +71,31 @@ Code: `src/research_pipeline/catalog.py`, the shipped list in `src/research_pipe
 **What it does.** `rpipe model recommend` scans the machine (a "scan" progress stage), then prints:
 
 1. A three-line summary: memory and CPU threads, the GPU(s) with total GPU memory and the machine's **band** (size class), Ollama and the free disk where it keeps models.
-2. Ollama server settings worth changing (from the same advice as `rpipe model tune`), followed by `Run rpipe model tune to apply them`. Nothing is printed when the settings are already right.
+2. Ollama server settings worth changing (from the same advice as `rpipe model tune`), followed by `Run rpipe model tune to apply them`. Nothing is printed when the settings are already right. When `rpipe` cannot read the server's settings at all (Ollama started by hand, Docker, the desktop app), it says `rpipe cannot read this server's settings` and lists the settings as "if these are not set yet", instead of claiming they are "not set". When the service it can read is not the server `rpipe` talks to (a port mismatch, see the scan), it prints the one-line note from `rpipe model tune` and works out the context estimates as if that server had default settings, since it cannot know them.
 3. Up to five models from the catalog, best first, each with plain reasons: where it would run and with about how much context, `installed` or `download X GB`, the catalog's note, and the measured time per paper (or `speed not measured yet: rpipe model bench`).
 4. Installed text models the catalog does not list (`installed, not in the catalog: NAME (rpipe model fit measures any installed model)`), and, when you are logged in to Claude Code, a line saying `rpipe model set-backend claude-code` would use it.
 5. On a terminal only: `Use one? number, or Enter to keep your current model`. Without a terminal it stops after printing, so it is safe in scripts.
 
 **How it works.** For each catalog model `place` decides where it would run. The numbers:
 
-- `vram` = all GPU memory added together, minus 1 GB for Ollama's own buffers (`GPU_OVERHEAD_GB`).
-- KV cache per token = the catalog's `kv_mib_per_1k` x a factor for the server settings (flash attention on plus `q8_0` halves it, `q4_0` quarters it, otherwise 1).
+All sizes here are in GiB (1 GiB = 2^30 bytes, what `nvidia-smi` and Ollama report). The catalog's download sizes are in GB (10^9 bytes), so they are converted: 13.7 GB = 13.7 x 10^9 / 2^30 = 12.76 GiB. Mixing the two units made the old estimate about 7% off.
 
-1. **On the GPU** (`gpu`): if the model file is smaller than `vram`, the leftover memory is filled with context: `leftover / KV per token`, rounded down to a multiple of 1,024, and no more than the model's trained context or 131,072 (`CONTEXT_CEILING`). At least 16,384 tokens counts as a fit.
-2. **Partly in RAM** (`spill`, mixture-of-experts models only, on a machine with at least 4 GB of GPU memory): if the model plus a 32,768-token context fits in `vram` + free RAM - 4 GB. Only a few experts work on each token, so the part sitting in RAM slows things down modestly; a dense model in the same spot would crawl, so dense models never spill.
+- `vram` = the GPU memory free at scan time, all cards added together (when the free amount cannot be read: total memory minus 0.5 GiB for the desktop), minus 2.0 GiB that Ollama leaves unused (`OLLAMA_RESERVE_GIB`).
+- weights = the catalog's download size, converted to GiB.
+- KV cache per token = the catalog's `kv_mib_per_1k` x a factor for the server settings (flash attention on plus `q8_0` halves it, `q4_0` quarters it, otherwise 1; always 1 on a port mismatch, because the settings `rpipe` can read belong to a different server).
+
+Where the 2.0 GiB comes from: on the owner's 16 GB RTX 5070 Ti (15.0 GiB free, nothing else loaded), Ollama's own report (`/api/ps`) showed the 13.7 GB Qwen3.6-35B-A3B at a 16K context taking 12.92 GiB, all on the GPU: 12.76 GiB of weights plus 16K x 19.5 MiB per 1K halved = 0.16 GiB, exactly the measured total. At 49K it put only 13.03 GiB on the GPU and moved the rest to RAM. Gemma 4 26B behaved the same way (at most 12.62 GiB on the GPU). So Ollama stops at about 13.0 GiB of the 15.0 GiB free: about 2.0 GiB is never used.
+
+Because free memory is read at scan time, an app holding GPU memory when you run `rpipe model recommend` (a game, a browser with hardware acceleration, a model still loaded) lowers the estimate. Close it and run the command again for the full figure.
+
+1. **On the GPU** (`gpu`): if the weights are smaller than `vram`, the leftover memory is filled with context: `leftover / KV per token`, rounded down to a multiple of 1,024, and no more than the model's trained context or 131,072 (`CONTEXT_CEILING`). At least 16,384 tokens counts as a fit.
+2. **Partly in RAM** (`spill`, mixture-of-experts models only, on a machine with at least 4 GB of GPU memory): if the weights plus a 32,768-token context fit in `vram` + free RAM - 4 GiB. Only a few experts work on each token, so the part sitting in RAM slows things down modestly; a dense model in the same spot would crawl, so dense models never spill.
 3. **On the CPU** (`cpu`, machines with less than 8 GB of GPU memory, i.e. the `cpu` and `small` bands; checked after the GPU and spill steps, so a small card still gets CPU options when nothing fits on it): if the model has at most 15 billion active parameters (`CPU_MAX_ACTIVE_B`; bigger ones are too slow for one night) and the model plus a 32,768-token context fits in total RAM - 4 GB (`RAM_SAFETY_GB`).
 4. Otherwise the model is not shown.
 
-Order: GPU first, then spill, then CPU; inside each, models the catalog lists for this machine's band first, then bigger models by **dense-equivalent size** (quality first), then ones already installed. The top five are shown. Dense-equivalent size is the parameter count for a dense model and `sqrt(total x active)` for a mixture of experts, so a 35B model with 3B active counts as about 10.2B and ranks below a 27B dense model.
+Order: GPU first, then spill, then CPU; inside each, models the catalog lists for this machine's band first, then bigger models by **dense-equivalent size** (quality first), then the bigger download (for two quantizations of the same model, the larger one keeps more detail, so a 16.8 GB Q4_K_M ranks above a 12 GB IQ3_XXS of the same 27B model when both fit), then ones already installed. The top five are shown. Dense-equivalent size is the parameter count for a dense model and `sqrt(total x active)` for a mixture of experts, so a 35B model with 3B active counts as about 10.2B and ranks below a 27B dense model.
 
-Worked example (16 GB card counted as 15.9 GB, flash attention and `q8_0` on): the 12 GB Qwen3.6 27B has `vram` 14.9 GB, so 2.9 GB is left; at 62.5 MiB per 1,000 tokens halved to 31.25, that is about 95,000 tokens, shown as "about 95K tokens of context (estimate; rpipe model fit measures it)". A 22 GB model would not fit on the card; if it is a mixture of experts and 20 GB of RAM is free, it is shown as a spill.
+Worked example (the owner's card: 16 GB RTX 5070 Ti, 15,364 MiB = 15.0 GiB free, flash attention and `q8_0` on): `vram` = 15.0 - 2.0 = 13.0 GiB. The 13.7 GB Qwen3.6-35B-A3B has 12.76 GiB of weights, so 0.25 GiB is left; at 19.5 MiB per 1,000 tokens halved to 9.75, that is 0.25 x 1024 x 1000 / 9.75 = about 25,700 tokens, rounded down to 25,600 and shown as "about 26K tokens of context (estimate; rpipe model fit measures it)". That matches the measurement: it fit fully at 16K and spilled at 49K. A 22 GB model would not fit on the card; if it is a mixture of experts and 20 GB of RAM is free, it is shown as a spill.
 
 **Picking one.**
 - Not installed: it shows `download X GB; free disk where Ollama keeps models: Y GB`. If X + 2 GB is more than Y it refuses (`not enough free disk`) and changes nothing. Otherwise it asks `Download NAME now (X GB)? [y/N]` (default no) and downloads with progress. The setup walkthrough uses the same check and question.
@@ -101,6 +110,8 @@ The setup walkthrough (`rpipe model setup`, see [setup.md](setup.md)) uses the s
 - **No invented speed.** Time per paper appears only when measured on this machine. Rejected: speed constants per GPU, which one machine's data cannot support.
 - **Quality first within a placement, by dense-equivalent size.** A bigger model that fits usually writes better summaries; the GPU-first order already protects speed. A mixture-of-experts model uses only a few experts per token, so its total size overstates its quality; the common rule of thumb `sqrt(total x active)` corrects for that. The owner's 10-paper test agreed: the 35B-A3B model covered 16 of 50 key facts against 19 for the 27B dense model, and produced unverified citations. Rejected: ranking by raw total parameters, which put the 35B first. The rule of thumb is only a starting order; measuring with `rpipe eval` on your own papers stays the final word.
 - **Small GPUs still get CPU options.** A 4-8 GB card is too small for most summary models, but the machine's RAM may hold one on the CPU; without this, a small GPU would leave a machine worse off than no GPU at all.
+- **Calibrated, not guessed.** The 2.0 GiB reserve and the GB-to-GiB conversion come from one measured machine (above); they replaced a flat 1 GB guess that over-estimated the context. Rejected: a reserve that scales with card size, which one card's data cannot support.
+- **Free memory, not total.** The estimate is for the machine as it is now. Rejected: total memory, which promised context that a busy desktop did not have.
 - **4 GB of RAM kept free and 2 GB of disk to spare,** so the rest of the computer keeps working and a download never fills the disk.
 - **Nothing changes without a yes**, and the go-back commands are printed every time.
 
@@ -110,7 +121,7 @@ rpipe model recommend
 uv run pytest tests/test_recommender.py -q
 ```
 
-**Where the code is.** `src/research_pipeline/recommender.py` (`band_for`, `kv_factor`, `place`, `rank`, `uncatalogued`), the `model recommend` command and `_use_candidate` in `src/research_pipeline/cli.py`, `recommend` in `src/research_pipeline/machine.py` (the walkthrough's backend choice), tests in `tests/test_recommender.py`.
+**Where the code is.** `src/research_pipeline/recommender.py` (`band_for`, `usable_vram`, `weights_gib`, `kv_factor`, `server_kv_factor`, `place`, `rank`, `uncatalogued`), the `model recommend` command and `_use_candidate` in `src/research_pipeline/cli.py`, `recommend` in `src/research_pipeline/machine.py` (the walkthrough's backend choice), tests in `tests/test_recommender.py`.
 
 ## Measuring speed
 
@@ -187,7 +198,7 @@ The setup walkthrough (`rpipe model setup`) also shows the new facts (free memor
 
 ## Where the code is
 
-- `src/research_pipeline/scan.py`: the probes (`detect_cpu`, `ram_free_gb`, `disk_free_gb`, `all_gpus`, `detect_ollama_server`, `parse_systemd_env`, `ollama_models_dir`, `setting_source`).
+- `src/research_pipeline/scan.py`: the probes (`flash_on`, `detect_cpu`, `ram_free_gb`, `disk_free_gb`, `all_gpus`, `detect_ollama_server`, `parse_systemd_env`, `ollama_models_dir`, `setting_source`).
 - `src/research_pipeline/machine.py`: `MachineInfo` and `detect_machine`, which call the scan.
 - `src/research_pipeline/cli.py`: `model scan` and the report text.
 - `tests/test_scan.py`: the tests.

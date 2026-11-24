@@ -108,11 +108,12 @@ def no_real_model_or_arxiv(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def pinned_machine_and_os(monkeypatch):
-    """Never probe this computer: no GPU, no Ollama, no Claude Code, and the OS is Linux."""
+    """Never probe this computer: no GPU, no Ollama, no Claude Code, too little memory (4 GB) for a
+    model on the CPU (so the walkthrough recommends `none`), and the OS is Linux."""
     from research_pipeline import cli
     from research_pipeline.machine import MachineInfo
 
     monkeypatch.setattr(cli, "detect_machine", lambda config: MachineInfo(
-        os="Linux", ram_gb=16.0, gpu=None, ollama_installed=False, ollama_running=False,
+        os="Linux", ram_gb=4.0, gpu=None, ollama_installed=False, ollama_running=False,
         ollama_models=[], claude_path=None, claude_logged_in=False))
     monkeypatch.setattr(cli, "_platform", lambda: "Linux", raising=False)

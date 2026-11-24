@@ -97,4 +97,4 @@ Just want to use it? Follow the quickstart in the top-level `README.md` (install
 - `progress.py`: progress events (data objects) that stages emit instead of printing; no package imports, so it can be shared.
 - `progress_render.py`: turns progress events into stderr output (a live spinner on a terminal, plain lines otherwise); see [running.md](running.md).
 - `categories.py`: the list of real arXiv category codes and the did-you-mean check ([profile.md](profile.md)).
-- `defaults/`: the packaged starting `profile.yaml`, `config.yaml` and `ollama_models.yaml`.
+- `defaults/`: the packaged starting `profile.yaml`, `config.yaml` and `model_catalog.yaml` (the models `rpipe model recommend` can suggest).

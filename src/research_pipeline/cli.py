@@ -22,7 +22,17 @@ import typer
 
 from research_pipeline import bench as bench_mod
 from research_pipeline import catalog as catalog_mod
-from research_pipeline import categories, judge, ollama_fit, ollama_tune, onboarding, profile_edit, registry, schedule
+from research_pipeline import (
+    categories,
+    judge,
+    ollama_fit,
+    ollama_tune,
+    onboarding,
+    profile_edit,
+    recommender,
+    registry,
+    schedule,
+)
 from research_pipeline import serve as serve_mod
 from research_pipeline.backends.claude_code import LOGIN_HINT, find_claude, logged_in, resolve_model
 from research_pipeline.collect import run_collect
@@ -75,7 +85,7 @@ from research_pipeline.gold import (
     suggest_papers,
 )
 from research_pipeline.llm import LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
-from research_pipeline.machine import OLLAMA_INSTALL, detect_machine, load_model_table, recommend
+from research_pipeline.machine import OLLAMA_INSTALL, _generation_models, detect_machine, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
@@ -1722,22 +1732,25 @@ def model_fit(vault: VaultOption = None) -> None:
 def model_bench(vault: VaultOption = None) -> None:
     """Measure how fast the chosen model reads and writes, and estimate the time per paper."""
     ctx = _open(vault)
-    cfg = ctx.config
-    if cfg.llm_backend != "ollama":
+    if ctx.config.llm_backend != "ollama":
         raise _fail("the benchmark measures local models; the cloud backend's speed is the "
                     "provider's. Nothing was measured.")
     try:
-        typer.echo("Measuring speed: this loads the model and takes about 1-3 minutes on a GPU, "
-                   "up to 5 on a CPU.")
-        with _reporter() as reporter, stage(reporter, "model bench") as handle:
-            fit = ollama_fit.resolve(cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx,
-                                     log=handle.note)
-            tokens = bench_mod.median_paper_tokens(ctx.conn)
-            handle.note(f"timing {fit.model} at {fit.num_ctx} tokens")
-            result = bench_mod.run_bench(cfg.llm_url, fit.model, fit.num_ctx, tokens)
-        bench_mod.save_bench(ctx.vault, result)
+        _measure_speed(ctx.vault, ctx.conn, ctx.config)
     except (LlmError, OSError, ValueError) as exc:
         raise _fail(str(exc)) from exc
+
+
+def _measure_speed(vault: Path, conn: sqlite3.Connection, cfg: Config) -> None:
+    """Time the configured Ollama model, save the result and print it (raises LlmError on failure)."""
+    typer.echo("Measuring speed: this loads the model and takes about 1-3 minutes on a GPU, "
+               "up to 5 on a CPU.")
+    with _reporter() as reporter, stage(reporter, "model bench") as handle:
+        fit = ollama_fit.resolve(cfg.llm_url, vault, cfg.llm_model, cfg.llm_num_ctx, log=handle.note)
+        tokens = bench_mod.median_paper_tokens(conn)
+        handle.note(f"timing {fit.model} at {fit.num_ctx} tokens")
+        result = bench_mod.run_bench(cfg.llm_url, fit.model, fit.num_ctx, tokens)
+    bench_mod.save_bench(vault, result)
     typer.echo(
         f"{fit.model}: reads {result.read_tps:.0f} tokens/s, writes {result.write_tps:.0f} tokens/s; "
         f"about {result.seconds_per_paper:.0f} s per paper ({result.paper_tokens:,}-token paper), "
@@ -2026,6 +2039,173 @@ def model_scan(vault: VaultOption = None) -> None:
         _describe_ollama_server(info.ollama, ctx.config.llm_url)
 
 
+def _model_kind(e: catalog_mod.CatalogEntry) -> str:
+    if e.arch == "moe":
+        return f"MoE ({e.active_b:g} active of {e.params_b:g} B)" if e.active_b else "MoE"
+    return "dense"
+
+
+def _machine_summary(info) -> None:
+    """Three lines: memory and CPU, the GPU(s) and size class, Ollama and free disk."""
+    mem = f"{info.ram_gb:.0f} GB of memory" if info.ram_gb else "memory unknown"
+    if info.ram_free_gb is not None:
+        mem += f" ({info.ram_free_gb:.0f} GB free now)"
+    cpu = f", {info.cpu.threads} CPU threads" if info.cpu is not None else ""
+    typer.echo(f"this computer: {info.os}, {mem}{cpu}")
+    vram = recommender.total_vram(info)
+    if vram == 0:
+        gpu = "no GPU found"
+    elif len(info.gpus) > 1:
+        gpu = " + ".join(f"{g.name} ({g.vram_gb:.1f} GB)" for g in info.gpus) + f" = {vram:.1f} GB"
+    else:
+        gpu = f"{(info.gpu or info.gpus[0]).name}, {vram:.1f} GB"
+    typer.echo(f"GPU: {gpu} (size class: {recommender.band_for(info)})")
+    if not info.ollama_installed:
+        ollama = "Ollama: not installed"
+    else:
+        count = len(_generation_models(info.ollama_models))
+        ollama = (f"Ollama: {'running' if info.ollama_running else 'not running'}, "
+                  f"{count} text model{'s' if count != 1 else ''} installed")
+    disk = f"; free disk for models: {info.disk_free_gb:.0f} GB" if info.disk_free_gb is not None else ""
+    typer.echo(ollama + disk)
+
+
+def _pin_off_gpu(vault: Path, name: str) -> None:
+    """Pin model and context for a model that runs (partly) outside the GPU."""
+    profile_edit.set_llm_model(vault, name)
+    profile_edit.set_llm_num_ctx(vault, recommender.CPU_CTX)
+    typer.echo(f"Model {name} and a context of {recommender.CPU_CTX:,} tokens are both pinned: the automatic "
+               "choice (auto) only accepts models that sit fully in GPU memory, and this one does not.")
+
+
+def _pick_candidate(count: int) -> int | None:
+    while True:
+        text = typer.prompt("Use one? number, or Enter to keep your current model",
+                            default="", show_default=False).strip()
+        if not text:
+            return None
+        if text.isdigit() and 1 <= int(text) <= count:
+            return int(text) - 1
+        typer.echo(f"Enter a number from 1 to {count}, or just press Enter.")
+
+
+def _go_back_hint(backend: str, model: str, num_ctx: int | str) -> None:
+    if backend == "ollama":
+        steps = [f"rpipe model set {model}", f"rpipe model set-context {num_ctx}"]
+    else:
+        steps = [f"rpipe model set-backend {backend}"]
+        if backend != "none" and model != "auto":
+            steps.append(f"rpipe model set {model}")
+    typer.echo("To go back: " + ", then ".join(steps))
+
+
+def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
+    """Show size against free disk, refuse when it does not fit, else ask and pull. True if pulled."""
+    free = info.disk_free_gb
+    typer.echo(f"download {entry.download_gb:g} GB; free disk where Ollama keeps models: "
+               + (f"{free:.0f} GB" if free is not None else "unknown"))
+    if free is not None and entry.download_gb + 2 > free:
+        raise _fail(f"not enough free disk: {entry.pull} needs {entry.download_gb:g} GB plus 2 GB to spare. "
+                    "Free some space or pick another model. Nothing was changed.")
+    if not info.ollama_running:
+        raise _fail(f"Ollama is not running, so nothing can be downloaded. Start it (or install it: "
+                    f"{OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}) and run rpipe model recommend "
+                    "again. Nothing was changed.")
+    if not typer.confirm(f"Download {entry.pull} now?", default=False):
+        return False
+    try:
+        with _reporter() as reporter, stage(reporter, "model pull", total=100, label=entry.pull) as handle:
+            pull_model(cfg.llm_url, entry.pull, _pull_progress(handle, entry.pull))
+    except LlmError as exc:
+        raise _fail(f"Download failed: {exc}. Nothing was changed.") from exc
+    return True
+
+
+def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
+    """Download (with consent), set the model, measure its context or pin it, offer the speed test."""
+    cfg = ctx.config
+    entry = cand.entry
+    if not cand.installed and not _download(cfg, info, entry):
+        typer.echo("Nothing was changed.")
+        return
+    previous = (cfg.llm_backend, cfg.llm_model, cfg.llm_num_ctx)
+    try:
+        if cfg.llm_backend != "ollama":
+            profile_edit.set_llm_backend(ctx.vault, "ollama", set(registry.plugins(registry.BACKEND_GROUP)))
+            typer.echo(f"backend: {cfg.llm_backend} -> ollama")
+        if cand.placement == "gpu":
+            profile_edit.set_llm_model(ctx.vault, entry.pull)
+            profile_edit.set_llm_num_ctx(ctx.vault, "auto")
+            typer.echo(f"model is now {entry.pull}; context: auto (the largest that fits, measured now)")
+        else:
+            _pin_off_gpu(ctx.vault, entry.pull)
+    except (ValueError, ConfigError, OSError) as exc:
+        raise _fail(str(exc)) from exc
+    ok = True
+    if cand.placement == "gpu":
+        typer.echo("Measuring the context that fits: this loads the model and can take a few minutes.")
+        try:
+            with _reporter() as reporter, stage(reporter, "model fit") as handle:
+                fit = ollama_fit.resolve(cfg.llm_url, ctx.vault, entry.pull, "auto", force=True, log=handle.note)
+            typer.echo(f"measured: {fit.model} with a context of {fit.num_ctx:,} tokens")
+        except (LlmError, OSError, ValueError) as exc:
+            typer.echo(f"The fit failed: {exc}")
+            ok = False
+    if ok and typer.confirm("Measure its speed now (about 1-5 minutes)?", default=False):
+        new_cfg = load_config(ctx.vault / "config.yaml").model_copy(update={"vault_path": ctx.vault})
+        try:
+            _measure_speed(ctx.vault, ctx.conn, new_cfg)
+        except (LlmError, OSError, ValueError) as exc:
+            typer.echo(f"Speed not measured: {exc}")
+    _go_back_hint(*previous)
+    if not ok:
+        raise typer.Exit(code=1)
+
+
+@model_app.command("recommend")
+def model_recommend(vault: VaultOption = None) -> None:
+    """Rank catalog models for this computer, installed or not; on a terminal, pick one to download, set and measure."""
+    ctx = _open(vault)
+    cfg = ctx.config
+    with _reporter() as reporter, stage(reporter, "scan", label="this computer"):
+        info = detect_machine(cfg)
+    catalog = catalog_mod.load_catalog(ctx.vault)
+    candidates = recommender.rank(info, catalog, bench_mod.load_benches(ctx.vault))
+    _machine_summary(info)
+    if info.ollama is not None and info.ollama.how != "unknown":
+        settings = ollama_tune.advise(info.ollama)
+        if settings:
+            typer.echo("\nOllama settings that would fit a longer context in the same memory:")
+            for st in settings:
+                typer.echo(f"  {st.name}={st.value} (now: {st.current or 'not set'}): {st.what}")
+            typer.echo("Run rpipe model tune to apply them")
+    typer.echo("")
+    if candidates:
+        typer.echo("Models for this computer, best first:")
+        for i, cand in enumerate(candidates, 1):
+            typer.echo(f"  {i}. {cand.entry.pull} ({cand.entry.family}, {_model_kind(cand.entry)})")
+            for reason in cand.reasons:
+                typer.echo(f"     - {reason}")
+    else:
+        typer.echo("No catalog model fits this computer: not enough GPU memory, and not enough memory (RAM) "
+                   "to run one on the CPU.")
+    for name in recommender.uncatalogued(info, catalog):
+        typer.echo(f"installed, not in the catalog: {name} (rpipe model fit measures any installed model)")
+    if info.claude_logged_in:
+        typer.echo("cloud: Claude Code is logged in; rpipe model set-backend claude-code uses it")
+    if not candidates or not _is_tty():
+        return
+    try:
+        pick = _pick_candidate(len(candidates))
+        if pick is None:
+            typer.echo("Nothing was changed.")
+            return
+        _use_candidate(ctx, info, candidates[pick])
+    except (typer.Abort, KeyboardInterrupt, EOFError):
+        typer.echo("\nStopped. Nothing further was changed.")
+        raise typer.Exit(code=130) from None
+
+
 def _recheck(config: Config, info, problem: str, ok: Callable, question: str):
     """Show `problem` and re-detect the machine each time the user says they fixed it."""
     while not ok(info):
@@ -2039,14 +2219,20 @@ def _recheck(config: Config, info, problem: str, ok: Callable, question: str):
 def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> None:
     info = _recheck(config, info, f"Ollama is not installed. Install it yourself with:\n  {OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}",
                     lambda i: i.ollama_installed, "Installed it? Check again")
+    pulled = None
     if rec.pull is not None and rec.backend == "ollama" and info.ollama_installed:
-        if typer.confirm(f"Pull {rec.pull.tag} now ({rec.pull.download_gb:g} GB download)?", default=True):
+        name = rec.pull.pull
+        if typer.confirm(f"Pull {name} now ({rec.pull.download_gb:g} GB download)?", default=True):
             try:
-                with _reporter() as reporter, stage(reporter, "model pull", total=100, label=rec.pull.tag) as handle:
-                    pull_model(config.llm_url, rec.pull.tag, _pull_progress(handle, rec.pull.tag))
+                with _reporter() as reporter, stage(reporter, "model pull", total=100, label=name) as handle:
+                    pull_model(config.llm_url, name, _pull_progress(handle, name))
+                pulled = rec.pull
             except LlmError as exc:
                 typer.echo(f"Pull failed: {exc}")
     profile_edit.set_llm_backend(vault, "ollama", known)
+    where = recommender.place(pulled, info) if pulled is not None else None
+    if where is not None and where[0] != "gpu":
+        _pin_off_gpu(vault, pulled.pull)
 
 
 def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:
@@ -2081,7 +2267,7 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
         return _check_backend(vault)
     info = detect_machine(config)
     _describe_machine(info)
-    rec = recommend(info, load_model_table())
+    rec = recommend(info, catalog_mod.load_catalog(vault))
     typer.echo(f"\nRecommended: {rec.backend}")
     for reason in rec.reasons:
         typer.echo(f"  - {reason}")
@@ -2145,9 +2331,7 @@ def catalog_show(vault: VaultOption = None) -> None:
             continue
         typer.echo(f"\n{band}")
         for e in rows:
-            kind = f"MoE ({e.active_b:g} active of {e.params_b:g} B)" if e.arch == "moe" and e.active_b else (
-                "MoE" if e.arch == "moe" else "dense")
-            typer.echo(f"  {e.pull} — {e.family}, {kind}, {e.quant}, {e.download_gb:g} GB, "
+            typer.echo(f"  {e.pull} — {e.family}, {_model_kind(e)}, {e.quant}, {e.download_gb:g} GB, "
                        f"trained context {e.trained_ctx:,}")
 
 

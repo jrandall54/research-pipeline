@@ -9,7 +9,7 @@
 3. **Tune**: turn on Ollama settings that let a model use a longer context in the same memory, after showing you the exact change and how to undo it.
 4. **Bench**: time a real summary so the "how long per paper" figure comes from your machine, not a guess.
 
-This page grows with each step. For now it covers the scan, the catalog, the speed benchmark and the server settings.
+This page covers all four: the scan, the catalog, the recommendations, the speed benchmark and the server settings.
 
 ## How it works: the scan
 
@@ -63,6 +63,53 @@ uv run pytest tests/test_catalog.py -q
 ```
 
 Code: `src/research_pipeline/catalog.py`, the shipped list in `src/research_pipeline/defaults/model_catalog.yaml`, tests in `tests/test_catalog.py`.
+
+## Recommendations
+
+**What it does.** `rpipe model recommend` scans the machine (a "scan" progress stage), then prints:
+
+1. A three-line summary: memory and CPU threads, the GPU(s) with total GPU memory and the machine's **band** (size class), Ollama and the free disk where it keeps models.
+2. Ollama server settings worth changing (from the same advice as `rpipe model tune`), followed by `Run rpipe model tune to apply them`. Nothing is printed when the settings are already right.
+3. Up to five models from the catalog, best first, each with plain reasons: where it would run and with about how much context, `installed` or `download X GB`, the catalog's note, and the measured time per paper (or `speed not measured yet: rpipe model bench`).
+4. Installed text models the catalog does not list (`installed, not in the catalog: NAME (rpipe model fit measures any installed model)`), and, when you are logged in to Claude Code, a line saying `rpipe model set-backend claude-code` would use it.
+5. On a terminal only: `Use one? number, or Enter to keep your current model`. Without a terminal it stops after printing, so it is safe in scripts.
+
+**How it works.** For each catalog model `place` decides where it would run. The numbers:
+
+- `vram` = all GPU memory added together, minus 1 GB for Ollama's own buffers (`GPU_OVERHEAD_GB`).
+- KV cache per token = the catalog's `kv_mib_per_1k` x a factor for the server settings (flash attention on plus `q8_0` halves it, `q4_0` quarters it, otherwise 1).
+
+1. **On the GPU** (`gpu`): if the model file is smaller than `vram`, the leftover memory is filled with context: `leftover / KV per token`, rounded down to a multiple of 1,024, and no more than the model's trained context or 131,072 (`CONTEXT_CEILING`). At least 16,384 tokens counts as a fit.
+2. **Partly in RAM** (`spill`, mixture-of-experts models only, on a machine with at least 4 GB of GPU memory): if the model plus a 32,768-token context fits in `vram` + free RAM - 4 GB. Only a few experts work on each token, so the part sitting in RAM slows things down modestly; a dense model in the same spot would crawl, so dense models never spill.
+3. **On the CPU** (`cpu`, machines with less than 4 GB of GPU memory): if the model has at most 15 billion active parameters (`CPU_MAX_ACTIVE_B`; bigger ones are too slow for one night) and the model plus a 32,768-token context fits in total RAM - 4 GB (`RAM_SAFETY_GB`).
+4. Otherwise the model is not shown.
+
+Order: GPU first, then spill, then CPU; inside each, models the catalog lists for this machine's band first, then bigger models (quality first), then ones already installed. The top five are shown.
+
+Worked example (16 GB card counted as 15.9 GB, flash attention and `q8_0` on): the 12 GB Qwen3.6 27B has `vram` 14.9 GB, so 2.9 GB is left; at 62.5 MiB per 1,000 tokens halved to 31.25, that is about 95,000 tokens, shown as "about 95K tokens of context (estimate; rpipe model fit measures it)". A 22 GB model would not fit on the card; if it is a mixture of experts and 20 GB of RAM is free, it is shown as a spill.
+
+**Picking one.**
+- Not installed: it shows `download X GB; free disk where Ollama keeps models: Y GB`. If X + 2 GB is more than Y it refuses (`not enough free disk`) and changes nothing. Otherwise it asks `Download NAME now? [y/N]` and downloads with progress.
+- It sets the model (switching the backend to `ollama` first if needed, and saying so). On the GPU the context is set to `auto` and measured right away with the same probe as `rpipe model fit`, which prints the real context. On spill or CPU both model and context (32,768) are pinned, because the automatic choice only accepts models that sit fully in GPU memory.
+- It offers `Measure its speed now (about 1-5 minutes)? [y/N]` (the same benchmark as `rpipe model bench`).
+- It prints how to go back, for example `To go back: rpipe model set auto, then rpipe model set-context auto`.
+
+The setup walkthrough (`rpipe model setup`, see [setup.md](setup.md)) uses the same ranking to choose which model to offer.
+
+**Why it's built this way.**
+- **Estimate, then measure.** The context figure is arithmetic from catalog numbers, so it is labelled an estimate; the real figure comes from loading the model (`rpipe model fit`), which only makes sense for an installed model. Rejected: downloading models just to measure them.
+- **No invented speed.** Time per paper appears only when measured on this machine. Rejected: speed constants per GPU, which one machine's data cannot support.
+- **Quality first within a placement.** A bigger model that fits usually writes better summaries; the GPU-first order already protects speed.
+- **4 GB of RAM kept free and 2 GB of disk to spare,** so the rest of the computer keeps working and a download never fills the disk.
+- **Nothing changes without a yes**, and the go-back commands are printed every time.
+
+**How to run / check it.**
+```
+rpipe model recommend
+uv run pytest tests/test_recommender.py -q
+```
+
+**Where the code is.** `src/research_pipeline/recommender.py` (`band_for`, `kv_factor`, `place`, `rank`, `uncatalogued`), the `model recommend` command and `_use_candidate` in `src/research_pipeline/cli.py`, `recommend` in `src/research_pipeline/machine.py` (the walkthrough's backend choice), tests in `tests/test_recommender.py`.
 
 ## Measuring speed
 
@@ -136,6 +183,7 @@ The setup walkthrough (`rpipe model setup`) also shows the new facts (free memor
 - `src/research_pipeline/machine.py`: `MachineInfo` and `detect_machine`, which call the scan.
 - `src/research_pipeline/cli.py`: `model scan` and the report text.
 - `tests/test_scan.py`: the tests.
+- `src/research_pipeline/recommender.py`: the ranking (see Recommendations).
 - `src/research_pipeline/ollama_tune.py`: the settings advice, drop-in text and commands (see Server settings).
 
 Sharing measurements between users (opt-in) is not built; it is a possible later feature.

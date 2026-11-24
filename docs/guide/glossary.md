@@ -196,7 +196,7 @@
 
 **Abstracts-only mode** — running with the `none` backend: no summary model is used, so the digest shows each paper's abstract instead of a summary. The health line says `summaries off (abstracts-only mode)`. See `backends.md`.
 
-**VRAM** — the memory on a graphics card (GPU). A model must fit in it to run fast; `rpipe model setup` compares it with 6 GB and with the model table. See `setup.md`.
+**VRAM** — the memory on a graphics card (GPU). A model must fit in it to run fast; `rpipe model recommend` and `rpipe model setup` compare it with the size of each catalog model. See `hardware.md`.
 
 **Unified memory** — Apple Silicon's single memory pool shared by CPU and GPU. rpipe counts 66% of it as GPU memory. See `setup.md`.
 
@@ -289,3 +289,7 @@
 **Parallel slots** — how many requests Ollama serves at once (`OLLAMA_NUM_PARALLEL`). Each slot reserves its own context memory, so more slots mean a shorter context for each. `rpipe` sends one paper at a time, so 1 is enough. See `hardware.md`, Server settings.
 
 **sudo** — a Linux command that runs another command with administrator rights after asking for your password. `rpipe model tune` runs its commands through `sudo` in your own terminal and never sees the password. See `hardware.md`, Server settings.
+
+**Band (size class)** — a rough label for how big a computer is for running models, from its total GPU memory: `cpu` (under 4 GB), `small` (under 8 GB), `mid` (up to about 16 GB), `high` (up to about 24 GB), `very_large` (more). Each catalog model lists the bands it suits, and the recommender puts those models first. See "Recommendations" in `hardware.md`.
+
+**Spill / offload to RAM** — running a model that does not fit in GPU memory with part of it in the computer's ordinary memory (RAM). The CPU then does that part, which is slower. For a mixture-of-experts model only a few experts work per token, so the slowdown is modest; for a dense model it is severe, so rpipe only suggests spilling mixture-of-experts models. See "Recommendations" in `hardware.md`.

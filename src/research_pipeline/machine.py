@@ -8,13 +8,12 @@ import platform
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from importlib import resources
 from typing import Literal
 
 import httpx
-import yaml
 
 from research_pipeline.backends.claude_code import find_claude, logged_in
+from research_pipeline.catalog import Catalog, CatalogEntry
 from research_pipeline.models import Config
 from research_pipeline.scan import (  # re-exported: other modules and tests import these from here
     APPLE_GPU_FRACTION,
@@ -35,8 +34,6 @@ from research_pipeline.scan import (  # re-exported: other modules and tests imp
 )
 
 __all__ = ["APPLE_GPU_FRACTION", "GIB", "PROBE_TIMEOUT", "CmdRunner", "Gpu", "system_cmd"]
-
-MIN_GPU_VRAM_GB = 6.0
 
 OLLAMA_INSTALL = {
     "Linux": "curl -fsSL https://ollama.com/install.sh | sh",
@@ -62,17 +59,10 @@ class MachineInfo:
     ollama: OllamaServer | None = None
 
 
-@dataclass(frozen=True)
-class ModelChoice:
-    min_vram_gb: float
-    tag: str
-    download_gb: float
-
-
 @dataclass
 class Recommendation:
     backend: Literal["ollama", "claude-code", "none"]
-    pull: ModelChoice | None
+    pull: CatalogEntry | None  # a catalog model to download, if any
     install_ollama: bool
     alternatives: list[str]
     reasons: list[str]
@@ -139,13 +129,6 @@ def detect_machine(
     )
 
 
-def load_model_table() -> list[ModelChoice]:
-    text = resources.files("research_pipeline.defaults").joinpath("ollama_models.yaml").read_text("utf-8")
-    rows = [ModelChoice(float(r["min_vram_gb"]), str(r["tag"]), float(r["download_gb"]))
-            for r in yaml.safe_load(text)]
-    return sorted(rows, key=lambda m: m.min_vram_gb)
-
-
 BUILTIN_BACKENDS: tuple[Literal["ollama", "claude-code", "none"], ...] = ("ollama", "claude-code", "none")
 
 
@@ -159,22 +142,37 @@ def _others(first: str) -> list[str]:
     return [b for b in BUILTIN_BACKENDS if b != first]
 
 
-def recommend(info: MachineInfo, table: list[ModelChoice]) -> Recommendation:
+def recommend(info: MachineInfo, catalog: Catalog) -> Recommendation:
     """Pick the best backend for this machine. The menu always lists all three built-ins
-    (`alternatives`); setup re-checks a choice that is not installed or logged in yet."""
+    (`alternatives`); setup re-checks a choice that is not installed or logged in yet.
+
+    1. A catalog model fits on the GPU (fully, or a mixture of experts partly in RAM): `ollama`.
+    2. Otherwise a Claude Code login: `claude-code`.
+    3. Otherwise a model fits in RAM on the CPU: `ollama` (slow but fine overnight).
+    4. Otherwise `none`.
+    With `ollama` and no text-writing model installed yet, `pull` is the top-ranked model."""
+    from research_pipeline.recommender import rank, total_vram  # recommender imports this module
+
+    ranked = rank(info, catalog, {})
+    pull = ranked[0].entry if ranked and not _generation_models(info.ollama_models) else None
+    install = not info.ollama_installed
+    if ranked and ranked[0].placement in ("gpu", "spill"):
+        vram = total_vram(info)
+        who = (f"{len(info.gpus)} GPUs together have" if len(info.gpus) > 1
+               else f"{info.gpu.name} has" if info.gpu is not None else "the GPU has")
+        reasons = [f"{who} {vram:.1f} GB of GPU memory, enough to run a model locally"]
+        return Recommendation("ollama", pull, install, _others("ollama"), reasons)
     gpu = info.gpu
-    if gpu is not None and gpu.vram_gb >= MIN_GPU_VRAM_GB:
-        fitting = [m for m in table if m.min_vram_gb <= gpu.vram_gb]
-        pull = fitting[-1] if fitting and not _generation_models(info.ollama_models) else None
-        reasons = [f"{gpu.name} has {gpu.vram_gb:.1f} GB of GPU memory, enough to run a model locally"]
-        return Recommendation("ollama", pull, not info.ollama_installed, _others("ollama"), reasons)
+    no_gpu = "no GPU found" if gpu is None else f"the GPU has only {total_vram(info):.1f} GB"
     if info.claude_logged_in:
-        why = ("no GPU with at least 6 GB was found" if gpu is None
-               else f"the GPU has only {gpu.vram_gb:.1f} GB (6 GB needed)")
+        why = ("no GPU was found" if gpu is None
+               else f"no catalog model fits the GPU's {total_vram(info):.1f} GB")
         return Recommendation("claude-code", None, False, _others("claude-code"),
                               [f"{why}, but you are logged in to Claude Code"])
+    if ranked:
+        return Recommendation("ollama", pull, install, _others("ollama"),
+                              [f"{no_gpu}; a small model runs on the CPU overnight (slow)"])
     return Recommendation("none", None, False, _others("none"), [
-        "no GPU with at least 6 GB of memory and no Claude Code login were found",
-        "a GPU with 6 GB or more plus Ollama, or a Claude Code login, would unlock summaries",
-        "a CPU-friendly pipeline is planned",
+        f"{no_gpu}, no Claude Code login, and too little memory (RAM) to run a model on the CPU",
+        "a GPU plus Ollama, more memory for a model on the CPU, or a Claude Code login would unlock summaries",
     ])

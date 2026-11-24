@@ -2,6 +2,17 @@
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
 
+## B.4 built (2026-11-24, branch `part-b4-scan-recommend`, not merged)
+
+Plan `plans/2026-11-24-part-b4-scan-recommend.md`. New: `rpipe model scan`, `recommend`, `tune [--undo]`, `bench`, `catalog show|update`; modules `scan.py`, `catalog.py`, `recommender.py`, `ollama_tune.py`, `bench.py`; data `defaults/model_catalog.yaml` (20 researched entries, version 1); guide page `docs/guide/hardware.md`. The setup wizard now uses the recommender (old `ollama_models.yaml` deleted); CPU-only and small-GPU machines get a CPU model instead of "none". The fit cache key now includes Ollama version, server settings and GPUs, so **the first nightly run after this probes the context once more (1-3 min)**. `uv run pytest -q`: 1233 passing, ruff clean. Every task had a spec+quality review; whole-branch review (opus) + one fix wave, approved.
+
+- **Owner's machine (read-only check):** the Ollama systemd service listens on 127.0.0.1:11436 (flash attention + q8_0 set in `kv-cache.conf`), but rpipe talks to localhost:11434 — a different server whose settings rpipe cannot read. `scan`, `recommend` and `tune` all say so; `recommend` then estimates with default KV settings. Worth finding out what serves 11434 (the owner's `o` helper?) and pointing rpipe at the tuned service with `rpipe model set-url` if appropriate.
+- **Calibration measured 2026-11-24** (`/api/ps`, nothing else loaded, 15.0 of 15.9 GiB free): Qwen3.6-35B-A3B IQ3_S at 16K = 12.92 GiB all on GPU; at 49K = 13.81 GiB, only 13.03 on GPU. Ollama leaves ~2.0 GiB of free GPU memory unused; weights = catalog GB × 1e9/2^30. The recommender uses free memory − 2.0 GiB; this reproduces the measurement (35B estimate 25,600 tokens with q8_0).
+- **Ranking:** dense-equivalent size (MoE: √(total × active)), then bigger quant, then installed. On the owner's machine: Qwen3.6-27B first; the 35B-A3B drops to "partly in RAM", matching the bake-off.
+- **Not run on the real machine:** `rpipe model tune` (would restart Ollama) and `rpipe model bench`.
+- **Parked for B.5 (from the reviews):** nvidia-smi printing `[N/A]` for free memory makes the scan skip the GPU; an 8 GB card with under ~5.5 GiB free gets no CPU fallback (allow CPU placement whenever nothing fits on the GPU; add a shipped-catalog 8 GB test); the 600 s per-call limit (`llm.CALL_TIMEOUT`) can stop CPU-tier nights (documented, `recommend` warns; B.5/B.6 lift it); docs polish (worked example 0.245 GiB; placement reason names total VRAM). Smaller deferred items are in git history of the plan's review notes: duplicate GPU probes, `setting_source` matching comments, private cache helpers imported by `bench.py`, `wait_ready` counting sleeps, IPv6 `OLLAMA_HOST`, transient probe failures causing one extra re-probe.
+- **Next:** owner decides merge; then plan B.5 (RAM-spill reruns within a night deadline), starting with the parked items above.
+
 ## State
 - **`main` holds Phases 1-5, the review loop, the shelf, summarize-backlog, and the pipeline/app split design and plan.** `main` is pushed; CI runs on GitHub.
 - **Phase 6 Parts A (progress feedback) and C (setting commands, category check, `rpipe show`, `my_work` boundary) are built and merged to `main` (2026-11-22).** `uv run pytest -q`: 994 passing; `ruff check .` clean. Part B (long papers) is not started; Part D is decided and recorded in the master plan.

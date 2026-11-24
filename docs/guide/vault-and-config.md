@@ -44,7 +44,7 @@ The pipeline currently writes `vault.sqlite` (which also holds full texts and su
 | `llm_cli_path` | empty | Full path of the subscription CLI (such as `claude`), so the nightly timer finds it. Recorded by `rpipe model setup`. |
 | `sources` | `arxiv, hf_daily` | Paper sources collected from, in order; at least one, no repeats. Change with `rpipe sources list`, `enable NAME`, `disable NAME`. See `sources.md`, `plugins.md`. |
 
-When either is `auto`, the choice is remembered in `cache/llm_fit.json` (the chosen model and context, keyed by the Ollama address and every installed model's name and digest). It is safe to delete; the next run probes again. `rpipe model fit` rewrites it.
+When either is `auto`, the choice is remembered in `cache/llm_fit.json` (the chosen model and context, keyed by the Ollama address and every installed model's name and digest, the Ollama version, the memory-related server settings and the GPUs). It is safe to delete; the next run probes again. `rpipe model fit` rewrites it.
 
 Both files reject unknown keys: a typo such as `keyword:` or `top-n:` stops the command with an error naming the file and the key, instead of being silently ignored.
 

@@ -610,3 +610,57 @@ def test_cached_auto_context_below_the_floor_is_rejected_and_reprobed(mock, tmp_
     assert fake.probes()  # probed again instead of trusting 4096
     assert again.num_ctx >= 8192 and again == first
     assert any("outside what it supports" in line for line in logs)
+
+
+# ---- the cache key includes the machine ----
+
+def test_same_machine_uses_cache(mock, tmp_path):
+    fake = three_models()
+    fake.install(mock)
+    same = lambda url: {"ollama": "0.5.1", "env": {}, "gpus": ["rtx:24.0"]}  # noqa: E731
+    first = resolve(URL, tmp_path, "auto", "auto", machine=same)
+    fake.generate_calls.clear()
+    assert resolve(URL, tmp_path, "auto", "auto", machine=same) == first
+    assert fake.generate_calls == []
+
+
+def test_changed_server_settings_reprobe(mock, tmp_path):
+    fake = three_models()
+    fake.install(mock)
+    before = lambda url: {"ollama": "0.5.1", "env": {}, "gpus": ["rtx:24.0"]}  # noqa: E731
+    after = lambda url: {"ollama": "0.5.1", "env": {"OLLAMA_KV_CACHE_TYPE": "q8_0"}, "gpus": ["rtx:24.0"]}  # noqa: E731
+    resolve(URL, tmp_path, "auto", "auto", machine=before)
+    fake.generate_calls.clear()
+    resolve(URL, tmp_path, "auto", "auto", machine=after)
+    assert fake.probes()
+
+
+def test_new_gpu_reprobe(mock, tmp_path):
+    fake = three_models()
+    fake.install(mock)
+    one = lambda url: {"ollama": "0.5.1", "env": {}, "gpus": ["rtx:24.0"]}  # noqa: E731
+    two = lambda url: {"ollama": "0.5.1", "env": {}, "gpus": ["rtx:24.0", "rtx:24.0"]}  # noqa: E731
+    resolve(URL, tmp_path, "auto", "auto", machine=one)
+    fake.generate_calls.clear()
+    resolve(URL, tmp_path, "auto", "auto", machine=two)
+    assert fake.probes()
+
+
+def test_ollama_upgrade_reprobes_and_cached_fit_follows_the_machine(mock, tmp_path):
+    from research_pipeline.ollama_fit import cached_fit
+    three_models().install(mock)
+    old = lambda url: {"ollama": "0.5.1"}  # noqa: E731
+    new = lambda url: {"ollama": "0.6.0"}  # noqa: E731
+    fit = resolve(URL, tmp_path, "auto", "auto", machine=old)
+    assert cached_fit(URL, tmp_path, "auto", "auto", machine=old) == fit
+    assert cached_fit(URL, tmp_path, "auto", "auto", machine=new) is None
+
+
+def test_cache_written_before_the_machine_key_misses_once(mock, tmp_path):
+    from research_pipeline.ollama_fit import _cache_key, _write_cache, cached_fit
+    fake = three_models()
+    fake.install(mock)
+    models = list_models(URL)
+    _write_cache(tmp_path / "cache" / "llm_fit.json",
+                 {"key": _cache_key(URL, "auto", "auto", models), "model": "mid", "num_ctx": 20000})
+    assert cached_fit(URL, tmp_path, "auto", "auto", machine=lambda url: {"ollama": "1"}) is None

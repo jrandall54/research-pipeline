@@ -5,22 +5,35 @@ import httpx
 import pytest
 import respx
 
+from research_pipeline.catalog import Catalog, CatalogEntry
 from research_pipeline.machine import (
     APPLE_GPU_FRACTION,
     OLLAMA_INSTALL,
     Gpu,
     MachineInfo,
-    ModelChoice,
+    OllamaServer,
     detect_gpu,
     detect_machine,
-    load_model_table,
     ollama_tags,
     recommend,
     system_cmd,
 )
 from research_pipeline.models import Config
 
-TABLE = [ModelChoice(6, "small:8b", 5.0), ModelChoice(12, "mid:14b", 9.0), ModelChoice(24, "big:32b", 20.0)]
+
+def _entry(pull, gb, params, bands, kv=64.0):
+    return CatalogEntry(id=pull, family="Test", pull=pull, arch="dense", params_b=params, quant="Q4_K_M",
+                        download_gb=gb, trained_ctx=131072, kv_mib_per_1k=kv, bands=bands)
+
+
+TABLE = Catalog(version=1, updated="2026-11-24", entries=[
+    _entry("small:8b", 5.0, 8.0, ["cpu", "small"]),
+    _entry("mid:14b", 9.0, 14.0, ["mid"]),
+    _entry("big:32b", 20.0, 32.0, ["high"]),
+])
+
+
+NO_SERVER = lambda url, run: OllamaServer(None, "unknown", {}, [], None)  # noqa: E731
 
 
 def cmds(table):
@@ -123,7 +136,7 @@ def test_detect_machine_with_fakes(tmp_path):
     cfg = Config(vault_path=tmp_path)
     m = detect_machine(cfg, run=run, which=lambda n: "/bin/ollama" if n == "ollama" else None,
                        tags=lambda url: ["qwen3:8b"], claude_logged_in=lambda p: True,
-                       find=lambda recorded: "/x/claude")
+                       find=lambda recorded: "/x/claude", server=NO_SERVER)
     assert m.gpu.vram_gb == pytest.approx(8.0)
     assert m.ollama_installed and m.ollama_running and m.ollama_models == ["qwen3:8b"]
     assert m.claude_path == "/x/claude" and m.claude_logged_in
@@ -131,20 +144,20 @@ def test_detect_machine_with_fakes(tmp_path):
 
 def test_detect_machine_nothing_installed(tmp_path):
     m = detect_machine(Config(vault_path=tmp_path), run=cmds({}), which=lambda n: None,
-                       tags=lambda url: None, claude_logged_in=lambda p: True, find=lambda r: None)
+                       tags=lambda url: None, claude_logged_in=lambda p: True, find=lambda r: None, server=NO_SERVER)
     assert not m.ollama_installed and not m.ollama_running and m.ollama_models == []
     assert m.claude_path is None and not m.claude_logged_in
 
 
 def test_recommend_gpu_with_ollama_no_models_offers_pull():
-    rec = recommend(info(gpu=Gpu("x", 8.0, "nvidia"), ollama_installed=True), TABLE)
-    assert rec.backend == "ollama" and rec.pull.tag == "small:8b" and not rec.install_ollama
+    rec = recommend(info(gpu=Gpu("x", 10.0, "nvidia"), ollama_installed=True), TABLE)
+    assert rec.backend == "ollama" and rec.pull.pull == "small:8b" and not rec.install_ollama
     assert rec.alternatives == ["claude-code", "none"]
 
 
-def test_recommend_picks_largest_fitting():
+def test_recommend_picks_top_ranked_for_the_band():
     rec = recommend(info(gpu=Gpu("x", 16.0, "nvidia"), ollama_installed=True), TABLE)
-    assert rec.pull.tag == "mid:14b"
+    assert rec.pull.pull == "mid:14b"
 
 
 def test_recommend_gpu_with_models_pulls_nothing_and_offers_claude():
@@ -162,7 +175,7 @@ def test_embedding_only_models_do_not_suppress_the_pull():
 
 
 def test_recommend_gpu_without_ollama_says_install():
-    rec = recommend(info(gpu=Gpu("x", 8.0, "nvidia")), TABLE)
+    rec = recommend(info(gpu=Gpu("x", 10.0, "nvidia")), TABLE)
     assert rec.backend == "ollama" and rec.install_ollama
 
 
@@ -171,22 +184,23 @@ def test_recommend_small_gpu_with_claude_picks_claude():
     assert rec.backend == "claude-code" and rec.alternatives == ["ollama", "none"]
 
 
-def test_recommend_claude_lists_ollama_if_installed():
+def test_recommend_cpu_only_with_claude_picks_claude():
     rec = recommend(info(claude_logged_in=True, ollama_installed=True), TABLE)
-    assert rec.alternatives == ["ollama", "none"]
+    assert rec.backend == "claude-code" and rec.alternatives == ["ollama", "none"]
+
+
+def test_recommend_cpu_only_without_cloud_offers_a_cpu_model():
+    rec = recommend(info(ram_gb=16.0, ollama_installed=True), TABLE)
+    assert rec.backend == "ollama" and rec.pull.pull == "small:8b"
+    assert rec.reasons == ["no GPU found; a small model runs on the CPU overnight (slow)"]
 
 
 def test_recommend_nothing_gives_none_with_unlock_reasons():
-    rec = recommend(info(), TABLE)
+    rec = recommend(info(ram_gb=4.0), TABLE)
     text = " ".join(rec.reasons)
     assert rec.backend == "none" and rec.pull is None
-    assert "6 GB" in text and "Claude Code" in text and "CPU" in text
+    assert "GPU" in text and "Claude Code" in text and "CPU" in text
     assert rec.alternatives == ["ollama", "claude-code"]
-
-
-def test_model_table_loads_sorted_and_nonempty():
-    table = load_model_table()
-    assert table and [m.min_vram_gb for m in table] == sorted(m.min_vram_gb for m in table)
 
 
 def test_install_hints_cover_three_systems():

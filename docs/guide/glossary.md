@@ -108,11 +108,11 @@
 
 **Pass mark** — the share of gold papers that must be graded accurate for the model to pass the accuracy check: 90% (`PASS_MARK`), so 9 of 10. Ungraded papers count as not accurate. See `evaluation.md`.
 
-**VRAM** — the memory on your graphics card. Models run fast when everything they need is in VRAM. See "Choosing the model and context automatically" in `llm.md`.
+**VRAM (GPU memory)** — the memory on a graphics card (GPU). A model runs fast when everything it needs (weights plus KV cache) is in VRAM; one that spills into ordinary RAM is much slower. `rpipe model recommend` and `rpipe model setup` compare the VRAM free at scan time with the size of each catalog model. See "Choosing the model and context automatically" in `llm.md` and "Recommendations" in `hardware.md`.
 
 **GPU offload** — how much of a model Ollama keeps on the graphics card versus the CPU. "Fully offloaded" means all of it is on the GPU; a partial offload spills the rest to the CPU and is many times slower. See `llm.md`.
 
-**KV cache** — the working memory a model builds while reading the prompt (a "key" and "value" for each token so far). It grows with the context window, which is why a bigger context can stop a model fitting in VRAM. See `llm.md`.
+**KV cache** — the working memory a model builds while reading the prompt (a "key" and "value" for each token so far). It grows with the context window, which is why a bigger context can stop a model fitting in VRAM. The catalog records how much it needs per 1,000 tokens (`kv_mib_per_1k`). See `llm.md`.
 
 **`auto`** — the default for `llm_model` and `llm_num_ctx`: the pipeline picks the largest installed model that fits fully on the GPU and the largest context it can hold, caches the answer, and re-checks with `rpipe model fit`. See `llm.md`.
 
@@ -196,8 +196,6 @@
 
 **Abstracts-only mode** — running with the `none` backend: no summary model is used, so the digest shows each paper's abstract instead of a summary. The health line says `summaries off (abstracts-only mode)`. See `backends.md`.
 
-**VRAM** — the memory on a graphics card (GPU). A model must fit in it to run fast; `rpipe model setup` compares it with 6 GB and with the model table. See `setup.md`.
-
 **Unified memory** — Apple Silicon's single memory pool shared by CPU and GPU. rpipe counts 66% of it as GPU memory. See `setup.md`.
 
 **Pull (a model)** — downloading a model's files into Ollama so it can run locally (`ollama pull NAME`). `rpipe model setup` offers to do it for you, after a yes/no, and shows download progress. See `setup.md`.
@@ -263,3 +261,33 @@
 **Unreviewed (gold paper)** — a gold paper whose key facts Claude drafted and saved with `rpipe gold auto` without a person checking them. The report says so, because the score then compares runs with each other instead of proving accuracy. See `evaluation.md`, Filling the set with no questions.
 
 **num_predict** — the Ollama option that caps how many tokens the model may write in one answer. We send 4096 with every call so a runaway answer cannot stall a night's run. See `llm.md`.
+
+**CPU vector instructions (AVX2, AVX512, NEON)** — extra processor instructions that do the same arithmetic on many numbers at once. Model software uses them to run much faster on a CPU; `rpipe model scan` lists which ones your CPU has (NEON is the Apple/ARM equivalent). See `hardware.md`, How it works.
+
+**Systemd drop-in file** — a small `.conf` file in a folder like `/etc/systemd/system/ollama.service.d/` that adds to or overrides a service's settings without editing the service file itself. Ollama's `OLLAMA_*` settings are often kept in one. See `hardware.md`, How it works.
+
+**Quantization** — storing a model's numbers with fewer bits (for example 4 instead of 16) so the file and its memory use shrink a lot, at a small cost in quality. Names like `Q4_K_M` or `UD-IQ3_S` say how it was done. See `hardware.md`.
+
+**Mixture of experts (MoE) and active parameters** — a model made of many specialist sub-networks where each token uses only a few. "30B total, 3B active" means all 30 billion must fit in memory, but only 3 billion do work per token, so it runs about as fast as a small model. See `hardware.md`.
+
+**Trained context** — the longest text (in tokens) a model was trained to handle. Asking for more than this makes quality drop, so the catalog records it and the recommender never goes past it. See `hardware.md`.
+
+**Tokens per second** — how fast a model works: how many tokens (small pieces of words) it processes each second. Reading speed (prompt tokens per second) is usually much higher than writing speed (generated tokens per second), because reading can be done in parallel and writing one token depends on the previous one. See `hardware.md`.
+
+**Prompt reading vs writing** — the two phases of a model call. Reading (also "prompt evaluation") takes in the paper; writing (also "generation") produces the summary. Ollama times them separately, which is what `rpipe model bench` uses.
+
+**Benchmark** — a short, repeatable test that measures speed on your own machine, so time estimates come from a measurement and not a guess. See `rpipe model bench` in `hardware.md`.
+
+**Flash attention** — a faster, more memory-frugal way of computing the "attention" step where a model looks back over the text. Ollama turns it on with `OLLAMA_FLASH_ATTENTION=1`; it is needed before the KV cache can be stored in smaller numbers. See `hardware.md`, Server settings.
+
+**KV cache type (`q8_0`)** — how the KV cache numbers are stored. The default keeps 16 bits per number; `q8_0` keeps 8, so the cache takes about half the memory and a longer context fits, with a very small quality cost. Set with `OLLAMA_KV_CACHE_TYPE=q8_0`. See `hardware.md`, Server settings.
+
+**Parallel slots** — how many requests Ollama serves at once (`OLLAMA_NUM_PARALLEL`). Each slot reserves its own context memory, so more slots mean a shorter context for each. `rpipe` sends one paper at a time, so 1 is enough. See `hardware.md`, Server settings.
+
+**sudo** — a Linux command that runs another command with administrator rights after asking for your password. `rpipe model tune` runs its commands through `sudo` in your own terminal and never sees the password. See `hardware.md`, Server settings.
+
+**Band (size class)** — a rough label for how big a computer is for running models, from its total GPU memory: `cpu` (under 4 GB), `small` (under 8 GB), `mid` (up to about 16 GB), `high` (up to about 24 GB), `very_large` (more). Each catalog model lists the bands it suits, and the recommender puts those models first. See "Recommendations" in `hardware.md`.
+
+**Spill / offload to RAM** — running a model that does not fit in GPU memory with part of it in the computer's ordinary memory (RAM). The CPU then does that part, which is slower. For a mixture-of-experts model only a few experts work per token, so the slowdown is modest; for a dense model it is severe, so rpipe only suggests spilling mixture-of-experts models. See "Recommendations" in `hardware.md`.
+
+**GB vs GiB** — two units for memory. A GB is 1,000,000,000 bytes; a GiB is 2^30 = 1,073,741,824 bytes, about 7% more. Download sizes are usually in GB, while `nvidia-smi` and Ollama report GPU memory in GiB (often labelled "GB" anyway). The recommender converts download sizes to GiB before comparing them with GPU memory. See "Recommendations" in `hardware.md`.

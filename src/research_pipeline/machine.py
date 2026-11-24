@@ -4,42 +4,42 @@ Every probe goes through an injected command runner, so tests never run a real t
 """
 from __future__ import annotations
 
-import json
 import platform
 import shutil
-import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
-from importlib import resources
+from dataclasses import dataclass, field
 from typing import Literal
 
 import httpx
-import yaml
 
 from research_pipeline.backends.claude_code import find_claude, logged_in
+from research_pipeline.catalog import Catalog, CatalogEntry
 from research_pipeline.models import Config
+from research_pipeline.scan import (  # re-exported: other modules and tests import these from here
+    APPLE_GPU_FRACTION,
+    GIB,
+    PROBE_TIMEOUT,
+    CmdRunner,
+    CpuInfo,
+    Gpu,
+    OllamaServer,
+    all_gpus,
+    best_gpu,
+    detect_cpu,
+    detect_ollama_server,
+    disk_free_gb,
+    ollama_models_dir,
+    ram_free_gb,
+    system_cmd,
+)
 
-MIN_GPU_VRAM_GB = 6.0
-# Apple Silicon shares one memory pool between CPU and GPU, and macOS lets the GPU use roughly
-# two thirds of it by default, so only that share is counted as GPU memory.
-APPLE_GPU_FRACTION = 0.66
-PROBE_TIMEOUT = 5.0
-GIB = 1024**3
-
-CmdRunner = Callable[[list[str], float], tuple[int, str]]
+__all__ = ["APPLE_GPU_FRACTION", "GIB", "PROBE_TIMEOUT", "CmdRunner", "Gpu", "system_cmd"]
 
 OLLAMA_INSTALL = {
     "Linux": "curl -fsSL https://ollama.com/install.sh | sh",
     "Darwin": "brew install ollama (or download it from https://ollama.com/download)",
     "Windows": "download it from https://ollama.com/download",
 }
-
-
-@dataclass
-class Gpu:
-    name: str
-    vram_gb: float
-    kind: Literal["nvidia", "amd", "apple"]
 
 
 @dataclass
@@ -52,33 +52,20 @@ class MachineInfo:
     ollama_models: list[str]
     claude_path: str | None
     claude_logged_in: bool
-
-
-@dataclass(frozen=True)
-class ModelChoice:
-    min_vram_gb: float
-    tag: str
-    download_gb: float
+    gpus: list[Gpu] = field(default_factory=list)  # every card; `gpu` is the best one
+    cpu: CpuInfo | None = None
+    ram_free_gb: float | None = None
+    disk_free_gb: float | None = None  # free space where Ollama stores models
+    ollama: OllamaServer | None = None
 
 
 @dataclass
 class Recommendation:
     backend: Literal["ollama", "claude-code", "none"]
-    pull: ModelChoice | None
+    pull: CatalogEntry | None  # a catalog model to download, if any
     install_ollama: bool
     alternatives: list[str]
     reasons: list[str]
-
-
-def system_cmd(argv: list[str], timeout: float) -> tuple[int, str]:
-    """Run a command; (127, "") if the binary is missing, (124, "") on timeout. Never raises."""
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return 124, ""
-    except OSError:
-        return 127, ""
-    return done.returncode, done.stdout
 
 
 def ollama_tags(url: str) -> list[str] | None:
@@ -91,64 +78,9 @@ def ollama_tags(url: str) -> list[str] | None:
         return None
 
 
-def _nvidia(run: CmdRunner) -> Gpu | None:
-    code, out = run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                    PROBE_TIMEOUT)
-    if code != 0:
-        return None
-    best: Gpu | None = None
-    for line in out.splitlines():
-        name, _, mem = line.rpartition(",")
-        try:
-            gb = float(mem.strip()) / 1024  # MiB -> GiB
-        except ValueError:
-            continue
-        if name.strip() and (best is None or gb > best.vram_gb):
-            best = Gpu(name.strip(), gb, "nvidia")
-    return best
-
-
-def _amd(run: CmdRunner) -> Gpu | None:
-    code, out = run(["rocm-smi", "--showmeminfo", "vram", "--json"], PROBE_TIMEOUT)
-    if code != 0:
-        return None
-    try:
-        data = json.loads(out)
-        items = list(data.items())
-    except (ValueError, AttributeError):
-        return None
-    best: Gpu | None = None
-    for card, vals in items:
-        try:
-            gb = int(vals["VRAM Total Memory (B)"]) / GIB
-        except (ValueError, KeyError, TypeError):
-            continue  # one unreadable card (or a non-card key) must not hide the others
-        if best is None or gb > best.vram_gb:
-            best = Gpu(card, gb, "amd")
-    return best
-
-
-def _apple(run: CmdRunner) -> Gpu | None:
-    code, out = run(["sysctl", "-n", "hw.memsize"], PROBE_TIMEOUT)
-    try:
-        total = int(out.strip())
-    except ValueError:
-        return None
-    if code != 0:
-        return None
-    return Gpu("Apple Silicon (unified memory)", total / GIB * APPLE_GPU_FRACTION, "apple")
-
-
 def detect_gpu(run: CmdRunner, system: str, arch: str) -> Gpu | None:
     """The best GPU found, trying NVIDIA, AMD, then Apple Silicon. A failing probe is skipped."""
-    probes: list[Callable[[CmdRunner], Gpu | None]] = [_nvidia, _amd]
-    if system == "Darwin" and arch == "arm64":
-        probes.append(_apple)
-    for probe in probes:
-        gpu = probe(run)
-        if gpu is not None:
-            return gpu
-    return None
+    return best_gpu(run, system, arch)
 
 
 def _ram_gb(run: CmdRunner, system: str) -> float | None:
@@ -172,27 +104,29 @@ def detect_machine(
     tags: Callable[[str], list[str] | None] = ollama_tags,
     claude_logged_in: Callable[[str], bool] = logged_in,
     find: Callable[[str | None], str | None] = find_claude,
+    server: Callable[[str, CmdRunner], OllamaServer] = detect_ollama_server,
 ) -> MachineInfo:
     system = platform.system()
     served = tags(config.llm_url)
     claude = find(config.llm_cli_path)
+    arch = platform.machine()
+    gpus = all_gpus(run, system, arch)
+    ollama = server(config.llm_url, run)
     return MachineInfo(
         os=system,
         ram_gb=_ram_gb(run, system),
-        gpu=detect_gpu(run, system, platform.machine()),
+        gpu=detect_gpu(run, system, arch),
         ollama_installed=which("ollama") is not None or served is not None,
         ollama_running=served is not None,
         ollama_models=served or [],
         claude_path=claude,
         claude_logged_in=bool(claude) and claude_logged_in(claude),
+        gpus=gpus,
+        cpu=detect_cpu(run, system),
+        ram_free_gb=ram_free_gb(system),
+        disk_free_gb=disk_free_gb(ollama_models_dir(ollama)),
+        ollama=ollama,
     )
-
-
-def load_model_table() -> list[ModelChoice]:
-    text = resources.files("research_pipeline.defaults").joinpath("ollama_models.yaml").read_text("utf-8")
-    rows = [ModelChoice(float(r["min_vram_gb"]), str(r["tag"]), float(r["download_gb"]))
-            for r in yaml.safe_load(text)]
-    return sorted(rows, key=lambda m: m.min_vram_gb)
 
 
 BUILTIN_BACKENDS: tuple[Literal["ollama", "claude-code", "none"], ...] = ("ollama", "claude-code", "none")
@@ -208,22 +142,39 @@ def _others(first: str) -> list[str]:
     return [b for b in BUILTIN_BACKENDS if b != first]
 
 
-def recommend(info: MachineInfo, table: list[ModelChoice]) -> Recommendation:
+def recommend(info: MachineInfo, catalog: Catalog) -> Recommendation:
     """Pick the best backend for this machine. The menu always lists all three built-ins
-    (`alternatives`); setup re-checks a choice that is not installed or logged in yet."""
+    (`alternatives`); setup re-checks a choice that is not installed or logged in yet.
+
+    1. A catalog model fits on the GPU (fully, or a mixture of experts partly in RAM): `ollama`.
+    2. Otherwise a Claude Code login: `claude-code`.
+    3. Otherwise a model fits in RAM on the CPU: `ollama` (slow but fine overnight).
+    4. Otherwise `none`.
+    With `ollama` and no text-writing model installed yet, `pull` is the top-ranked model."""
+    from research_pipeline.recommender import rank, total_vram  # recommender imports this module
+
+    ranked = rank(info, catalog, {})
+    pull = ranked[0].entry if ranked and not _generation_models(info.ollama_models) else None
+    install = not info.ollama_installed
+    if ranked and ranked[0].placement in ("gpu", "spill"):
+        vram = total_vram(info)
+        who = (f"{len(info.gpus)} GPUs together have" if len(info.gpus) > 1
+               else f"{info.gpu.name} has" if info.gpu is not None else "the GPU has")
+        reasons = [f"{who} {vram:.1f} GB of GPU memory, enough to run a model locally"]
+        return Recommendation("ollama", pull, install, _others("ollama"), reasons)
     gpu = info.gpu
-    if gpu is not None and gpu.vram_gb >= MIN_GPU_VRAM_GB:
-        fitting = [m for m in table if m.min_vram_gb <= gpu.vram_gb]
-        pull = fitting[-1] if fitting and not _generation_models(info.ollama_models) else None
-        reasons = [f"{gpu.name} has {gpu.vram_gb:.1f} GB of GPU memory, enough to run a model locally"]
-        return Recommendation("ollama", pull, not info.ollama_installed, _others("ollama"), reasons)
+    vram = total_vram(info)
     if info.claude_logged_in:
-        why = ("no GPU with at least 6 GB was found" if gpu is None
-               else f"the GPU has only {gpu.vram_gb:.1f} GB (6 GB needed)")
+        why = ("no GPU was found" if gpu is None
+               else f"no catalog model fits the GPU's {vram:.1f} GB")
         return Recommendation("claude-code", None, False, _others("claude-code"),
                               [f"{why}, but you are logged in to Claude Code"])
+    if ranked:
+        where = "no GPU found" if gpu is None else f"the GPU's {vram:.1f} GB is too little for a model"
+        return Recommendation("ollama", pull, install, _others("ollama"),
+                              [f"{where}; a small model runs on the CPU overnight (slow)"])
     return Recommendation("none", None, False, _others("none"), [
-        "no GPU with at least 6 GB of memory and no Claude Code login were found",
-        "a GPU with 6 GB or more plus Ollama, or a Claude Code login, would unlock summaries",
-        "a CPU-friendly pipeline is planned",
+        "no model in the catalog fits this computer's GPU memory or its memory (RAM), "
+        "and there is no Claude Code login",
+        "a bigger GPU plus Ollama, more memory for a model on the CPU, or a Claude Code login would unlock summaries",
     ])

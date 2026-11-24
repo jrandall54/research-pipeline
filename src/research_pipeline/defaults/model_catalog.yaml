@@ -1,0 +1,380 @@
+# Shipped model catalog. Checked 2026-11-24 against the Ollama registry, Hugging Face file listings and config.json files.
+# kv_mib_per_1k = L_full * 2 * n_kv_heads * head_dim * 2 bytes * 1000 / 2^20 (f16 KV cache; layers with sliding-window or linear attention are skipped).
+# download_gb = bytes / 1e9. Sources and formula inputs are in the comment above each entry.
+version: 1
+updated: 2026-11-24
+entries:
+  # qwen3-4b-instruct-2507-q4km: L_full=36, n_kv_heads=8, head_dim=128 -> 140.6 MiB/1k
+  # inputs: 36 layers all full attention, 8 KV heads, head_dim 128, max_position_embeddings 262144
+  # source: https://ollama.com/library/qwen3/tags (tag exists)
+  # source: https://registry.ollama.ai/v2/library/qwen3/manifests/4b-instruct-2507-q4_K_M (size 2,497,280,480 B)
+  # source: https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/raw/main/config.json
+  - id: qwen3-4b-instruct-2507-q4km
+    family: Qwen3
+    pull: qwen3:4b-instruct-2507-q4_K_M
+    arch: dense
+    params_b: 4.0
+    quant: Q4_K_M
+    download_gb: 2.5
+    trained_ctx: 262144
+    kv_mib_per_1k: 140.6
+    bands:
+    - cpu
+    - small
+    notes: Non-thinking instruct model; the smallest option here that is still useful for summaries.
+
+  # qwen3-8b-q4km: L_full=36, n_kv_heads=8, head_dim=128 -> 140.6 MiB/1k
+  # inputs: 36 layers all full, 8 KV heads, head_dim 128, max_position_embeddings 40960
+  # source: https://registry.ollama.ai/v2/library/qwen3/manifests/8b (size 5,225,374,496 B)
+  # source: https://huggingface.co/Qwen/Qwen3-8B/raw/main/config.json
+  - id: qwen3-8b-q4km
+    family: Qwen3
+    pull: qwen3:8b
+    arch: dense
+    params_b: 8.2
+    quant: Q4_K_M
+    download_gb: 5.2
+    trained_ctx: 40960
+    kv_mib_per_1k: 140.6
+    bands:
+    - cpu
+    - small
+    - mid
+    notes: Hybrid thinking model (can reason before answering). Good all-round pick for 8 GB cards.
+
+  # gemma3-4b-q4km: L_full=5, n_kv_heads=4, head_dim=256 -> 19.5 MiB/1k
+  # inputs: 34 layers, sliding_window_pattern 6 so floor(34/6)=5 full-attention layers, 4 KV heads, head_dim 256, max_position_embeddings 131072
+  # source: https://registry.ollama.ai/v2/library/gemma3/manifests/4b (total layers 3,350,272,259 B)
+  # source: https://huggingface.co/unsloth/gemma-3-4b-it/raw/main/config.json (mirror of the gated google repo)
+  - id: gemma3-4b-q4km
+    family: Gemma 3
+    pull: gemma3:4b
+    arch: dense
+    params_b: 4.0
+    quant: Q4_K_M
+    download_gb: 3.4
+    trained_ctx: 131072
+    kv_mib_per_1k: 19.5
+    bands:
+    - cpu
+    - small
+    notes: Download includes the vision projector. 5 of 34 layers use full attention; the rest keep only
+      a 1024-token window.
+
+  # llama3.1-8b-q4km: L_full=32, n_kv_heads=8, head_dim=128 -> 125.0 MiB/1k
+  # inputs: 32 layers all full, 8 KV heads, head_dim 128, max_position_embeddings 131072
+  # source: https://registry.ollama.ai/v2/library/llama3.1/manifests/8b (size 4,920,738,944 B)
+  # source: https://huggingface.co/unsloth/Llama-3.1-8B-Instruct/raw/main/config.json (mirror of the gated meta repo)
+  - id: llama3.1-8b-q4km
+    family: Llama 3.1
+    pull: llama3.1:8b
+    arch: dense
+    params_b: 8.0
+    quant: Q4_K_M
+    download_gb: 4.9
+    trained_ctx: 131072
+    kv_mib_per_1k: 125.0
+    bands:
+    - cpu
+    - small
+    notes: Older (2024) but well-tested instruct model with a long context.
+
+  # gemma3-12b-q4km: L_full=8, n_kv_heads=8, head_dim=256 -> 62.5 MiB/1k
+  # inputs: 48 layers, pattern 6 so 8 full-attention layers, 8 KV heads, head_dim 256, max_position_embeddings 131072
+  # source: https://registry.ollama.ai/v2/library/gemma3/manifests/12b (total layers 8,164,039,587 B)
+  # source: https://huggingface.co/unsloth/gemma-3-12b-it/raw/main/config.json
+  - id: gemma3-12b-q4km
+    family: Gemma 3
+    pull: gemma3:12b
+    arch: dense
+    params_b: 12.0
+    quant: Q4_K_M
+    download_gb: 8.2
+    trained_ctx: 131072
+    kv_mib_per_1k: 62.5
+    bands:
+    - mid
+    notes: Download includes the vision projector. 8 of 48 layers use full attention.
+
+  # qwen3-14b-q4km: L_full=40, n_kv_heads=8, head_dim=128 -> 156.2 MiB/1k
+  # inputs: 40 layers all full, 8 KV heads, head_dim 128, max_position_embeddings 40960
+  # source: https://registry.ollama.ai/v2/library/qwen3/manifests/14b (size 9,276,184,896 B)
+  # source: https://huggingface.co/Qwen/Qwen3-14B/raw/main/config.json
+  - id: qwen3-14b-q4km
+    family: Qwen3
+    pull: qwen3:14b
+    arch: dense
+    params_b: 14.8
+    quant: Q4_K_M
+    download_gb: 9.3
+    trained_ctx: 40960
+    kv_mib_per_1k: 156.2
+    bands:
+    - mid
+    - high
+    notes: Hybrid thinking model. Comfortable on 12-16 GB cards.
+
+  # gpt-oss-20b-mxfp4: L_full=12, n_kv_heads=8, head_dim=64 -> 23.4 MiB/1k
+  # inputs: 24 layers (12 full_attention, 12 sliding_attention), 8 KV heads, head_dim 64, max_position_embeddings 131072, 32 experts with 4 active per token. Total 21B / active 3.6B from the model card, not config.json
+  # source: https://registry.ollama.ai/v2/library/gpt-oss/manifests/20b (size 13,793,422,816 B)
+  # source: https://huggingface.co/openai/gpt-oss-20b/raw/main/config.json
+  - id: gpt-oss-20b-mxfp4
+    family: gpt-oss
+    pull: gpt-oss:20b
+    arch: moe
+    params_b: 21.0
+    active_b: 3.6
+    quant: MXFP4
+    download_gb: 13.8
+    trained_ctx: 131072
+    kv_mib_per_1k: 23.4
+    bands:
+    - cpu
+    - mid
+    - high
+    notes: Reasoning model (always thinks first). 12 of 24 layers use a 128-token window, so the KV figure
+      counts only the 12 full layers.
+
+  # qwen3-30b-a3b-instruct-2507-q4km: L_full=48, n_kv_heads=4, head_dim=128 -> 93.8 MiB/1k
+  # inputs: 48 layers all full, 4 KV heads, head_dim 128, max_position_embeddings 262144, 128 experts with 8 active. 30.5B / 3.3B from the model card, not config.json
+  # source: https://registry.ollama.ai/v2/library/qwen3/manifests/30b-a3b-instruct-2507-q4_K_M (size 18,556,685,856 B)
+  # source: https://huggingface.co/Qwen/Qwen3-30B-A3B-Instruct-2507/raw/main/config.json
+  - id: qwen3-30b-a3b-instruct-2507-q4km
+    family: Qwen3
+    pull: qwen3:30b-a3b-instruct-2507-q4_K_M
+    arch: moe
+    params_b: 30.5
+    active_b: 3.3
+    quant: Q4_K_M
+    download_gb: 18.6
+    trained_ctx: 262144
+    kv_mib_per_1k: 93.8
+    bands:
+    - cpu
+    - high
+    - very_large
+    notes: Non-thinking instruct MoE; only 3.3B parameters work per token, so it is fast even when part
+      of it sits in RAM.
+
+  # qwen3.6-35b-a3b-ud-iq3s: L_full=10, n_kv_heads=2, head_dim=256 -> 19.5 MiB/1k
+  # inputs: 40 layers, 10 full_attention (30 linear_attention), 2 KV heads, head_dim 256, max_position_embeddings 262144. 35B / 3B active from the model name
+  # source: https://huggingface.co/api/models/unsloth/Qwen3.6-35B-A3B-GGUF/tree/main (Qwen3.6-35B-A3B-UD-IQ3_S.gguf 13,676,723,168 B)
+  # source: https://huggingface.co/Qwen/Qwen3.6-35B-A3B/raw/main/config.json
+  - id: qwen3.6-35b-a3b-ud-iq3s
+    family: Qwen3.6
+    pull: hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S
+    arch: moe
+    params_b: 35.0
+    active_b: 3.0
+    quant: UD-IQ3_S
+    download_gb: 13.7
+    trained_ctx: 262144
+    kv_mib_per_1k: 19.5
+    bands:
+    - cpu
+    - mid
+    - high
+    notes: About 2x faster than a 27B dense model in a 10-paper test, but covered fewer key facts and produced
+      unverified citations; partly in RAM on 16 GB. 30 of 40 layers are linear attention (fixed-size state,
+      not counted in KV).
+
+  # qwen3.6-35b-a3b-ud-q4km: L_full=10, n_kv_heads=2, head_dim=256 -> 19.5 MiB/1k
+  # inputs: same as the IQ3_S entry: 10 full layers, 2 KV heads, head_dim 256
+  # source: https://huggingface.co/api/models/unsloth/Qwen3.6-35B-A3B-GGUF/tree/main (Qwen3.6-35B-A3B-UD-Q4_K_M.gguf 22,134,528,992 B)
+  # source: https://huggingface.co/Qwen/Qwen3.6-35B-A3B/raw/main/config.json
+  - id: qwen3.6-35b-a3b-ud-q4km
+    family: Qwen3.6
+    pull: hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M
+    arch: moe
+    params_b: 35.0
+    active_b: 3.0
+    quant: UD-Q4_K_M
+    download_gb: 22.1
+    trained_ctx: 262144
+    kv_mib_per_1k: 19.5
+    bands:
+    - high
+    - very_large
+    notes: Higher-quality quant of the same model; leaves little room for context on a 24 GB card.
+
+  # gemma4-26b-a4b-ud-iq4xs: L_full=5, n_kv_heads=2, head_dim=512 -> 19.5 MiB/1k
+  # inputs: 30 layers, 5 full_attention, num_global_key_value_heads 2, global_head_dim 512, attention_k_eq_v true, max_position_embeddings 262144. 26B / 4B active from the model name
+  # source: https://huggingface.co/api/models/unsloth/gemma-4-26B-A4B-it-GGUF/tree/main (gemma-4-26B-A4B-it-UD-IQ4_XS.gguf 13,597,177,568 B)
+  # source: https://huggingface.co/google/gemma-4-26B-A4B-it/raw/main/config.json
+  - id: gemma4-26b-a4b-ud-iq4xs
+    family: Gemma 4
+    pull: hf.co/unsloth/gemma-4-26B-A4B-it-GGUF:UD-IQ4_XS
+    arch: moe
+    params_b: 26.0
+    active_b: 4.0
+    quant: UD-IQ4_XS
+    download_gb: 13.6
+    trained_ctx: 262144
+    kv_mib_per_1k: 19.5
+    bands:
+    - cpu
+    - mid
+    - high
+    notes: From the owner's bake-off. 25 of 30 layers use a 1024-token window and are not counted; the window
+      layers add a fixed ~200 MiB regardless of context. K and V are shared in full-attention layers, so
+      the figure may be about 2x too high (safe side).
+
+  # gemma4-26b-a4b-ud-q8: L_full=5, n_kv_heads=2, head_dim=512 -> 19.5 MiB/1k
+  # inputs: same as the IQ4_XS entry
+  # source: https://huggingface.co/api/models/unsloth/gemma-4-26B-A4B-it-GGUF/tree/main (gemma-4-26B-A4B-it-Q8_0.gguf 26,859,861,728 B)
+  # source: https://huggingface.co/google/gemma-4-26B-A4B-it/raw/main/config.json
+  - id: gemma4-26b-a4b-ud-q8
+    family: Gemma 4
+    pull: hf.co/unsloth/gemma-4-26B-A4B-it-GGUF:Q8_0
+    arch: moe
+    params_b: 26.0
+    active_b: 4.0
+    quant: Q8_0
+    download_gb: 26.9
+    trained_ctx: 262144
+    kv_mib_per_1k: 19.5
+    bands:
+    - very_large
+    notes: Near-lossless quant for 32 GB and larger setups.
+
+  # qwen3.6-27b-ud-iq3xxs: L_full=16, n_kv_heads=4, head_dim=256 -> 62.5 MiB/1k
+  # inputs: 64 layers, 16 full_attention (48 linear_attention), 4 KV heads, head_dim 256, max_position_embeddings 262144
+  # source: https://huggingface.co/api/models/unsloth/Qwen3.6-27B-GGUF/tree/main (Qwen3.6-27B-UD-IQ3_XXS.gguf 11,994,777,824 B)
+  # source: https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/config.json
+  - id: qwen3.6-27b-ud-iq3xxs
+    family: Qwen3.6
+    pull: hf.co/unsloth/Qwen3.6-27B-GGUF:UD-IQ3_XXS
+    arch: dense
+    params_b: 27.0
+    quant: UD-IQ3_XXS
+    download_gb: 12.0
+    trained_ctx: 262144
+    kv_mib_per_1k: 62.5
+    bands:
+    - mid
+    - high
+    notes: Dense 27B squeezed to about 12 GB (the repo has no IQ3_S file; this is the closest 3-bit quant).
+      Tight on a 12 GB card; best on 16 GB. 48 of 64 layers are linear attention.
+
+  # qwen3.6-27b-q4km: L_full=16, n_kv_heads=4, head_dim=256 -> 62.5 MiB/1k
+  # inputs: same as the UD-IQ3_XXS entry
+  # source: https://huggingface.co/api/models/unsloth/Qwen3.6-27B-GGUF/tree/main (Qwen3.6-27B-Q4_K_M.gguf 16,817,244,384 B)
+  # source: https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/config.json
+  - id: qwen3.6-27b-q4km
+    family: Qwen3.6
+    pull: hf.co/unsloth/Qwen3.6-27B-GGUF:Q4_K_M
+    arch: dense
+    params_b: 27.0
+    quant: Q4_K_M
+    download_gb: 16.8
+    trained_ctx: 262144
+    kv_mib_per_1k: 62.5
+    bands:
+    - high
+    notes: Standard 4-bit quant of the dense 27B; fits a 24 GB card with room for long context.
+
+  # qwen3.6-27b-q8: L_full=16, n_kv_heads=4, head_dim=256 -> 62.5 MiB/1k
+  # inputs: same as the UD-IQ3_XXS entry
+  # source: https://huggingface.co/api/models/unsloth/Qwen3.6-27B-GGUF/tree/main (Qwen3.6-27B-Q8_0.gguf 28,595,763,424 B)
+  # source: https://huggingface.co/Qwen/Qwen3.6-27B/raw/main/config.json
+  - id: qwen3.6-27b-q8
+    family: Qwen3.6
+    pull: hf.co/unsloth/Qwen3.6-27B-GGUF:Q8_0
+    arch: dense
+    params_b: 27.0
+    quant: Q8_0
+    download_gb: 28.6
+    trained_ctx: 262144
+    kv_mib_per_1k: 62.5
+    bands:
+    - very_large
+    notes: Near-lossless 8-bit quant of the dense 27B.
+
+  # qwen3-32b-q4km: L_full=64, n_kv_heads=8, head_dim=128 -> 250.0 MiB/1k
+  # inputs: 64 layers all full, 8 KV heads, head_dim 128, max_position_embeddings 40960
+  # source: https://registry.ollama.ai/v2/library/qwen3/manifests/32b (size 20,201,240,160 B)
+  # source: https://huggingface.co/Qwen/Qwen3-32B/raw/main/config.json
+  - id: qwen3-32b-q4km
+    family: Qwen3
+    pull: qwen3:32b
+    arch: dense
+    params_b: 32.8
+    quant: Q4_K_M
+    download_gb: 20.2
+    trained_ctx: 40960
+    kv_mib_per_1k: 250.0
+    bands:
+    - high
+    - very_large
+    notes: 'Hybrid thinking model. 64 full-attention layers make its context expensive: about 250 MiB per
+      1,000 tokens.'
+
+  # gemma3-27b-q4km: L_full=10, n_kv_heads=16, head_dim=128 -> 78.1 MiB/1k
+  # inputs: 62 layers, pattern 6 so 10 full-attention layers, 16 KV heads, head_dim 128, max_position_embeddings 131072
+  # source: https://registry.ollama.ai/v2/library/gemma3/manifests/27b (total layers 17,413,409,507 B)
+  # source: https://huggingface.co/unsloth/gemma-3-27b-it/raw/main/config.json
+  - id: gemma3-27b-q4km
+    family: Gemma 3
+    pull: gemma3:27b
+    arch: dense
+    params_b: 27.0
+    quant: Q4_K_M
+    download_gb: 17.4
+    trained_ctx: 131072
+    kv_mib_per_1k: 78.1
+    bands:
+    - high
+    notes: Download includes the vision projector. 10 of 62 layers use full attention.
+
+  # mistral-small3.2-24b-q4km: L_full=40, n_kv_heads=8, head_dim=128 -> 156.2 MiB/1k
+  # inputs: 40 layers all full, 8 KV heads, head_dim 128, max_position_embeddings 131072
+  # source: https://registry.ollama.ai/v2/library/mistral-small3.2/manifests/24b (size 15,177,369,888 B)
+  # source: https://huggingface.co/mistralai/Mistral-Small-3.2-24B-Instruct-2506/raw/main/config.json
+  - id: mistral-small3.2-24b-q4km
+    family: Mistral Small
+    pull: mistral-small3.2:24b
+    arch: dense
+    params_b: 24.0
+    quant: Q4_K_M
+    download_gb: 15.2
+    trained_ctx: 131072
+    kv_mib_per_1k: 156.2
+    bands:
+    - high
+    notes: Instruct model with a 128K context; the weights alone nearly fill 16 GB, so it needs 24 GB for
+      useful context.
+
+  # gpt-oss-120b-mxfp4: L_full=18, n_kv_heads=8, head_dim=64 -> 35.2 MiB/1k
+  # inputs: 36 layers (18 full_attention, 18 sliding), 8 KV heads, head_dim 64, max_position_embeddings 131072. 117B / 5.1B from the model card
+  # source: https://registry.ollama.ai/v2/library/gpt-oss/manifests/120b (size 65,369,800,832 B)
+  # source: https://huggingface.co/openai/gpt-oss-120b/raw/main/config.json
+  - id: gpt-oss-120b-mxfp4
+    family: gpt-oss
+    pull: gpt-oss:120b
+    arch: moe
+    params_b: 117.0
+    active_b: 5.1
+    quant: MXFP4
+    download_gb: 65.4
+    trained_ctx: 131072
+    kv_mib_per_1k: 35.2
+    bands:
+    - very_large
+    notes: Reasoning model. Needs about 80 GB of memory in total (GPU plus RAM) to run well.
+
+  # llama3.3-70b-q4km: L_full=80, n_kv_heads=8, head_dim=128 -> 312.5 MiB/1k
+  # inputs: 80 layers all full, 8 KV heads, head_dim 128, max_position_embeddings 131072
+  # source: https://registry.ollama.ai/v2/library/llama3.3/manifests/70b (size 42,520,398,528 B)
+  # source: https://huggingface.co/unsloth/Llama-3.3-70B-Instruct/raw/main/config.json
+  - id: llama3.3-70b-q4km
+    family: Llama 3.3
+    pull: llama3.3:70b
+    arch: dense
+    params_b: 70.0
+    quant: Q4_K_M
+    download_gb: 42.5
+    trained_ctx: 131072
+    kv_mib_per_1k: 312.5
+    bands:
+    - very_large
+    notes: Dense 70B; needs about 48 GB of GPU memory or a large RAM spill (slow).

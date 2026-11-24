@@ -54,7 +54,8 @@ New to the project? Read in this order:
 16. [plugins.md](plugins.md): plug-ins, entry points, `rpipe plugins` and `rpipe sources`
 17. [backends.md](backends.md): the summary backends (Ollama, Claude Code, none) and how they differ
 18. [setup.md](setup.md): the setup walkthrough (`rpipe model setup`, also the first step of `rpipe init`): how your machine is checked, a backend recommended, chosen and tested
-19. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+19. [hardware.md](hardware.md): `rpipe model scan` and how rpipe reads your machine (CPU, memory, disk, every GPU, the Ollama server's settings); later sections cover recommending, tuning and benchmarking
+20. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Follow the quickstart in the top-level `README.md` (install, `rpipe init`, `rpipe run`, `rpipe schedule install`), then read [running.md](running.md), then [profile.md](profile.md) for setting up your profile.
 
@@ -90,6 +91,7 @@ Just want to use it? Follow the quickstart in the top-level `README.md` (install
 - `shelf.py`: your own notes and writing, indexed for ranking.
 - `registry.py`: built-in and installed plug-ins.
 - `machine.py`: looks at your computer and recommends a backend.
+- `scan.py`: the probes behind `rpipe model scan` (CPU, memory, disk, every GPU, Ollama server settings).
 - `run_lock.py`: stops two `rpipe run`s working on one vault at once.
 - `progress.py`: progress events (data objects) that stages emit instead of printing; no package imports, so it can be shared.
 - `progress_render.py`: turns progress events into stderr output (a live spinner on a terminal, plain lines otherwise); see [running.md](running.md).

@@ -263,3 +263,9 @@
 **Unreviewed (gold paper)** — a gold paper whose key facts Claude drafted and saved with `rpipe gold auto` without a person checking them. The report says so, because the score then compares runs with each other instead of proving accuracy. See `evaluation.md`, Filling the set with no questions.
 
 **num_predict** — the Ollama option that caps how many tokens the model may write in one answer. We send 4096 with every call so a runaway answer cannot stall a night's run. See `llm.md`.
+
+**CPU vector instructions (AVX2, AVX512, NEON)** — extra processor instructions that do the same arithmetic on many numbers at once. Model software uses them to run much faster on a CPU; `rpipe model scan` lists which ones your CPU has (NEON is the Apple/ARM equivalent). See `hardware.md`, How it works.
+
+**Systemd drop-in file** — a small `.conf` file in a folder like `/etc/systemd/system/ollama.service.d/` that adds to or overrides a service's settings without editing the service file itself. Ollama's `OLLAMA_*` settings are often kept in one. See `hardware.md`, How it works.
+
+**VRAM (GPU memory)** — the memory on the graphics card. A model that fits entirely in VRAM runs fast; one that spills into ordinary RAM is much slower. See `hardware.md`.

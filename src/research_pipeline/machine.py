@@ -4,12 +4,10 @@ Every probe goes through an injected command runner, so tests never run a real t
 """
 from __future__ import annotations
 
-import json
 import platform
 import shutil
-import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 from typing import Literal
 
@@ -18,28 +16,33 @@ import yaml
 
 from research_pipeline.backends.claude_code import find_claude, logged_in
 from research_pipeline.models import Config
+from research_pipeline.scan import (  # re-exported: other modules and tests import these from here
+    APPLE_GPU_FRACTION,
+    GIB,
+    PROBE_TIMEOUT,
+    CmdRunner,
+    CpuInfo,
+    Gpu,
+    OllamaServer,
+    all_gpus,
+    best_gpu,
+    detect_cpu,
+    detect_ollama_server,
+    disk_free_gb,
+    ollama_models_dir,
+    ram_free_gb,
+    system_cmd,
+)
+
+__all__ = ["APPLE_GPU_FRACTION", "GIB", "PROBE_TIMEOUT", "CmdRunner", "Gpu", "system_cmd"]
 
 MIN_GPU_VRAM_GB = 6.0
-# Apple Silicon shares one memory pool between CPU and GPU, and macOS lets the GPU use roughly
-# two thirds of it by default, so only that share is counted as GPU memory.
-APPLE_GPU_FRACTION = 0.66
-PROBE_TIMEOUT = 5.0
-GIB = 1024**3
-
-CmdRunner = Callable[[list[str], float], tuple[int, str]]
 
 OLLAMA_INSTALL = {
     "Linux": "curl -fsSL https://ollama.com/install.sh | sh",
     "Darwin": "brew install ollama (or download it from https://ollama.com/download)",
     "Windows": "download it from https://ollama.com/download",
 }
-
-
-@dataclass
-class Gpu:
-    name: str
-    vram_gb: float
-    kind: Literal["nvidia", "amd", "apple"]
 
 
 @dataclass
@@ -52,6 +55,11 @@ class MachineInfo:
     ollama_models: list[str]
     claude_path: str | None
     claude_logged_in: bool
+    gpus: list[Gpu] = field(default_factory=list)  # every card; `gpu` is the best one
+    cpu: CpuInfo | None = None
+    ram_free_gb: float | None = None
+    disk_free_gb: float | None = None  # free space where Ollama stores models
+    ollama: OllamaServer | None = None
 
 
 @dataclass(frozen=True)
@@ -70,17 +78,6 @@ class Recommendation:
     reasons: list[str]
 
 
-def system_cmd(argv: list[str], timeout: float) -> tuple[int, str]:
-    """Run a command; (127, "") if the binary is missing, (124, "") on timeout. Never raises."""
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return 124, ""
-    except OSError:
-        return 127, ""
-    return done.returncode, done.stdout
-
-
 def ollama_tags(url: str) -> list[str] | None:
     """Names of pulled models, or None if the server does not answer within PROBE_TIMEOUT."""
     try:
@@ -91,64 +88,9 @@ def ollama_tags(url: str) -> list[str] | None:
         return None
 
 
-def _nvidia(run: CmdRunner) -> Gpu | None:
-    code, out = run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                    PROBE_TIMEOUT)
-    if code != 0:
-        return None
-    best: Gpu | None = None
-    for line in out.splitlines():
-        name, _, mem = line.rpartition(",")
-        try:
-            gb = float(mem.strip()) / 1024  # MiB -> GiB
-        except ValueError:
-            continue
-        if name.strip() and (best is None or gb > best.vram_gb):
-            best = Gpu(name.strip(), gb, "nvidia")
-    return best
-
-
-def _amd(run: CmdRunner) -> Gpu | None:
-    code, out = run(["rocm-smi", "--showmeminfo", "vram", "--json"], PROBE_TIMEOUT)
-    if code != 0:
-        return None
-    try:
-        data = json.loads(out)
-        items = list(data.items())
-    except (ValueError, AttributeError):
-        return None
-    best: Gpu | None = None
-    for card, vals in items:
-        try:
-            gb = int(vals["VRAM Total Memory (B)"]) / GIB
-        except (ValueError, KeyError, TypeError):
-            continue  # one unreadable card (or a non-card key) must not hide the others
-        if best is None or gb > best.vram_gb:
-            best = Gpu(card, gb, "amd")
-    return best
-
-
-def _apple(run: CmdRunner) -> Gpu | None:
-    code, out = run(["sysctl", "-n", "hw.memsize"], PROBE_TIMEOUT)
-    try:
-        total = int(out.strip())
-    except ValueError:
-        return None
-    if code != 0:
-        return None
-    return Gpu("Apple Silicon (unified memory)", total / GIB * APPLE_GPU_FRACTION, "apple")
-
-
 def detect_gpu(run: CmdRunner, system: str, arch: str) -> Gpu | None:
     """The best GPU found, trying NVIDIA, AMD, then Apple Silicon. A failing probe is skipped."""
-    probes: list[Callable[[CmdRunner], Gpu | None]] = [_nvidia, _amd]
-    if system == "Darwin" and arch == "arm64":
-        probes.append(_apple)
-    for probe in probes:
-        gpu = probe(run)
-        if gpu is not None:
-            return gpu
-    return None
+    return best_gpu(run, system, arch)
 
 
 def _ram_gb(run: CmdRunner, system: str) -> float | None:
@@ -172,19 +114,28 @@ def detect_machine(
     tags: Callable[[str], list[str] | None] = ollama_tags,
     claude_logged_in: Callable[[str], bool] = logged_in,
     find: Callable[[str | None], str | None] = find_claude,
+    server: Callable[[str, CmdRunner], OllamaServer] = detect_ollama_server,
 ) -> MachineInfo:
     system = platform.system()
     served = tags(config.llm_url)
     claude = find(config.llm_cli_path)
+    arch = platform.machine()
+    gpus = all_gpus(run, system, arch)
+    ollama = server(config.llm_url, run)
     return MachineInfo(
         os=system,
         ram_gb=_ram_gb(run, system),
-        gpu=detect_gpu(run, system, platform.machine()),
+        gpu=detect_gpu(run, system, arch),
         ollama_installed=which("ollama") is not None or served is not None,
         ollama_running=served is not None,
         ollama_models=served or [],
         claude_path=claude,
         claude_logged_in=bool(claude) and claude_logged_in(claude),
+        gpus=gpus,
+        cpu=detect_cpu(run, system),
+        ram_free_gb=ram_free_gb(system),
+        disk_free_gb=disk_free_gb(ollama_models_dir(ollama)),
+        ollama=ollama,
     )
 
 

@@ -11,6 +11,7 @@
 - **Operating system and memory.** Linux, macOS (Darwin) or Windows, and total RAM where it is easy to read.
 - **GPU.** NVIDIA via `nvidia-smi` (when several GPUs exist, the one with the most memory wins), AMD via `rocm-smi` (each card is read on its own, so one unreadable card is skipped and the others still count), Apple Silicon via the total memory from `sysctl`. Apple chips share one memory pool with the CPU, and macOS lets the GPU use about two thirds of it, so only 66% (`APPLE_GPU_FRACTION`) is counted as GPU memory. A probe that is missing, exits non-zero (for example an NVIDIA driver mismatch) or prints something unreadable is skipped, never a crash; the next probe is tried, then "no GPU".
 - **Ollama.** Whether the program is installed, whether its server answers within 5 seconds, and which models are already pulled.
+- **Free memory, CPU and free disk.** Memory available right now, CPU threads and vector instructions, and free disk where Ollama keeps models; the full scan (every GPU, the Ollama server's settings) is `rpipe model scan`, see [hardware.md](hardware.md).
 - **Claude Code.** Where the `claude` program is and whether you are logged in (see [backends.md](backends.md)).
 
 ## How it recommends

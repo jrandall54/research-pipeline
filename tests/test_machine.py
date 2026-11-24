@@ -11,6 +11,7 @@ from research_pipeline.machine import (
     Gpu,
     MachineInfo,
     ModelChoice,
+    OllamaServer,
     detect_gpu,
     detect_machine,
     load_model_table,
@@ -21,6 +22,9 @@ from research_pipeline.machine import (
 from research_pipeline.models import Config
 
 TABLE = [ModelChoice(6, "small:8b", 5.0), ModelChoice(12, "mid:14b", 9.0), ModelChoice(24, "big:32b", 20.0)]
+
+
+NO_SERVER = lambda url, run: OllamaServer(None, "unknown", {}, [], None)  # noqa: E731
 
 
 def cmds(table):
@@ -123,7 +127,7 @@ def test_detect_machine_with_fakes(tmp_path):
     cfg = Config(vault_path=tmp_path)
     m = detect_machine(cfg, run=run, which=lambda n: "/bin/ollama" if n == "ollama" else None,
                        tags=lambda url: ["qwen3:8b"], claude_logged_in=lambda p: True,
-                       find=lambda recorded: "/x/claude")
+                       find=lambda recorded: "/x/claude", server=NO_SERVER)
     assert m.gpu.vram_gb == pytest.approx(8.0)
     assert m.ollama_installed and m.ollama_running and m.ollama_models == ["qwen3:8b"]
     assert m.claude_path == "/x/claude" and m.claude_logged_in
@@ -131,7 +135,7 @@ def test_detect_machine_with_fakes(tmp_path):
 
 def test_detect_machine_nothing_installed(tmp_path):
     m = detect_machine(Config(vault_path=tmp_path), run=cmds({}), which=lambda n: None,
-                       tags=lambda url: None, claude_logged_in=lambda p: True, find=lambda r: None)
+                       tags=lambda url: None, claude_logged_in=lambda p: True, find=lambda r: None, server=NO_SERVER)
     assert not m.ollama_installed and not m.ollama_running and m.ollama_models == []
     assert m.claude_path is None and not m.claude_logged_in
 

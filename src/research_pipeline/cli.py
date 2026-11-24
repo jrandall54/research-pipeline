@@ -80,6 +80,7 @@ from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_r
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
 from research_pipeline.run_lock import RunLocked, run_lock
+from research_pipeline.scan import setting_source
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
@@ -1825,11 +1826,55 @@ def _describe_machine(info) -> None:
     else:
         models = ", ".join(info.ollama_models) or "no models pulled yet"
         typer.echo(f"  Ollama: installed, {'running' if info.ollama_running else 'not running'}; {models}")
+    if info.ram_free_gb is not None:
+        typer.echo(f"  memory free right now: {info.ram_free_gb:.0f} GB")
+    if info.cpu is not None:
+        typer.echo(f"  CPU: {info.cpu.threads} threads, vector instructions: {', '.join(info.cpu.vector) or 'none found'}")
+    if info.disk_free_gb is not None:
+        typer.echo(f"  free disk where Ollama keeps models: {info.disk_free_gb:.0f} GB")
     if info.claude_path is None:
         typer.echo("  Claude Code: not found")
     else:
         typer.echo(f"  Claude Code: found at {info.claude_path}, "
                    f"{'logged in' if info.claude_logged_in else 'not logged in'}")
+
+
+def _describe_ollama_server(server, llm_url: str) -> None:
+    """Plain-words lines about how the Ollama server runs and its performance settings."""
+    how = {"systemd": "a system service (systemd)", "systemd-user": "a user service (systemd --user)",
+           "manual": "started by hand (ollama serve)", "docker": "in Docker", "app": "the Ollama app",
+           "unknown": "not found running"}[server.how]
+    typer.echo(f"  Ollama server: version {server.version or 'unknown'}, {how}")
+    if server.how not in ("systemd", "systemd-user"):
+        typer.echo("  (rpipe can only read the server settings of a systemd service)")
+        return
+
+    def source(key: str) -> str:
+        found = setting_source(server, key)
+        return f" (set in {found})" if found else ""
+
+    flash = server.env.get("OLLAMA_FLASH_ATTENTION")
+    typer.echo("  flash attention: " + (f"on{source('OLLAMA_FLASH_ATTENTION')}" if flash == "1" else "off"))
+    typer.echo(f"  context memory type (KV cache): {server.env.get('OLLAMA_KV_CACHE_TYPE', 'f16 (default)')}"
+               + (source("OLLAMA_KV_CACHE_TYPE") if "OLLAMA_KV_CACHE_TYPE" in server.env else ""))
+    typer.echo(f"  parallel slots: {server.env.get('OLLAMA_NUM_PARALLEL', 'automatic (default)')}")
+    if server.host_matches is False:
+        port = server.env.get("OLLAMA_HOST", "").rpartition(":")[2]
+        typer.echo(f"  note: the Ollama service listens on port {port} but rpipe talks to "
+                   f"{llm_url.split('://')[-1]}; settings rpipe changes would go to the service, not the server rpipe uses")
+
+
+@model_app.command("scan")
+def model_scan(vault: VaultOption = None) -> None:
+    """Read this computer (GPUs, memory, CPU, disk) and the Ollama server's settings; change nothing."""
+    ctx = _open(vault)
+    with _reporter() as reporter, stage(reporter, "scan", label="this computer"):
+        info = detect_machine(ctx.config)
+    _describe_machine(info)
+    if len(info.gpus) > 1:
+        typer.echo("  all GPUs: " + "; ".join(f"{g.name} ({g.vram_gb:.1f} GB)" for g in info.gpus))
+    if info.ollama is not None:
+        _describe_ollama_server(info.ollama, ctx.config.llm_url)
 
 
 def _recheck(config: Config, info, problem: str, ok: Callable, question: str):

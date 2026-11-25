@@ -1,6 +1,18 @@
-# Handoff — after Phase 6 Part B.5 (spill reruns) (2026-11-24)
+# Handoff — after Phase 6 Part B.6 (task splitting, map-reduce) (2026-11-25)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
+
+## B.6 built (2026-11-25, branch `part-b6-split-map-reduce`, not merged)
+
+Plan `plans/2026-11-24-part-b6-split-map-reduce.md`. `uv run pytest -q`: 1404 passing, ruff clean. Per-task spec+quality reviews, whole-branch review (opus), one fix wave + scoped re-review, two follow-up fixes reviewed.
+
+- **New:** `parts.py` (notes per part → condense if too long → summary + critique from notes), `citations.py`; `summarize_mode` setting `auto|whole|split` with `rpipe model set-mode`; `rpipe eval run --mode`; `read_mode`, `parts`, `notes_unverified` on summaries; health line `in parts N`; `rpipe show` prints the read mode. Prompts `2026-11-p7` (whole-paper text unchanged).
+- **Map-reduce is a fallback, not a mode:** a cut whole read goes to parts only when no rerun could ever read it whole (needed context above the model's cap, or reruns off / non-Ollama). A split read whose notes are all unusable reads whole.
+- **Found and fixed: embeddings now run on the CPU.** The 2026-11-25 nightly (first on branch code) ran every paper in split: `auto` saw GPU share 0.92. The embedding model's CUDA memory stayed in the rpipe process, so 8% of the 27B spilled to RAM — probably every night before too, unnoticed. CPU embedding costs ~22 s per 600 abstracts; verified share 1.0 with the embedder alive in the same process. Night 2026-11-25 took 1,225 s (split, 0.92) vs 853 s the night before.
+- **Measured (owner machine, 10-paper answer key, Claude judge):** whole 14/50 covered, 2 contradicted, 0 unverified, 9m54s; split 16/50, 2, 0, 11m34s. Split passes the pass rule; on a full-GPU model it is ~17% slower, so `auto` keeps whole there (shipped rule unchanged). Per-paper counts swing up to ±3 between runs (same whole setup scored 19 on 11-22): the answer key is noisy. Eval files: `eval/2026-11-24.json` holds the split run #1 (only 1 paper judged, usage limit) — the whole run is kept as `eval/2026-11-24.previous.json`. `eval/2026-11-25.json` = split, fully judged.
+- **Not measured:** split's speed on a CPU-only or spilled model (the case `auto` sends to split). Needs a CPU evening run in a throwaway vault.
+- **Next nightly check:** the `reading mode` note in `journalctl --user` should say `whole` (share 1.0); `rpipe show ID` should not print "read in parts".
+- **Parked minors:** map-reduce path's NoUsableNotes fallback gives no progress note; no wiring test that the `notes_unusable` note reaches the run output; hung `load()` can wait up to 600 s; notes citing a real section from another chunk are kept and also listed in `notes_unverified`; ruling 10's CPU-always-drops-appendices not built.
 
 ## B.5 built (2026-11-24, merged and pushed)
 

@@ -41,7 +41,11 @@ class SentenceTransformerEmbedder:
                 "`uv tool install --editable '.[embed]' --force` (or `uv sync --extra embed` inside the repo)"
             ) from exc
         self.model_name = model_name
-        self._model = SentenceTransformer(model_name)
+        # Always the CPU: on a GPU the process would keep a CUDA context (GPU memory that cannot be
+        # handed back until the process exits) and the summarizing model would spill to RAM all
+        # night. About 20 s per ~600 abstracts on a desktop CPU. See "Why it's built this way" in
+        # docs/guide/triage.md.
+        self._model = SentenceTransformer(model_name, device="cpu")
 
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:

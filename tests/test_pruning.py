@@ -117,3 +117,15 @@ def test_needed_ctx_none_when_only_appendices_overflow():
     secs = [sec("1 Intro", 50_000), sec("Appendix A Proofs", 90_000)]
     fit = fit_to_budget(secs, 32768)
     assert fit.body_cut is False and fit.needed_ctx is None
+
+
+def test_partition_splits_paper_appendix_and_non_paper():
+    from research_pipeline.pruning import partition
+
+    secs = [sec("1 Intro"), sec("6 Acknowledgements"), sec("6.1 Grants"), sec("Appendix A Proofs"),
+            sec("A.1 Lemma"), sec("2 Method")]
+    paper, appendix, dropped = partition(secs)
+    assert [s.title for s in paper] == ["1 Intro", "2 Method"]
+    assert [s.title for s in appendix] == ["Appendix A Proofs", "A.1 Lemma"]
+    assert [(d.title, d.reason, d.chars) for d in dropped] == [
+        ("6 Acknowledgements", "non_paper", 118), ("6.1 Grants", "non_paper", 110)]

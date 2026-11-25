@@ -60,7 +60,7 @@ def _int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def rerun_candidates(conn: sqlite3.Connection, model_cap: int) -> list[Rerun]:
+def rerun_candidates(conn: sqlite3.Connection, cap: int) -> list[Rerun]:
     """Stored summaries that were cut and could be read whole (or at least at more context).
 
     A candidate has `body_cut`, a recorded `needed_ctx`, and Ollama provenance showing it ran at a
@@ -86,19 +86,19 @@ def rerun_candidates(conn: sqlite3.Connection, model_cap: int) -> list[Rerun]:
         ran = _int(prov.get("num_ctx")) if isinstance(prov, dict) else None
         if not isinstance(prov, dict) or prov.get("backend") != "ollama":
             continue  # only local summaries: a cloud backend reads long papers whole already
-        if needed is None or ran is None or ran >= needed or ran >= model_cap:
+        if needed is None or ran is None or ran >= needed or ran >= cap:
             continue
         out.append(Rerun(row["paper_id"], needed, ran))
     out.sort(key=lambda r: r.needed_ctx)  # stable: newest digest first among equals
     return out
 
 
-def buckets(reruns: list[Rerun], model_cap: int) -> list[tuple[int, list[Rerun]]]:
+def buckets(reruns: list[Rerun], cap: int) -> list[tuple[int, list[Rerun]]]:
     """Group reruns by the context they run at: needed context rounded up to RERUN_STEP,
     at most the model's cap. One model load per group, smallest first."""
     groups: dict[int, list[Rerun]] = {}
     for r in reruns:
-        ctx = min(math.ceil(r.needed_ctx / RERUN_STEP) * RERUN_STEP, model_cap)
+        ctx = min(math.ceil(r.needed_ctx / RERUN_STEP) * RERUN_STEP, cap)
         groups.setdefault(ctx, []).append(r)
     return [(ctx, sorted(groups[ctx], key=lambda r: r.needed_ctx)) for ctx in sorted(groups)]
 
@@ -114,7 +114,7 @@ def ram_part_bytes(ctx: int, num_ctx: int, s_fit: int, v_fit: int, s_8k: int) ->
     return round(s_fit + (ctx - num_ctx) * per_token - v_fit)
 
 
-def _model_cap(url: str, model: str) -> int:
+def model_cap(url: str, model: str) -> int:
     """min(the model's trained context, CONTEXT_CEILING); CONTEXT_CEILING if it cannot be read."""
     try:
         resp = httpx.post(f"{url}/api/show", json={"model": model}, timeout=CHECK_TIMEOUT)
@@ -215,7 +215,7 @@ def run_reruns(
     """
     url, model, fit_ctx = llm.url, llm.model_name, llm.num_ctx
     # With no deadline nothing runs, so Ollama is not even asked for the model's limit.
-    cap = _model_cap(url, model) if deadline is not None and not model_timed_out else CONTEXT_CEILING
+    cap = model_cap(url, model) if deadline is not None and not model_timed_out else CONTEXT_CEILING
     candidates = rerun_candidates(conn, cap)
     total = len(candidates)
     errors: list[str] = []
@@ -332,8 +332,10 @@ def run_reruns(
                                     "critique": "writing the critique for"}
                             handle.note(f"{what.get(name, 'retrying citations for')} {r.paper_id}")  # noqa: B023
 
+                        # A rerun exists to read the paper whole: never fall back to parts.
                         result = summarize_paper(client, paper["title"], paper["abstract"],
-                                                 sections, ctx, on_phase=on_phase)
+                                                 sections, ctx, on_phase=on_phase,
+                                                 fallback_above=None)
                         save_summary(conn, r.paper_id, result, model,
                                      prompt_version=PROMPT_VERSION, paper_version=paper["version"],
                                      num_ctx=ctx, backend=client.name,

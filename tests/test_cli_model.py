@@ -12,6 +12,7 @@ from research_pipeline import cli, profile_edit, registry
 from research_pipeline.backends import claude_code
 from research_pipeline.cli import Pipeline
 from research_pipeline.llm import NO_MODEL, LlmError, LlmLimitReached
+from research_pipeline.parts import SPLIT_BELOW_CTX
 from research_pipeline.vault import init_vault, load_config
 
 runner = CliRunner()
@@ -305,7 +306,8 @@ def test_ollama_backend_ignores_effort(vault, monkeypatch):
 
 
 def test_summarize_command_prints_one_line_per_paper(vault, monkeypatch):
-    def fake(conn, llm, fetch, num_ctx, today=None, backlog_limit=None, paper_ids=None, *, reporter=None, refetch=False):
+    def fake(conn, llm, fetch, num_ctx, today=None, backlog_limit=None, paper_ids=None, *, reporter=None, refetch=False,
+             mode="whole", fallback_above=None):
         from research_pipeline.progress import ProgressEvent
         for pid, n, outcome, detail in (("2611.26408", 1, "done", "41s"), ("2611.26409", 2, "failed", "bad json"),
                                         ("2611.26410", 2, "stopped", "")):
@@ -405,3 +407,31 @@ def test_set_embedding_blank_exits_1(vault):
     res = run(vault, "model", "set-embedding", "  ")
     assert res.exit_code == 1
     assert (vault / "config.yaml").read_bytes() == before
+
+
+def test_set_mode_command_validates(vault):
+    result = run(vault, "model", "set-mode", "SPLIT")
+    assert result.exit_code == 0, result.output
+    assert load_config(vault / "config.yaml").summarize_mode == "split"
+    before = (vault / "config.yaml").read_text()
+    bad = run(vault, "model", "set-mode", "fast")
+    assert bad.exit_code == 1
+    assert "auto, whole, split" in bad.output
+    assert (vault / "config.yaml").read_text() == before
+
+
+def test_set_mode_works_for_claude_code(vault):
+    set_config(vault, llm_backend="claude-code")
+    assert run(vault, "model", "set-mode", "split").exit_code == 0
+    assert load_config(vault / "config.yaml").summarize_mode == "split"
+
+
+def test_model_show_prints_summarize_mode(vault):
+    out = run(vault, "model", "show").output
+    assert "summarize mode: auto" in out
+    assert ("auto: split when the model is not fully in GPU memory or the context is below "
+            f"{SPLIT_BELOW_CTX} tokens (Ollama); whole otherwise") in out
+    set_config(vault, llm_backend="claude-code")
+    run(vault, "model", "set-mode", "whole")
+    out = run(vault, "model", "show").output
+    assert "summarize mode: whole" in out

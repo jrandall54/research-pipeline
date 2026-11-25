@@ -85,6 +85,25 @@ def _classes(sections: list[Section]) -> list[SectionClass]:
     return out
 
 
+def partition(sections: list[Section]) -> tuple[list[Section], list[Section], list[Dropped]]:
+    """(paper sections, appendix sections, non-paper text dropped), each in paper order.
+
+    Uses the same classes as `fit_to_budget` (a child takes its parent's class). Reading a
+    paper in parts (parts.py) decides itself whether the appendices fit.
+    """
+    paper: list[Section] = []
+    appendix: list[Section] = []
+    dropped: list[Dropped] = []
+    for s, c in zip(sections, _classes(sections), strict=True):
+        if c == "paper":
+            paper.append(s)
+        elif c == "appendix":
+            appendix.append(s)
+        else:
+            dropped.append(Dropped(title=s.title, chars=len(s.title) + len(s.text), reason="non_paper"))
+    return paper, appendix, dropped
+
+
 @dataclass(frozen=True)
 class Fit:
     sections: list[Section]

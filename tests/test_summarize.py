@@ -9,6 +9,7 @@ from research_pipeline.summarize import (
     Claim,
     Critique,
     Summary,
+    phase_note,
     summarize_paper,
     unknown_citations,
 )
@@ -162,7 +163,8 @@ def test_run_summarize_happy_path(conn):
     add_triaged(conn, "2501.00002")
     llm = FakeLLM([summary(), critique(), summary(), critique()])
     counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
-    assert counts == {"fetched": 2, "summarized": 2, "abstract_only": 0, "body_cut": 0, "summary_failed": 0}
+    assert counts == {"fetched": 2, "summarized": 2, "abstract_only": 0, "body_cut": 0, "summary_failed": 0,
+                      "in_parts": 0}
     assert errors == []
     for pid in ("2501.00001", "2501.00002"):
         assert get_paper(conn, pid)["status"] == "summarized"
@@ -269,7 +271,8 @@ def test_prior_day_in_digest_paper_is_not_touched(conn):
     add_triaged(conn, "2501.00001")
     mark_in_digest(conn, ["2501.00001"], TODAY - timedelta(days=1))
     counts, errors = run_summarize(conn, FakeLLM([]), lambda pid: SECTIONS, 32768, today=TODAY)
-    assert counts == {"fetched": 0, "summarized": 0, "abstract_only": 0, "body_cut": 0, "summary_failed": 0}
+    assert counts == {"fetched": 0, "summarized": 0, "abstract_only": 0, "body_cut": 0, "summary_failed": 0,
+                      "in_parts": 0}
     assert errors == [] and get_summary(conn, "2501.00001") is None
 
 
@@ -688,3 +691,187 @@ def test_references_dropped_is_not_body_cut():
     result = summarize_paper(llm, "Paper T", "We study X.", secs, 32768)
     assert result.body_cut is False
     assert [d.title for d in result.dropped] == ["References"]
+
+
+# ---- reading modes: whole, split, map-reduce fallback (B.6 Task 3) ----
+from research_pipeline.summary_models import Notes  # noqa: E402
+
+
+class PartsLLM(FakeLLM):
+    """Answers by schema: notes cite the first section heading of their part; summary and
+    critique are the usual conftest ones (they cite Abstract, 1 Introduction, 2 Method, 3 Results)."""
+
+    def __init__(self):
+        super().__init__([])
+        self.schemas = []
+
+    def generate(self, system, user, schema):
+        self.calls.append((system, user))
+        self.schemas.append(schema)
+        if schema is Notes:
+            heading = user.split("\n## ", 1)[1].split("\n", 1)[0]
+            return Notes(claims=[Claim(text=f"Note on {heading}.", sections=[heading])])
+        return summary() if schema is Summary else critique()
+
+
+LONG = [
+    Section(title="Abstract", text="We study X."),
+    Section(title="1 Introduction", text="X matters because Y."),
+    Section(title="2 Method", text="m" * 40_000),
+    Section(title="3 Results", text="Accuracy is 91%."),
+    Section(title="References", text="[1] A paper."),
+    Section(title="Appendix A Proofs", text="p" * 5_000),
+]
+
+
+def test_whole_mode_unchanged_when_it_fits():
+    llm = PartsLLM()
+    ps = summarize_paper(llm, "T", "", SECTIONS, 32768, mode="whole", fallback_above=0)
+    assert len(llm.calls) == 2 and ps.read_mode == "whole" and ps.parts == 1
+
+
+def test_split_mode_uses_parts():
+    llm = PartsLLM()
+    phases = []
+    ps = summarize_paper(llm, "T", "", SECTIONS, 32768, phases.append, mode="split")
+    assert ps.read_mode == "split" and ps.parts == 2 and len(llm.calls) == 4
+    assert phases == ["notes 1/2", "notes 2/2", "summary", "critique"]
+    assert ps.unverified == [] and ps.basis == "full_text"
+
+
+def test_split_mode_with_no_paper_sections_reads_whole():
+    llm = PartsLLM()
+    only_refs = [Section(title="References", text="[1] A paper.")]
+    ps = summarize_paper(llm, "T", "", only_refs, 32768, mode="split")
+    assert ps.read_mode == "whole" and Notes not in llm.schemas  # (citation retries aside)
+
+
+class InventedNotesLLM(PartsLLM):
+    """Every note cites a section the paper does not have, even after the retry."""
+
+    def generate(self, system, user, schema):
+        if schema is Notes:
+            self.calls.append((system, user))
+            self.schemas.append(schema)
+            return Notes(claims=[Claim(text="Made up.", sections=["9 Nowhere"])])
+        return super().generate(system, user, schema)
+
+
+@pytest.mark.parametrize("mode, fallback_above", [("split", None), ("whole", 0)])
+def test_no_usable_notes_reads_the_paper_whole(mode, fallback_above):
+    llm = InventedNotesLLM()
+    sections = SECTIONS if mode == "split" else LONG  # LONG is cut at 8,192: map-reduce first
+    ps = summarize_paper(llm, "T", "", sections, 8192, mode=mode, fallback_above=fallback_above)
+    assert ps.read_mode == "whole" and ps.parts == 1 and ps.notes_unverified == []
+    assert llm.schemas[-2:] == [Summary, Critique]
+    whole = build_summary_prompt("T", [s for s in sections if s.title != "References"], "full_text")[1]
+    assert llm.calls[-2][1].split("<paper>")[0] == whole.split("<paper>")[0]  # a whole-paper prompt
+    if mode == "whole":
+        assert ps.body_cut and ps.needed_ctx  # the normal fit's values
+
+
+def test_split_mode_below_the_context_floor_reads_whole():
+    llm = PartsLLM()
+    ps = summarize_paper(llm, "T", "", SECTIONS, 4096, mode="split")
+    assert ps.read_mode == "whole" and len(llm.calls) == 2
+
+
+def test_abstract_only_is_always_whole():
+    llm = PartsLLM()
+    ps = summarize_paper(llm, "T", "We study X.", None, 32768, mode="split", fallback_above=0)
+    assert ps.basis == "abstract" and ps.read_mode == "whole" and Notes not in llm.schemas
+
+
+def test_cut_paper_falls_back_above_threshold():
+    llm = PartsLLM()
+    ps = summarize_paper(llm, "T", "", LONG, 8192, mode="whole", fallback_above=0)
+    assert ps.read_mode == "map_reduce" and not ps.body_cut and ps.needed_ctx is None
+    assert ps.parts >= 3 and len(llm.calls) == ps.parts + 2
+    # Non-paper text and the appendices are left out of the fallback, in paper order.
+    assert [(d.title, d.reason) for d in ps.dropped] == [
+        ("References", "non_paper"), ("Appendix A Proofs", "appendix")]
+
+
+def test_cut_paper_waits_for_rerun_below_threshold():
+    llm = PartsLLM()
+    ps = summarize_paper(llm, "T", "", LONG, 8192, mode="whole", fallback_above=200_000)
+    assert ps.read_mode == "whole" and ps.body_cut and ps.needed_ctx
+    assert len(llm.calls) == 2
+
+
+def test_cut_paper_never_falls_back_without_a_threshold():
+    llm = PartsLLM()
+    ps = summarize_paper(llm, "T", "", LONG, 8192)
+    assert ps.read_mode == "whole" and ps.body_cut and len(llm.calls) == 2
+
+
+def test_fallback_threshold_is_strictly_above():
+    needed = summarize_paper(PartsLLM(), "T", "", LONG, 8192).needed_ctx
+    at = summarize_paper(PartsLLM(), "T", "", LONG, 8192, fallback_above=needed)
+    below = summarize_paper(PartsLLM(), "T", "", LONG, 8192, fallback_above=needed - 1)
+    assert at.read_mode == "whole" and below.read_mode == "map_reduce"
+
+
+def test_run_summarize_counts_in_parts_and_notes_progress(conn):
+    add_triaged(conn, "2501.00001")
+    add_triaged(conn, "2501.00002")
+    fetch = {"2501.00001": LONG, "2501.00002": SECTIONS}
+    reporter = ListReporter()
+    counts, errors = run_summarize(conn, PartsLLM(), fetch.__getitem__, 8192,
+                                   reporter=reporter, fallback_above=0)
+    assert errors == []
+    assert counts["in_parts"] == 1 and counts["body_cut"] == 0 and counts["summarized"] == 2
+    cut = get_summary(conn, "2501.00001")
+    assert cut.read_mode == "map_reduce" and cut.parts >= 3
+    assert get_summary(conn, "2501.00002").read_mode == "whole"
+    notes = [e.label for e in reporter.events if e.kind == "note"]
+    assert f"reading part 1 of {cut.parts} of 2501.00001" in notes
+    assert "writing the summary for 2501.00001" in notes
+
+
+def test_run_summarize_split_mode_is_not_counted_in_parts(conn):
+    add_triaged(conn, "2501.00001")
+    counts, _ = run_summarize(conn, PartsLLM(), lambda pid: SECTIONS, 32768, mode="split")
+    assert counts["in_parts"] == 0
+    assert get_summary(conn, "2501.00001").read_mode == "split"
+
+
+def test_condense_progress_label(conn, monkeypatch):
+    from research_pipeline import summarize as summarize_mod
+
+    add_triaged(conn, "2501.00001")
+    real = summarize_mod.summarize_paper
+
+    def fake(llm, title, abstract, sections, num_ctx, on_phase=None, **kw):
+        on_phase("condense")
+        return real(llm, title, abstract, sections, num_ctx, **kw)
+
+    monkeypatch.setattr(summarize_mod, "summarize_paper", fake)
+    reporter = ListReporter()
+    run_summarize(conn, PartsLLM(), lambda pid: SECTIONS, 32768, reporter=reporter)
+    notes = [e.label for e in reporter.events if e.kind == "note"]
+    assert "condensing notes for 2501.00001" in notes
+
+
+def test_health_line_in_parts():
+    from datetime import date
+
+    from research_pipeline import cli
+
+    assert " · in parts 2" in cli.health_line(date(2026, 11, 24), {"in_parts": 2}, [])
+    assert "in parts" not in cli.health_line(date(2026, 11, 24), {"in_parts": 0}, [])
+
+
+def test_failed_split_read_is_read_whole_never_map_reduced():
+    llm = InventedNotesLLM()
+    phases = []
+    ps = summarize_paper(llm, "T", "", LONG, 8192, phases.append, mode="split", fallback_above=0)
+    assert ps.read_mode == "whole" and ps.parts == 1 and ps.body_cut and ps.needed_ctx
+    at = phases.index("notes_unusable")
+    assert not any(p.startswith("notes ") for p in phases[at:])  # no map-reduce notes calls
+    assert phases[at:] == ["notes_unusable", "summary", "critique"]
+    assert llm.schemas[-2:] == [Summary, Critique]
+
+
+def test_phase_note_for_unusable_notes():
+    assert phase_note("notes_unusable", "2401.00001") == "notes unusable for 2401.00001; reading it whole"

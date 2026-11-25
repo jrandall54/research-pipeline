@@ -98,7 +98,7 @@
 
 **abstract-only summary** — a summary written from the abstract because the paper has no arXiv HTML full text. The digest says so under the summary and the health line counts them as `abstract-only N`. See `digest.md`.
 
-**unverified claim** — a summary or critique claim that cites a section title the paper does not have; the digest prefixes it with `⚠ unverified`. See `summaries.md`.
+**unverified claim** — a summary or critique claim that cites a section title the paper does not have; the digest prefixes it with `⚠ unverified`. A note taken while reading a paper in parts can be unverified too; those are kept apart (`notes_unverified`), their made-up titles removed before the summary is written, and they never count as unverified claims. See `summaries.md`.
 
 **Gold set** — a small collection (we aim for 10) of papers you know well, each with a list of key facts a correct summary must contain. It is the answer key we grade the model against. See `evaluation.md`.
 
@@ -140,7 +140,7 @@
 
 **Provenance** — the record of where a summary came from: which model, prompt version, paper version and context size produced it, and when. Shown as a footer in the digest. See `summaries.md`.
 
-**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts. Bumped whenever those prompts change, so summaries made with different wording can be told apart. See `summaries.md`.
+**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts (and the notes, condense and combine prompts used when a paper is read in parts). Bumped whenever those prompts change, so summaries made with different wording can be told apart. Currently `2026-11-p7`. See `summaries.md`.
 
 **Unfinished run** — a `runs` row whose `finished_at` is empty: the process was killed before it could record its end. The next digest's health line says `previous run did not finish`. See `running.md`.
 
@@ -298,7 +298,7 @@
 
 **`needed_ctx`** — on a summary whose core text was cut (`body_cut`), the context window in tokens that would have fit that core text whole: its characters divided by 3, plus the 4,000 reserved, rounded up to a multiple of 1024. 300,000 characters of core text gives 104,448. Empty when nothing was cut. Used to find papers worth reading again at a bigger context. See `summaries.md`.
 
-**GPU share (`gpu_share`)** — how much of the model sat in GPU memory while it wrote a summary, from 0 to 1 (`1.0` = all of it; `0.93` = 7% spilled to ordinary RAM). Read from Ollama's list of loaded models and stored in the summary's provenance; empty when unknown or for a cloud backend. See `summaries.md`.
+**GPU share (`gpu_share`)** — how much of the model sat in GPU memory while it wrote a summary (and, with `summarize_mode: auto`, at the start of a run, to choose the mode), from 0 to 1 (`1.0` = all of it; `0.93` = 7% spilled to ordinary RAM). Read from Ollama's list of loaded models and stored in the summary's provenance; empty when unknown or for a cloud backend. See `summaries.md`.
 
 **Rerun (of a cut paper)** — reading a paper whose core text was cut (`body_cut`) a second time, at a context big enough for all of it, with part of the model spilled to RAM. Slow, so it happens after the normal work and must finish by the morning deadline. Only with the local Ollama backend. A failed rerun keeps the old summary. The health line counts `rerun N` (read whole tonight) and `rerun waiting N` (left for a later night). Not the same as a same-day re-run of the whole pipeline. See "Reading cut papers whole: reruns" in `running.md` and "The morning deadline" in `scheduling.md`.
 
@@ -307,3 +307,21 @@
 **Morning deadline (`night_deadline`)** — the clock time (default 07:00) by which reruns of cut papers must finish, or `off`. It never stops normal papers. If the next such time is more than 12 hours away there is no deadline and reruns are skipped. Set with `rpipe schedule set-deadline`. See `scheduling.md`.
 
 **Call time limit** — how long one request to the local model may take before rpipe gives up on it (a timeout). Normally 600 seconds; on a machine `rpipe model bench` measured as slow it is raised to 1.5 times the time needed to read a full context and write the longest allowed answer at the measured speeds. See "The time limit for one call" in `llm.md`.
+
+**Notes (reading in parts)** — what the model writes about one part of a long paper: a short list of claims, each with the section titles it comes from (the `Notes` schema). The summary and critique are then written from the notes instead of the paper. See "Reading a paper in parts" in `summaries.md`.
+
+**Task splitting** — reading a long paper as two jobs instead of one: notes on the front matter (abstract, introduction, conclusion: what is claimed) and notes on the body (method and results: how well it is backed), then one step that combines the notes. Stored as `read_mode: split`. See `summaries.md`.
+
+**Map-reduce** — a general way to handle input too big for one pass: cut it into pieces, do the same job on each piece separately ("map"), then merge the pieces' results into one ("reduce"). Here the pieces are size-based chunks of a paper, the job is taking notes, and the merge is condensing the notes and writing the summary from them. The last resort for a paper that does not fit any other way: used only when a whole read would cut the core text and no rerun could read it whole (see *Fallback threshold*). Stored as `read_mode: map_reduce`; the health line counts these papers as `in parts N`. See `summaries.md`.
+
+**Front matter** — the parts of a paper that state what it claims: abstract, introduction, conclusion (also discussion, limitations, future work, summary). When a paper is read in parts, the front matter is one group and everything else (method, experiments, results) is the body. Numbered subsections go with their parent, whatever their heading says (`4.3 Discussion` under `4 Experiments` is body). See "Reading a paper in parts" in `summaries.md`.
+
+**Fallback threshold (`fallback_above`)** — the context size, in tokens, above which a paper cut in a whole read is read in parts (map-reduce) instead. Set to the model's context cap when reruns can happen (so only papers no rerun could read whole are split), `0` when there are no reruns (every cut paper is split), "none" for reruns themselves (never split), and `0` for `rpipe eval run` (an eval never waits for a rerun). See "Which way a paper is read" in `summaries.md`.
+
+**Summarize mode (`summarize_mode`)** — the setting that says how papers are read: `whole` (the model reads the whole paper in one go), `split` (notes on the front matter and the body, then combined; see *Task splitting*) or `auto` (the default: split when the model is not fully in GPU memory, runs on the CPU, or has a context below 26,624 tokens; whole otherwise and for Claude Code). Change it with `rpipe model set-mode`; `rpipe eval run --mode` overrides it for one eval without saving. See "Choosing the mode" in `summaries.md` and "Comparing reading modes" in `evaluation.md`.
+
+**Context cap (model cap)** — the biggest context window a model can be run at here: the context it was trained for, as Ollama reports it, but at most `CONTEXT_CEILING` (131,072 tokens). `spill.model_cap` reads it. A paper needing more than this can never be read whole.
+
+**Condensing notes** — when the notes from all parts of a paper are too long to send in one call, they are sent back to the model in batches to be merged into fewer notes, keeping every cited section. At most 3 rounds; if they still do not fit, every note is shortened by the same share and the summary is marked `body_cut`. See `summaries.md`.
+
+**CUDA context** — the working state a program sets up on an NVIDIA graphics card the first time it uses it (through CUDA, NVIDIA's GPU programming toolkit): loaded GPU code, memory bookkeeping and the like. It takes a few hundred MB of GPU memory and stays until the program exits; it cannot be handed back earlier. This is why rpipe runs its embedding model on the CPU: a context created for embedding would hold GPU memory the summarizing model needs for the rest of the run. See "Why it's built this way" in `triage.md`.

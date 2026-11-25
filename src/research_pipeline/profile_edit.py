@@ -414,6 +414,22 @@ def set_night_deadline(vault: Path, value: str) -> None:
     _edit(_config_path(vault), Config, change)
 
 
+SUMMARIZE_MODES = ("auto", "whole", "split")
+
+
+def set_summarize_mode(vault: Path, value: str) -> None:
+    """How papers are read: auto, whole or split (any capitals; surrounding spaces ignored)."""
+    mode = value.strip().lower()
+    if mode not in SUMMARIZE_MODES:
+        raise ValueError(f"unknown mode {value.strip()!r}: choose one of {', '.join(SUMMARIZE_MODES)}")
+
+    def change(data) -> bool:
+        data["summarize_mode"] = mode
+        return True
+
+    _edit(_config_path(vault), Config, change)
+
+
 def enable_source(vault: Path, name: str, known: set[str]) -> bool:
     """Turn a source on (appended to the end of the order). False if it was already on."""
     name = name.strip()

@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
-from research_pipeline.llm import LlmError
+from research_pipeline.llm import KEEP_ALIVE, LlmError
 from research_pipeline.models import PaperMeta
 from research_pipeline.sources.arxiv import parse_arxiv_atom
 from research_pipeline.sources.base import SourceError
@@ -428,12 +428,17 @@ def test_e2e_default_vault_auto_picks_model_and_sends_resolved_values(vault, mon
         # mid fits until 8 GB + 100_000 * n <= 20 GB, i.e. n = 120000 -> 117 * 1024 = 119808, ceiling 40960, less one step of margin -> 39936
         assert {b["options"]["num_ctx"] for b in bodies} == {39936}
         assert "summarized 2" in next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
-        probes_after_first = len(fake.probes())
+        # Fit probes only: each run also loads the model once to choose the summarize mode
+        # (OllamaClient.load, keep_alive KEEP_ALIVE), which is not a probe.
+        def fit_probes():
+            return [p for p in fake.probes() if p["keep_alive"] != KEEP_ALIVE]
+        probes_after_first = len(fit_probes())
         assert probes_after_first > 0
+        assert len(fake.probes()) == probes_after_first + 1
         assert (vault / "cache" / "llm_fit.json").exists()
         res = run_cli("run", "--vault", str(vault))
         assert res.exit_code == 0, res.output
-        assert len(fake.probes()) == probes_after_first
+        assert len(fit_probes()) == probes_after_first
 
 
 def test_e2e_pinned_model_with_auto_context_probes_only_that_model(vault, monkeypatch):

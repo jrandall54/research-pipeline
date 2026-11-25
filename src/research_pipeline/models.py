@@ -97,6 +97,9 @@ class Config(BaseModel):
     # Morning deadline (24-hour HH:MM, local time) by which reruns of cut papers must finish,
     # or "off" for no reruns. Normal papers always run. See docs/guide/scheduling.md.
     night_deadline: str = Field(default="07:00", pattern=r"^(off|([01]\d|2[0-3]):[0-5]\d)$")
+    # How papers are read: whole (one call), split (front/body notes, then combine) or auto
+    # (chosen per run from the backend, GPU share and context). See docs/guide/summaries.md.
+    summarize_mode: Literal["auto", "whole", "split"] = "auto"
 
     @field_validator("night_deadline", mode="before")
     @classmethod

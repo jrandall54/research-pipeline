@@ -20,6 +20,8 @@ CALL_TIMEOUT = 600.0  # seconds one Ollama model call may take (a slow CPU can e
 # Output token limit sent with every Ollama call: a guard against a model that never stops
 # writing. A summary or critique is about 2,000 tokens at most, so this is a wide margin.
 NUM_PREDICT = 4096
+# How long Ollama keeps a model loaded after `load()` (the first paper follows within seconds).
+KEEP_ALIVE = "10m"
 _STAT_FIELDS = ("prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration")
 
 
@@ -178,6 +180,21 @@ class OllamaClient:
         except (httpx.HTTPError, ValueError, AttributeError, TypeError):
             return None
         return None
+
+    def load(self) -> None:
+        """Load the model at this client's context without asking it anything (an empty prompt
+        only loads it), so `gpu_share()` can then say where it sits. LlmError if it cannot.
+        A load is not a paper: it waits at most one normal call (CALL_TIMEOUT), even when this
+        client's limit was raised for a slow model."""
+        resp = self._request("POST", "/api/generate", timeout=min(self.timeout, CALL_TIMEOUT), json={
+            "model": self.model_name, "prompt": "", "keep_alive": KEEP_ALIVE,
+            "options": {"num_ctx": self.num_ctx}})
+        try:
+            error = resp.json().get("error")
+        except (ValueError, AttributeError):
+            error = None
+        if error:
+            raise LlmError(f"could not load {self.model_name} at {self.num_ctx} tokens: {error}")
 
     def ping(self) -> None:
         """Raise LlmError (with a fix) unless the server answers; says nothing about models."""

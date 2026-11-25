@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal, cast
 from urllib.parse import urlparse
 
 import typer
@@ -98,6 +98,7 @@ from research_pipeline.llm import (
 )
 from research_pipeline.machine import OLLAMA_INSTALL, _generation_models, detect_machine, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
+from research_pipeline.parts import SPLIT_BELOW_CTX, resolve_mode
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
@@ -115,7 +116,7 @@ from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_tex
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
-from research_pipeline.spill import run_reruns
+from research_pipeline.spill import model_cap, run_reruns
 from research_pipeline.summarize import TIMEOUT_STOPPED, run_summarize
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
@@ -177,7 +178,12 @@ class _Tee:
 
 
 def _release_gpu_memory() -> None:
-    """Hand back GPU memory the embedding model held (never imports torch just for this)."""
+    """Free memory the embedding model held before the summarizer loads.
+
+    Embeddings run on the CPU (embed.py), so normally there is no GPU memory to hand back; this is
+    a harmless safety net (gc + torch.cuda.empty_cache if torch is already loaded and sees a GPU).
+    It never imports torch just for this.
+    """
     gc.collect()
     torch = sys.modules.get("torch")
     if torch is not None and torch.cuda.is_available():
@@ -385,6 +391,8 @@ def health_line(
         extras += f" · abstract-only {counts['abstract_only']}"
     if counts.get("body_cut"):
         extras += f" · body cut {counts['body_cut']}"
+    if counts.get("in_parts"):
+        extras += f" · in parts {counts['in_parts']}"
     if counts.get("summary_failed"):
         extras += f" · summary failures {counts['summary_failed']}"
     if counts.get("rerun"):
@@ -414,6 +422,54 @@ def _ready_llm(pipeline: Pipeline) -> LLM | None:
     if check is not None:
         check()
     return llm
+
+
+def _read_mode(
+    llm: LLM, setting: str, reporter: Reporter | None, set_with: str | None = None
+) -> Literal["whole", "split"]:
+    """Resolve a summarize_mode setting (auto/whole/split) to whole or split, in a "reading mode" stage.
+
+    For `auto` on Ollama the model is loaded (a note says so first) and its GPU share read
+    (parts.resolve_mode). Any failure there reads whole, as before split mode existed. Shared
+    by `rpipe run`, `rpipe summarize` and `rpipe eval run` so all three decide the same way.
+    ``set_with`` names where a fixed mode came from (eval's `--mode`); default the setting.
+    """
+    backend = getattr(llm, "name", "")
+    with stage(reporter, "reading mode") as handle:
+        share: float | None = None
+        problem = ""
+        if setting == "auto" and backend == "ollama":
+            try:
+                ollama = cast(OllamaClient, llm)  # backend "ollama" is an OllamaClient
+                handle.note(f"loading {llm.model_name} to see where it sits (GPU or RAM)")
+                ollama.load()
+                share = ollama.gpu_share()
+            except Exception as exc:  # noqa: BLE001 - an unknown share reads whole
+                problem = " ".join(str(exc).split()) or type(exc).__name__
+        mode, reason = resolve_mode(setting, backend, share, llm.num_ctx, set_with=set_with)
+        handle.note(f"{reason} ({problem})" if problem else reason)
+    return mode
+
+
+def _summarize_plan(
+    llm: LLM, config: Config, reruns_possible: bool, reporter: Reporter | None, *, has_work: bool = True
+) -> tuple[Literal["whole", "split"], int]:
+    """How this command reads papers: the mode and `fallback_above` for run_summarize.
+
+    Mode: the summarize_mode setting, resolved by `_read_mode`; with nothing queued
+    (``has_work=False``) there is no "reading mode" stage and no model load, just whole.
+    fallback_above (Decision 2):
+    with Ollama and reruns possible, only papers no rerun could read whole (needing more than
+    the model's cap) go to parts; otherwise every cut paper does (0). See "Choosing the mode"
+    in docs/guide/summaries.md.
+    """
+    backend = getattr(llm, "name", "")
+    mode: Literal["whole", "split"] = (
+        _read_mode(llm, config.summarize_mode, reporter) if has_work else "whole")
+    fallback_above = 0
+    if backend == "ollama" and reruns_possible:
+        fallback_above = model_cap(getattr(llm, "url", ""), llm.model_name)
+    return mode, fallback_above
 
 
 def _require_model(config: Config) -> None:
@@ -495,10 +551,19 @@ def _run_locked(ctx: _Context) -> None:
                     if llm is None:
                         counts["summaries_off"] = 1  # chosen, not a failure: abstracts-only digest
                     else:
+                        # None when reruns are off or the deadline is over 12 hours away.
+                        deadline = schedule.deadline_at(datetime.now(), ctx.config.night_deadline)
                         with _reporter() as reporter:
+                            # The setting, not tonight's clock: a paper cut in a daytime run is
+                            # still rerun whole on a later night (rerun_candidates looks at every day).
+                            # Nothing queued: no reason to load the model just to pick a mode.
+                            has_work = bool(papers_to_summarize(ctx.conn, date.today()))
+                            mode, fallback_above = _summarize_plan(
+                                llm, ctx.config, ctx.config.night_deadline != "off", reporter,
+                                has_work=has_work)
                             sum_counts, sum_errors = run_summarize(
                                 ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
-                                reporter=reporter,
+                                reporter=reporter, mode=mode, fallback_above=fallback_above,
                             )
                         counts |= sum_counts
                         errors += sum_errors
@@ -507,8 +572,7 @@ def _run_locked(ctx: _Context) -> None:
                             try:
                                 with _reporter() as reporter:
                                     rerun_counts, rerun_errors = run_reruns(
-                                        ctx.conn, llm, ctx.vault,
-                                        schedule.deadline_at(datetime.now(), ctx.config.night_deadline),
+                                        ctx.conn, llm, ctx.vault, deadline,
                                         reporter=reporter,
                                         model_timed_out=TIMEOUT_STOPPED in sum_errors,
                                     )
@@ -673,10 +737,14 @@ def summarize(
             typer.echo("No older digest papers are missing a summary.")
     done = ListReporter()
     with _reporter() as live:
+        # Reruns follow tonight unless the deadline is off, so the same fallback rule as `run`.
+        mode, fallback_above = _summarize_plan(
+            llm, ctx.config, ctx.config.night_deadline != "off", live)
         counts, errors = run_summarize(
             ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
             today=today, backlog_limit=cap, paper_ids=paper_ids or None,
             reporter=_Tee(live, done), refetch=refetch,
+            mode=mode, fallback_above=fallback_above,
         )
     typer.echo("Summarized:")
     _report(counts, errors)
@@ -1501,10 +1569,16 @@ def _latest_eval(vault: Path) -> date:
 def eval_run(
     vault: VaultOption = None,
     use_judge: Annotated[bool, typer.Option("--judge", help="Also grade every key fact with the Claude judge.")] = False,
+    mode: Annotated[str | None, typer.Option(
+        "--mode", help="How to read papers for this eval only: auto, whole or split (default: your summarize mode).",
+    )] = None,
 ) -> None:
     """Summarize every gold-set paper with the local model and write a report to grade."""
     ctx = _open(vault)
     _require_model(ctx.config)
+    setting = ctx.config.summarize_mode if mode is None else mode.strip().lower()
+    if setting not in profile_edit.SUMMARIZE_MODES:
+        raise _fail(f"unknown mode {mode!r}: choose one of {', '.join(profile_edit.SUMMARIZE_MODES)}")
     with _clean_errors():
         papers = load_gold(ctx.vault)
     if not papers:
@@ -1538,8 +1612,10 @@ def eval_run(
     typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
     with _clean_errors():
         with _reporter() as reporter:
+            read_mode = _read_mode(llm, setting, reporter,
+                                   set_with=None if mode is None else "--mode for this eval")
             md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
-                          reporter=reporter, judge=eval_judge)
+                          reporter=reporter, judge=eval_judge, mode=read_mode)
     typer.echo(f"Report written: {md}")
     if eval_judge:
         typer.echo("Next: rpipe eval report")
@@ -1615,6 +1691,10 @@ def model_show(vault: VaultOption = None) -> None:
         typer.echo("No summary model: digests list abstracts only. Choose one with `rpipe model setup`.")
         return
     typer.echo(f"model: {cfg.llm_model}")
+    typer.echo(f"summarize mode: {cfg.summarize_mode} (change with `rpipe model set-mode`)")
+    if cfg.summarize_mode == "auto":
+        typer.echo(f"  auto: split when the model is not fully in GPU memory or the context is "
+                   f"below {SPLIT_BELOW_CTX} tokens (Ollama); whole otherwise")
     if cfg.llm_backend == "claude-code":
         typer.echo(f"effort: {cfg.llm_effort}")
     else:
@@ -1741,6 +1821,22 @@ def model_set_context(
         profile_edit.set_llm_num_ctx(ctx.vault, n)
     typer.echo("context window is now auto." if n.strip().lower() == "auto"
                else f"context window is now {int(n)} tokens.")
+
+
+@model_app.command("set-mode")
+def model_set_mode(
+    mode: Annotated[str, typer.Argument(help="auto (chosen per run), whole (one call per paper) or split (read in parts).")],
+    vault: VaultOption = None,
+) -> None:
+    """Choose how papers are read: whole, split (front matter and body notes, then combined) or auto."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_summarize_mode(ctx.vault, mode)
+    stored = load_config(ctx.vault / "config.yaml").summarize_mode
+    if stored == "auto":
+        typer.echo("summarize mode is now auto: each run picks split or whole (see `rpipe model show`).")
+    else:
+        typer.echo(f"summarize mode is now {stored}.")
 
 
 @model_app.command("fit")
@@ -2632,6 +2728,9 @@ def _show_paper(conn: sqlite3.Connection, row: sqlite3.Row, header: str) -> None
     ps = get_summary(conn, row["id"])
     if ps is not None:
         typer.echo("\n".join(render_summary(ps)).rstrip())
+        if ps.read_mode != "whole":
+            how = "map-reduce" if ps.read_mode == "map_reduce" else ps.read_mode
+            typer.echo(f"\nread in parts: {how}, {ps.parts} notes call{'s' if ps.parts != 1 else ''}")
     else:
         typer.echo((row["abstract"] or "").strip() or "No abstract available.")
     typer.echo(f"\n{row['url']}")

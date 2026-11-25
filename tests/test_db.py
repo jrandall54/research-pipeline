@@ -185,6 +185,32 @@ def test_summary_round_trip_and_absent(tmp_path):
     assert get_summary(conn, "nope") is None
 
 
+def test_summary_round_trip_keeps_read_mode_and_parts(tmp_path):
+    import json
+
+    from research_pipeline.db import get_summary, save_summary
+    from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
+
+    conn = open_db(tmp_path / "v.db")
+    upsert_paper(conn, make())
+    c = Claim(text="t", sections=["Abstract"])
+    result = PaperSummary(
+        summary=Summary(one_line="o", problem=c, approach=c, results=c, limitations=c),
+        critique=Critique(strengths=[c], weaknesses=[], questions=[]),
+        basis="full_text", unverified=[], read_mode="map_reduce", parts=5,
+        notes_unverified=["A note citing a made-up section."],
+    )
+    save_summary(conn, "2401.00001", result, "m")
+    assert get_summary(conn, "2401.00001") == result
+    row = json.loads(conn.execute("SELECT text FROM summaries WHERE kind = 'summary'").fetchone()[0])
+    assert row["notes_unverified"] == ["A note citing a made-up section."]
+    # Rows written before B.6 have none of these keys: they read as whole, one part, no notes.
+    del row["read_mode"], row["parts"], row["notes_unverified"]
+    conn.execute("UPDATE summaries SET text = ? WHERE kind = 'summary'", (json.dumps(row),))
+    old = get_summary(conn, "2401.00001")
+    assert old.read_mode == "whole" and old.parts == 1 and old.notes_unverified == []
+
+
 def test_version_bump_drops_stale_fulltext_summary_and_retries(tmp_path):
     from research_pipeline.db import get_fulltext, get_summary, record_failure, save_fulltext, save_summary
     from research_pipeline.models import Section

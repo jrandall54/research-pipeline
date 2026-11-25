@@ -1,8 +1,23 @@
-# Handoff — after Phase 6 Part B.1 (answer key) (2026-11-22)
+# Handoff — after Phase 6 Part B.5 (spill reruns) (2026-11-24)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
 
-## B.4 built (2026-11-24, branch `part-b4-scan-recommend`, not merged)
+## B.5 built (2026-11-24, branch `part-b5-spill-reruns`, not merged)
+
+Plan `plans/2026-11-24-part-b5-spill-reruns.md`. `uv run pytest -q`: 1310 passing, ruff clean. Every task had a spec+quality review; whole-branch review (opus) + one fix wave.
+
+- **Proxy seen through:** when `llm_url` and the Ollama service's own address list the same models (names + digests), they count as one server (`OllamaServer.proxied`). On the owner's machine the false mismatch note should be gone and `recommend` should now estimate with q8_0 (about double the context it showed before). Check: `rpipe model scan`.
+- **B.4 parked fixes done:** nvidia-smi `[N/A]` free memory = unknown (card kept); CPU fallback whenever no catalog model fits the GPU (8 GB busy card); placement reason names usable memory; hardware.md worked example 0.245 GiB.
+- **Summaries record** `needed_ctx` (only when the body was cut) and provenance `gpu_share` (from `/api/ps`).
+- **Night deadline:** `night_deadline` (default `07:00`, or `off`), `rpipe schedule set-deadline HH:MM|off`, shown first by `rpipe schedule show`. Reruns only start if the deadline is at most 12 h away (a 03:00 run gets them; a 10:00 manual run does not).
+- **Rerun stage (`spill.py`)** after the normal summarize pass in `rpipe run`, Ollama only: candidates = Ollama summaries with `body_cut` whose `needed_ctx` exceeds the context they ran with; grouped in 8,192-token buckets; memory cost per token measured with two loads (fit context and 8,192); each bucket must fit in free RAM − 4 GiB (re-checked after loading, previous bucket unloaded first); time estimated from the last rerun, else bench × 3, else needs ≥ 1 h left. Skipped when the normal pass timed out, another model holds the GPU, RAM can't be read, or no deadline. Health line: `rerun N`, `rerun waiting M`. Digest is written after reruns.
+- **Call time limit:** with a bench for the fitted model, each call may take `max(600, 1.5 × (ctx/read + 4096/write))` s (CPU 14B ≈ 957 s); without one, 600 s.
+- **Owner model names scrubbed** from the working tree (guide, handoff, plans, phase-6 spec); still in older git history.
+- **Not run on the real machine.** First real-night checks: `rpipe runs` / digest health line shows `rerun` / `rerun waiting` only if some paper was cut (nights so far had `body cut 0`, so likely nothing happens); `rpipe show ID` on a summary shows provenance `gpu_share` 1.0.
+- **Deferred minors:** DST edge in `deadline_at` near the 12 h limit; duplicate `/api/tags` probes in scan; recommend note sizes the raised limit by the bench's context; time estimate omits bucket load time; rerun load cap stays 600 s; no cache of the per-token memory measurement (~1 min on nights with candidates).
+- **Next:** owner decides merge; then B.6 (task splitting / map-reduce, measured with `rpipe eval`), refresh the Phase 7 plan.
+
+## B.4 built (2026-11-24, merged)
 
 Plan `plans/2026-11-24-part-b4-scan-recommend.md`. New: `rpipe model scan`, `recommend`, `tune [--undo]`, `bench`, `catalog show|update`; modules `scan.py`, `catalog.py`, `recommender.py`, `ollama_tune.py`, `bench.py`; data `defaults/model_catalog.yaml` (20 researched entries, version 1); guide page `docs/guide/hardware.md`. The setup wizard now uses the recommender (old `ollama_models.yaml` deleted); CPU-only and small-GPU machines get a CPU model instead of "none". The fit cache key now includes Ollama version, server settings and GPUs, so **the first nightly run after this probes the context once more (1-3 min)**. `uv run pytest -q`: 1233 passing, ruff clean. Every task had a spec+quality review; whole-branch review (opus) + one fix wave, approved.
 

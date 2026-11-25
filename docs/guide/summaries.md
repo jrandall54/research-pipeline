@@ -9,6 +9,8 @@ For each kept paper, the local model ([llm.md](llm.md)) writes two things from t
 
 Every point in both (a *claim*) names the paper section(s) it came from. Code then checks that each named section really exists. A claim whose citation cannot be verified is kept but flagged **unverified**, so it is never shown as if it were backed by the paper. The result also records whether it was built from the full text or only the abstract, and whether a long paper had to be cut to fit.
 
+A paper is read in one of two ways. **Whole**: the model reads the paper in one go (cut to fit if it must be) and writes the summary and critique. **Split**: the model takes notes on the front matter (abstract, introduction, conclusion) and on the body separately, then writes the summary and critique from the notes. Split is not only a fix for long papers: it is the faster way on a machine where the model is slow at long prompts, so the `summarize_mode` setting (`auto`, the default) picks it on CPU-only machines, when part of the model sits in ordinary RAM, and when the context window is small; a model fully in GPU memory with room for a typical paper, and Claude Code, read whole. Change it with `rpipe model set-mode auto|whole|split`; see "Choosing the mode" below. Whatever the mode, a paper too long for any context the model can ever use is read in size-based parts (map-reduce) rather than cut.
+
 `summarize_paper` in `src/research_pipeline/summarize.py` does one paper. (`rpipe run` summarises every kept paper; `rpipe summarize --backlog` and `rpipe summarize ID` catch up older ones, see `running.md`.)
 
 ## How it works
@@ -182,9 +184,9 @@ A paper that fit (nothing cut, or only appendices dropped) stores `needed_ctx: n
 3. **Notes, one call per chunk**, with the group's focus (`front`, `body` or `general`). The progress note says `notes 2/3`. A notes call sees only its chunk, so its citations are checked against that chunk's titles, with the usual one retry; still-wrong notes are kept and their text added to `unverified`.
 4. **Condense if too long.** All notes, in paper order, must fit one combine call (the budget minus the list of valid titles). If not, they are cut into batches that fit and each batch gets a condense call (progress note `condense`, once per round), and the merged notes replace them. This repeats for at most `MAX_CONDENSE_ROUNDS = 3` rounds. If the notes still do not fit, every note's text is shortened by the same share (ending in ` [...]`) and the result is marked `body_cut`: some of what the model read did not reach the summary.
 5. **Combine**: the summary call and the critique call (progress `summary`, `critique`), whose citations are checked against every section title that was read.
-`read_in_parts` refuses (`ValueError`) a context below `MIN_PARTS_CTX = 8192` tokens, the smallest `llm_num_ctx` the config accepts: below it a chunk would hold only a few characters and the combine prompt could not fit its own instructions. `summarize_paper` never asks it to: at such a context it reads the paper whole.
-
 6. **Result.** `read_mode` is `split` or `map_reduce` (what the caller asked for), `parts` the number of notes calls, `basis` `full_text`, `needed_ctx` none (it means "how big a context would read this whole", which does not apply here), `dropped` the list the caller passed (from `split_groups` or its own pruning), and `unverified` the unverified claim texts of the notes, condense, summary and critique calls together.
+
+`read_in_parts` refuses (`ValueError`) a context below `MIN_PARTS_CTX = 8192` tokens, the smallest `llm_num_ctx` the config accepts: below it a chunk would hold only a few characters and the combine prompt could not fit its own instructions. `summarize_paper` never asks it to: at such a context it reads the paper whole.
 
 **Worked example: a 3-chunk paper.** A paper at an 8,192-token context has a budget of (8192 - 4000) x 3 = 12,576 characters per call. Its sections: `Abstract` (1,200 characters), `1 Introduction` (4,000), `2 Method` (9,000), `3 Experiments` (6,000), `4 Results` (5,000), `5 Conclusion` (1,500), `References` (8,000), `Appendix A Proofs` (7,000).
 
@@ -201,8 +203,8 @@ A paper that fit (nothing cut, or only appendices dropped) stores `needed_ctx: n
 
 **What it does.** `summarize_paper(llm, title, abstract, sections, num_ctx, on_phase, *, mode, fallback_above)` decides, per paper, whether to read it in one go or in parts. There are two *modes* a user can pick, and one *fallback*:
 
-- **`whole`** (the default): one summary call and one critique call over the whole paper, cut to fit the context if it must be (`body_cut`). This is how every paper was read before B.6.
-- **`split`**: front matter and body read as separate parts, notes combined (`read_mode: split`), as described above. Useful when the model is slow at long prompts (part of it in ordinary RAM, or a small context).
+- **`whole`** (the function's default; the setting's default is `auto`, see "Choosing the mode"): one summary call and one critique call over the whole paper, cut to fit the context if it must be (`body_cut`). This is how every paper was read before B.6.
+- **`split`**: front matter and body read as separate parts, notes combined (`read_mode: split`), as described above. Faster when the model is slow at long prompts (CPU-only, part of it in ordinary RAM, or a small context), which is when `auto` picks it.
 - **map-reduce fallback**: not a mode but what a whole read does when the paper had to be cut and no rerun will ever read it whole. The paper's core text is chunked by size and read in parts (`read_mode: map_reduce`), so nothing of the core text is lost.
 
 **How it works, step by step.**
@@ -220,12 +222,12 @@ The decision is made before any model call, so a paper that falls back costs onl
 
 | caller | `fallback_above` | why |
 | --- | --- | --- |
-| the nightly run, Ollama, night deadline set (reruns can happen) | the model's context cap (`spill.model_cap`: its trained context, at most `CONTEXT_CEILING`) | a paper needing more than the cap can never be read whole; anything below it waits for a rerun |
-| the nightly run with no reruns (another backend, or the deadline `off`) | `0` | no rerun will come, so every cut paper is read in parts now |
+| `rpipe run` and `rpipe summarize`, Ollama, reruns can happen | the model's context cap (`spill.model_cap`: its trained context, at most `CONTEXT_CEILING`) | a paper needing more than the cap can never be read whole; anything below it waits for a rerun |
+| `rpipe run` and `rpipe summarize` with no reruns (another backend, or the deadline `off`) | `0` | no rerun will come, so every cut paper is read in parts now |
 | a spill rerun (`spill.run_reruns`) | `None` | a rerun exists to read the paper whole; falling back would defeat it |
-| `rpipe eval` | `0` | measures the reading as a night with no reruns would do it |
+| `rpipe eval` | `None` (whole, no fallback) | for now eval reads every paper whole; this changes with `rpipe eval run --mode` |
 
-`rpipe run` and `rpipe summarize` will pass the mode and `fallback_above` once the `summarize_mode` setting is wired in (the next B.6 task); until then they use the defaults (`whole`, `None`): every paper is read as before B.6. Spill reruns already pass `None` explicitly.
+"Reruns can happen" means: for `rpipe run`, the morning deadline (`rpipe schedule set-deadline`) is set and less than 12 hours away, exactly when the rerun stage after the normal pass will run; for `rpipe summarize`, which you may run in the daytime, the deadline is not `off` (tonight's run can rerun what it cuts). Both commands pass the mode chosen by the `summarize_mode` setting (next section). Spill reruns pass `None` and always read whole.
 
 **Worked example 1: too long for any context.** A paper's core text is 420,000 characters, about 140,000 tokens; its `needed_ctx` is `roundup(140,000 + 4,000, 1024) = 144,384`. The model's trained context, and so its cap, is 131,072 tokens. The nightly run reads at 57,344 tokens with reruns on, so `fallback_above = 131,072`. The whole read would cut the body; `144,384 > 131,072`, so no rerun could ever read it whole: it falls back to map-reduce. At 57,344 tokens a chunk holds `(57,344 - 4,000) x 3 = 160,032` characters, so the core text becomes 3 chunks: three notes calls, then the summary and critique calls. Stored: `read_mode: map_reduce`, `parts: 3`, `body_cut: false`, and the health line counts it in ` · in parts 1`.
 
@@ -238,6 +240,36 @@ The decision is made before any model call, so a paper that falls back costs onl
 **Why it's built this way.** Map-reduce is a fallback, not a mode, to keep the order of preference from the hardware-adaptive design: a context that fits the GPU for everyone, reruns at a bigger context for papers a rerun can fix (they read the paper whole, which is best), and size-based parts only when nothing else can read the core text. Rejected: falling back for every cut paper (it would spend calls on papers a rerun reads whole tonight, and produce notes-based summaries where a whole read was possible), and never falling back (a paper longer than the model's trained context would be cut every night forever). The threshold is a number, not a yes/no, so one rule serves all callers: the cap, `0` or `None`. The fallback drops appendices even if they would fit in a chunk: they are the first thing ruling 10 drops when space is short, and the paper is here precisely because space was short. A paper with no paper sections, or a context below 8,192, is read whole instead of raising, because a summary of what is there beats a failed paper.
 
 **How to check it.** `tests/test_summarize.py` checks: whole mode unchanged when the paper fits (2 calls, `read_mode: whole`); split mode reads in parts (`notes 1/2`, `notes 2/2`, `summary`, `critique`); abstract-only, references-only and below-8,192 papers are read whole; a cut paper falls back above the threshold (with non-paper text and appendices in `dropped`), keeps its cut summary below it or with `None`, and the threshold is strictly above; `run_summarize` counts `in_parts`, notes `reading part 1 of N of ID` and `condensing notes for ID`, and a split-mode paper is not counted. `tests/test_spill.py` checks that a rerun passes `fallback_above=None`. `tests/test_cli_show.py` checks the `read in parts` line.
+
+### Choosing the mode: the `summarize_mode` setting
+
+**What it does.** `summarize_mode` in `config.yaml` says how `rpipe run` and `rpipe summarize` read papers: `whole`, `split`, or `auto` (the default), which picks one of the two at the start of each command from what the machine can do. Set it with `rpipe model set-mode auto|whole|split` (any capitals; anything else is refused with the three choices listed and the config left unchanged). It works for every backend, so a Claude Code user can choose `split` too. `rpipe model show` prints `summarize mode: ...` and, for `auto`, the rule in one line.
+
+**How it works, step by step** (`_summarize_plan` in `cli.py`, `resolve_mode` in `parts.py`). Once per command, after the model has been checked, inside a progress stage named `reading mode`:
+
+1. `whole` or `split`: used as set, on any backend. The model is not loaded for this.
+2. `auto` with a backend other than Ollama (Claude Code, a plug-in): `whole`. Cloud models have large contexts and run on the provider's hardware.
+3. `auto` with Ollama: the model is loaded at the run's context (`OllamaClient.load()`: an empty prompt to `/api/generate`, which only loads it) and Ollama is asked how much of it sits in GPU memory (`gpu_share()`, from `/api/ps`). Then:
+   - share unknown (the load failed, Ollama did not say): `whole`, which is how papers were read before split mode existed. The note says the share could not be read, and why; the run continues.
+   - share below 1.0 (part of the model in ordinary RAM; CPU-only is 0.0): `split`. Reading a long prompt is far slower when the model is partly or wholly on the CPU, and split mode keeps each prompt short.
+   - context below `SPLIT_BELOW_CTX = 26,624` tokens: `split`. That is the median paper (about 22,000 tokens, measured 2026-11-22) plus the 4,000-token reserve, rounded up to a multiple of 1,024: below it a typical paper would be cut in whole mode.
+   - otherwise: `whole`.
+4. The stage prints one note with the choice and the reason, for example `split: part of the model runs from RAM (GPU share 0.62)`.
+5. `fallback_above` is worked out as in the table above (the model's cap when reruns can happen, else `0`), and both go to `run_summarize`.
+
+**Worked examples.**
+
+| machine | what `auto` sees | mode |
+| --- | --- | --- |
+| 16 GB GPU, a mid-size model at a 57,344-token context, all of it in GPU memory | Ollama, share 1.0, 57,344 >= 26,624 | `whole` |
+| CPU-only laptop, a small model at 32,768 tokens | Ollama, share 0.0 | `split` |
+| the same GPU with a model too big for it (share 0.93) | Ollama, share below 1.0 | `split` |
+| a small GPU that only fits 16,384 tokens, fully on GPU | Ollama, share 1.0, 16,384 < 26,624 | `split` |
+| Claude Code | not Ollama | `whole` |
+
+**Why it's built this way.** The mode is chosen once per command, not per paper, because loading the model and reading `/api/ps` takes seconds and the answer does not change between papers. The model is loaded first because `/api/ps` only lists loaded models; the first paper would load it a moment later anyway, so the load is not wasted. An unknown share reads whole rather than split, so a hiccup in Ollama never changes how papers are read compared with before. Rejected: choosing per paper by length (a long paper in whole mode is already handled by reruns and the map-reduce fallback; the mode is about the machine), and a separate `rpipe` setting per backend (one setting, with `auto` doing the right thing per backend, is simpler to explain). The thresholds are shipped defaults; a later B.6 task measures them on real machines and may change them.
+
+**How to check it.** `rpipe model show` prints the setting. During `rpipe run` the `reading mode` stage shows the choice and the reason. `tests/test_parts.py` checks `resolve_mode` for each case above; `tests/test_profile_edit.py` and `tests/test_cli_model.py` check `set-mode` (capitals accepted, a bad value refused with the choices listed and nothing changed, works under Claude Code) and the `model show` line; `tests/test_llm.py` checks `load()` (empty prompt, context, keep-alive, an error reply raises); `tests/test_spill.py` checks that `run` passes the mode and `fallback_above` (Ollama with a deadline gets the model's cap, deadline off gets `0`, Claude Code gets `whole` and `0`), that a set mode skips the load, that a failed load reads whole with the reason in the note, and that `rpipe summarize` follows the deadline setting rather than the clock.
 
 ### Provenance: which model and prompt wrote this
 
@@ -284,10 +316,12 @@ The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They ch
 - `src/research_pipeline/summary_models.py`: `Claim`, `Notes`, `Summary`, `Critique`, `PaperSummary` (with `read_mode`, `parts`)
 - `src/research_pipeline/summarize.py`: `summarize_paper` (modes `whole` / `split`, the map-reduce fallback rule), `phase_note` (progress text for each phase), `run_summarize` (counts `in_parts`); also re-exports `claims` and `unknown_citations`
 - `src/research_pipeline/citations.py`: the citation check, `claims`, `unknown_citations`, `generate_checked` (generate, check, retry once); shared by whole reads and reading in parts
-- `src/research_pipeline/parts.py`: reading in parts, `split_groups`, `chunk_to_budget`, `read_in_parts`, `FRONT_WORDS`, `MAX_CONDENSE_ROUNDS`, `MIN_PARTS_CTX`
+- `src/research_pipeline/parts.py`: reading in parts, `split_groups`, `chunk_to_budget`, `read_in_parts`, `FRONT_WORDS`, `MAX_CONDENSE_ROUNDS`, `MIN_PARTS_CTX`; choosing the mode, `resolve_mode`, `SPLIT_BELOW_CTX`
+- `src/research_pipeline/cli.py`: `_summarize_plan` (the `reading mode` stage: mode and `fallback_above` for `rpipe run` and `rpipe summarize`), `rpipe model set-mode`
+- `src/research_pipeline/profile_edit.py`: `set_summarize_mode`; `src/research_pipeline/models.py`: `Config.summarize_mode`
 - `src/research_pipeline/pruning.py`: `classify`, `partition`, `fit_to_budget`, `Fit` (with `needed_ctx`), `NEEDED_STEP`
-- `src/research_pipeline/llm.py`: `OllamaClient.gpu_share` (reads `/api/ps`)
+- `src/research_pipeline/llm.py`: `OllamaClient.gpu_share` (reads `/api/ps`), `OllamaClient.load` (loads the model with an empty prompt)
 - `src/research_pipeline/prompts.py`: `PROMPT_VERSION`, `build_summary_prompt`, `build_critique_prompt`, `citation_feedback`, `defuse`, `SHARED_SYSTEM`, `SUMMARY_TASK`, `CRITIQUE_TASK`, `REMINDER`; for reading in parts `Focus`, `build_notes_prompt`, `build_condense_prompt`, `build_combine_prompts`, `notes_block`, `NOTES_SYSTEM`, `CONDENSE_SYSTEM`, `COMBINE_SYSTEM`, `REMINDER_NOTES`
 - `src/research_pipeline/spill.py`: `model_cap` (the model's context cap, the threshold when reruns can happen)
 - `src/research_pipeline/db.py`: `save_summary` (stores `read_mode` and `parts` too; replaces an existing summary, which is what makes a re-summary work), `get_summary`, `get_provenance`, `papers_missing_summary`, `papers_by_ids`
-- `tests/test_summarize.py`, `tests/test_parts.py`, `tests/test_pruning.py`, `tests/test_db.py`, `tests/test_spill.py`, `tests/test_cli_show.py`, `tests/test_prompt_layout.py`, `tests/test_prompt_limits.py`
+- `tests/test_summarize.py`, `tests/test_parts.py`, `tests/test_profile_edit.py`, `tests/test_cli_model.py`, `tests/test_llm.py`, `tests/test_pruning.py`, `tests/test_db.py`, `tests/test_spill.py`, `tests/test_cli_show.py`, `tests/test_prompt_layout.py`, `tests/test_prompt_limits.py`

@@ -9,7 +9,7 @@ import respx
 from conftest import SECTIONS, AlwaysSummary, FakeEmbedder, critique, summary
 from typer.testing import CliRunner
 
-from research_pipeline import cli, spill
+from research_pipeline import cli, profile_edit, spill
 from research_pipeline.bench import Bench, save_bench
 from research_pipeline.cli import Pipeline
 from research_pipeline.db import (
@@ -592,3 +592,118 @@ def test_bench_saved_without_tag_is_used(conn, tmp_path, ollama, monkeypatch):
                                  now=Clock(), ram_free=lambda: 32.0)
     assert counts == {"rerun": 0, "rerun_waiting": 1}  # refused by the bench estimate
     assert fake.calls == []
+
+
+# ---- summarize mode and fallback_above, wired into run and summarize ----
+
+
+class ModeOllama(NamedSummary):
+    """A fake Ollama client for the mode decision: `share` is what gpu_share() reads after load()."""
+
+    def __init__(self, share=1.0, num_ctx=57_344, load_error=None):
+        super().__init__("ollama")
+        self.url, self.model_name, self.num_ctx = "http://ollama.test", "m", num_ctx
+        self.share, self.load_error, self.loaded = share, load_error, 0
+
+    def load(self):
+        self.loaded += 1
+        if self.load_error:
+            raise self.load_error
+
+    def gpu_share(self):
+        return self.share
+
+
+def install_llm(monkeypatch, llm):
+    monkeypatch.setattr(cli, "build_pipeline", lambda config: Pipeline(
+        [], FakeEmbedder, lambda ids: [], lambda: llm, lambda pid: SECTIONS))
+    monkeypatch.setattr(cli, "run_reruns", lambda *a, **k: ({}, []))
+    monkeypatch.setattr(cli, "model_cap", lambda url, model: 40_960)
+    seen = {}
+    monkeypatch.setattr(cli, "run_summarize",
+                        lambda *a, **k: seen.update(k) or ({"summarized": 0}, []))
+    return seen
+
+
+def at_night(monkeypatch):
+    """Pretend every deadline is a few hours away, whatever time the test runs at."""
+    monkeypatch.setattr(cli.schedule, "deadline_at",
+                        lambda now, value: None if value == "off" else START + timedelta(hours=4))
+
+
+def set_cfg(vault, **values):
+    from ruamel.yaml import YAML
+    yaml = YAML()
+    path = vault / "config.yaml"
+    data = yaml.load(path.read_text())
+    data.update(values)
+    with path.open("w") as f:
+        yaml.dump(data, f)
+
+
+def test_run_passes_mode_and_fallback(vault, monkeypatch):
+    at_night(monkeypatch)
+    llm = ModeOllama(share=1.0)
+    seen = install_llm(monkeypatch, llm)
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["mode"] == "whole" and seen["fallback_above"] == 40_960 and llm.loaded == 1
+    assert "whole: the model is fully in GPU memory" in res.stderr
+
+    profile_edit.set_night_deadline(vault, "off")
+    seen = install_llm(monkeypatch, ModeOllama(share=0.62))
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["mode"] == "split" and seen["fallback_above"] == 0
+    assert "split: part of the model runs from RAM (GPU share 0.62)" in res.stderr
+
+
+def test_run_claude_code_reads_whole_with_no_fallback_cap(vault, monkeypatch):
+    at_night(monkeypatch)
+    llm = NamedSummary("claude-code")
+    seen = install_llm(monkeypatch, llm)
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["mode"] == "whole" and seen["fallback_above"] == 0
+
+
+def test_run_set_mode_is_kept_without_loading(vault, monkeypatch):
+    at_night(monkeypatch)
+    set_cfg(vault, summarize_mode="split")
+    llm = ModeOllama(share=1.0)
+    seen = install_llm(monkeypatch, llm)
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["mode"] == "split" and llm.loaded == 0
+
+
+def test_run_auto_load_failure_is_whole(vault, monkeypatch):
+    at_night(monkeypatch)
+    llm = ModeOllama(share=0.0, load_error=LlmError("out of memory"))
+    seen = install_llm(monkeypatch, llm)
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["mode"] == "whole"
+    assert "could not read how much of the model is in GPU memory" in res.stderr
+    assert "out of memory" in res.stderr
+    assert next((vault / "digests").glob("*.md")).exists()
+
+
+def test_summarize_uses_deadline_setting_not_the_clock(vault, monkeypatch):
+    # The real clock: daytime or night, a set deadline means reruns can happen tonight.
+    from research_pipeline.db import open_db, upsert_paper
+    conn = open_db(vault / "vault.sqlite")
+    upsert_paper(conn, PaperMeta(id="2611.00001", title="T", source="arxiv", url="http://x"))
+    conn.commit()
+    conn.close()
+    seen = install_llm(monkeypatch, ModeOllama(share=0.0))
+    monkeypatch.setattr(cli, "_ready_llm", lambda p: p.make_llm())
+    res = runner.invoke(cli.app, ["summarize", "2611.00001", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["mode"] == "split" and seen["fallback_above"] == 40_960
+    profile_edit.set_night_deadline(vault, "off")
+    seen = install_llm(monkeypatch, ModeOllama(share=0.0))
+    monkeypatch.setattr(cli, "_ready_llm", lambda p: p.make_llm())
+    res = runner.invoke(cli.app, ["summarize", "2611.00001", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["fallback_above"] == 0

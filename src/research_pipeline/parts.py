@@ -41,6 +41,9 @@ MAX_CONDENSE_ROUNDS = 3
 # Smallest context a paper is read in parts at: the config's floor for `llm_num_ctx`. Below it a
 # chunk would be a few characters and the combine prompt could not fit its own instructions.
 MIN_PARTS_CTX = 8192
+# `auto` picks split mode below this context (Decision 6): the median paper (~22K tokens,
+# measured 2026-11-22) plus the 4,000-token reserve, rounded up to a multiple of 1,024.
+SPLIT_BELOW_CTX = 26_624
 
 Group = tuple[Focus, list[Section]]
 
@@ -266,3 +269,34 @@ def read_in_parts(
         read_mode=read_mode,
         parts=of,
     )
+
+
+# --- Choosing the mode (the summarize_mode setting) ----------------------------------------
+
+
+def resolve_mode(
+    setting: str, backend: str, gpu_share: float | None, num_ctx: int
+) -> tuple[Literal["whole", "split"], str]:
+    """The mode to read papers in, and a one-line plain reason for the progress note.
+
+    ``whole`` and ``split`` are kept as set, whatever the backend. ``auto`` (Decision 6): a
+    backend other than Ollama reads whole (cloud models have room); on Ollama, an unknown GPU
+    share reads whole (the behaviour before split mode existed); any of the model in RAM
+    (share below 1.0, CPU-only is 0.0) or a context below SPLIT_BELOW_CTX reads in parts.
+    """
+    if setting == "whole":
+        return "whole", "whole: set with `rpipe model set-mode whole`"
+    if setting == "split":
+        return "split", "split: set with `rpipe model set-mode split`"
+    if backend != "ollama":
+        return "whole", f"whole: the {backend} backend has room to read a paper in one call"
+    if gpu_share is None:
+        return "whole", "whole: could not read how much of the model is in GPU memory"
+    if gpu_share <= 0.0:
+        return "split", "split: the model runs on the CPU only (GPU share 0.0)"
+    if gpu_share < 1.0:
+        return "split", f"split: part of the model runs from RAM (GPU share {gpu_share:.2f})"
+    if num_ctx < SPLIT_BELOW_CTX:
+        return "split", (f"split: the context ({num_ctx} tokens) is below {SPLIT_BELOW_CTX},"
+                         " too small for a typical paper")
+    return "whole", f"whole: the model is fully in GPU memory with a {num_ctx}-token context"

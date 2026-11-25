@@ -1,5 +1,6 @@
 """Reading a paper in parts: groups, chunks, notes, condense, combine (parts.py)."""
 
+import pytest
 from conftest import FakeLLM
 
 from research_pipeline.citations import claims, generate_checked
@@ -7,8 +8,10 @@ from research_pipeline.models import Section
 from research_pipeline.parts import (
     FRONT_WORDS,
     MAX_CONDENSE_ROUNDS,
+    SPLIT_BELOW_CTX,
     chunk_to_budget,
     read_in_parts,
+    resolve_mode,
     split_groups,
 )
 from research_pipeline.prompts import COMBINE_SYSTEM, CONDENSE_SYSTEM, NOTES_SYSTEM
@@ -260,3 +263,31 @@ def test_read_in_parts_refuses_a_context_below_the_floor():
     with pytest.raises(ValueError, match="8192"):
         read_in_parts(FakeLLM([]), "T", [("general", [S("1 A")])], 8191,
                       read_mode="split", dropped=[])
+
+
+# --- resolve_mode (the summarize_mode setting, Decision 6) ---------------------------------
+
+
+@pytest.mark.parametrize("setting,backend,share,ctx,mode", [
+    ("whole", "ollama", 0.0, 8192, "whole"), ("split", "claude-code", None, 200_000, "split"),
+    ("auto", "claude-code", None, 200_000, "whole"), ("auto", "ollama", 1.0, 57_344, "whole"),
+    ("auto", "ollama", 0.93, 57_344, "split"), ("auto", "ollama", 0.0, 32_768, "split"),
+    ("auto", "ollama", 1.0, 16_384, "split"), ("auto", "ollama", 1.0, 26_624, "whole"),
+])
+def test_resolve_mode(setting, backend, share, ctx, mode):
+    assert resolve_mode(setting, backend, share, ctx)[0] == mode
+
+
+def test_resolve_mode_unknown_share_is_whole():
+    mode, reason = resolve_mode("auto", "ollama", None, 57_344)
+    assert mode == "whole" and "could not" in reason
+
+
+def test_resolve_mode_reasons_are_plain():
+    assert resolve_mode("auto", "ollama", 0.62, 57_344) == (
+        "split", "split: part of the model runs from RAM (GPU share 0.62)")
+    assert "CPU" in resolve_mode("auto", "ollama", 0.0, 57_344)[1]
+    assert "16384" in resolve_mode("auto", "ollama", 1.0, 16_384)[1]
+    assert resolve_mode("split", "ollama", 1.0, 57_344)[1].startswith("split: ")
+    assert resolve_mode("auto", "claude-code", None, 200_000)[1].startswith("whole: ")
+    assert SPLIT_BELOW_CTX == 26_624

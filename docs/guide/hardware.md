@@ -117,6 +117,18 @@ Because free memory is read at scan time, an app holding GPU memory when you run
 
 **On the CPU tier, measure the speed.** Each model call normally may take at most 600 seconds (`CALL_TIMEOUT` in `llm.py`). On a slow CPU, reading a long paper alone can take longer than that: at 20 tokens/s a 22,000-token paper needs about 1,100 s. Once `rpipe model bench` has measured the model, the limit grows to fit the measured speed (see "The time limit for one call" in [llm.md](llm.md)), so long papers finish instead of timing out; without a measurement they would time out and fall back to their abstracts. "Slow but fine overnight" therefore assumes you run `rpipe model bench` (the recommend and setup flows offer it).
 
+**Which placement reads papers in parts.** With the `summarize_mode` setting at `auto` (the default), each run looks at where the model actually sits and chooses how to read papers (see "Choosing the mode" in [summaries.md](summaries.md)):
+
+| placement | what Ollama reports | mode |
+| --- | --- | --- |
+| On the GPU, with a context of 26,624 tokens or more (for example a 16 GB card at 57K) | all of the model in GPU memory | whole: one call per paper |
+| On the GPU, but only a small context fits (below 26,624 tokens) | all in GPU memory | split: a typical paper would be cut otherwise |
+| Partly in RAM (spill) | part of the model in RAM | split: shorter prompts, read faster |
+| On the CPU | none of it in GPU memory | split |
+| Claude Code (no local model) | not asked | whole |
+
+Split mode makes one notes call per part plus the summary and critique calls from the notes, each with a short prompt, instead of two calls that each read the whole paper; on a CPU or a spilled model, where reading a long prompt is the slow part, that is the cheaper way. Pin it either way with `rpipe model set-mode whole` or `rpipe model set-mode split`.
+
 Order: GPU first, then spill, then CPU; inside each, models the catalog lists for this machine's band first, then bigger models by **dense-equivalent size** (quality first), then the bigger download (for two quantizations of the same model, the larger one keeps more detail, so a 16.8 GB Q4_K_M ranks above a 12 GB IQ3_XXS of the same 27B model when both fit), then ones already installed. The top five are shown. Dense-equivalent size is the parameter count for a dense model and `sqrt(total x active)` for a mixture of experts, so a 35B model with 3B active counts as about 10.2B and ranks below a 27B dense model.
 
 Worked example (the owner's card: 16 GB RTX 5070 Ti, 15,364 MiB = 15.0 GiB free, flash attention and `q8_0` on): `vram` = 15.0 - 2.0 = 13.0 GiB. The 13.7 GB Qwen3.6-35B-A3B has 12.76 GiB of weights, so 0.245 GiB is left (13.004 - 12.759); at 19.5 MiB per 1,000 tokens halved to 9.75, that is 0.245 x 1024 x 1000 / 9.75 = about 25,700 tokens, rounded down to 25,600 and shown as "fits fully in the 13.0 GB of GPU memory free for models with about 26K tokens of context (estimate; rpipe model fit measures it)". The figure in that sentence is `vram`, the memory actually usable, not the card's 16 GB total. That matches the measurement: it fit fully at 16K and spilled at 49K. A 22 GB model would not fit on the card; if it is a mixture of experts and 20 GB of RAM is free, it is shown as a spill.

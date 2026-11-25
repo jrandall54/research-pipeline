@@ -351,3 +351,12 @@ def test_unquoted_hand_written_deadline_loads_and_can_be_changed(vault, written,
     assert load_config(path).night_deadline == loaded
     pe.set_night_deadline(vault, "06:15")
     assert load_config(path).night_deadline == "06:15"
+
+
+def test_set_summarize_mode_normalises_and_validates(vault):
+    assert load_config(vault / "config.yaml").summarize_mode == "auto"
+    pe.set_summarize_mode(vault, " SPLIT ")
+    assert load_config(vault / "config.yaml").summarize_mode == "split"
+    with pytest.raises(ValueError, match="auto, whole, split"):
+        pe.set_summarize_mode(vault, "fast")
+    assert load_config(vault / "config.yaml").summarize_mode == "split"

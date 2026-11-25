@@ -60,7 +60,7 @@ def _int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def rerun_candidates(conn: sqlite3.Connection, model_cap: int) -> list[Rerun]:
+def rerun_candidates(conn: sqlite3.Connection, cap: int) -> list[Rerun]:
     """Stored summaries that were cut and could be read whole (or at least at more context).
 
     A candidate has `body_cut`, a recorded `needed_ctx`, and Ollama provenance showing it ran at a
@@ -86,19 +86,19 @@ def rerun_candidates(conn: sqlite3.Connection, model_cap: int) -> list[Rerun]:
         ran = _int(prov.get("num_ctx")) if isinstance(prov, dict) else None
         if not isinstance(prov, dict) or prov.get("backend") != "ollama":
             continue  # only local summaries: a cloud backend reads long papers whole already
-        if needed is None or ran is None or ran >= needed or ran >= model_cap:
+        if needed is None or ran is None or ran >= needed or ran >= cap:
             continue
         out.append(Rerun(row["paper_id"], needed, ran))
     out.sort(key=lambda r: r.needed_ctx)  # stable: newest digest first among equals
     return out
 
 
-def buckets(reruns: list[Rerun], model_cap: int) -> list[tuple[int, list[Rerun]]]:
+def buckets(reruns: list[Rerun], cap: int) -> list[tuple[int, list[Rerun]]]:
     """Group reruns by the context they run at: needed context rounded up to RERUN_STEP,
     at most the model's cap. One model load per group, smallest first."""
     groups: dict[int, list[Rerun]] = {}
     for r in reruns:
-        ctx = min(math.ceil(r.needed_ctx / RERUN_STEP) * RERUN_STEP, model_cap)
+        ctx = min(math.ceil(r.needed_ctx / RERUN_STEP) * RERUN_STEP, cap)
         groups.setdefault(ctx, []).append(r)
     return [(ctx, sorted(groups[ctx], key=lambda r: r.needed_ctx)) for ctx in sorted(groups)]
 

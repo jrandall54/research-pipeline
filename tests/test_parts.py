@@ -183,7 +183,8 @@ def test_notes_see_only_their_chunk_titles_combine_sees_all():
     # "Method" is not in the front chunk: the front notes call retries, then it is verified there.
     assert phases == ["notes 1/2", "retry", "notes 2/2", "summary", "critique"]
     assert '"Intro"' in llm.calls[1][1].split("</paper>", 1)[1]
-    assert ps.unverified == ["A note. (Method)"]
+    # A notes miss is kept apart: `unverified` means the final claims only, as in whole mode.
+    assert ps.notes_unverified == ["A note. (Method)"] and ps.unverified == []
 
 
 def test_notes_bad_citation_retries_once():
@@ -191,13 +192,45 @@ def test_notes_bad_citation_retries_once():
     ps = read_in_parts(llm, "T", [("general", [S("Intro")])], 32768, read_mode="map_reduce", dropped=[])
     assert len(llm.calls) == 4
     assert "Nope" in llm.calls[1][1].split("</paper>", 1)[1]  # citation feedback on the retry
-    assert ps.unverified == ["A note. (Nope)"]
+    assert ps.notes_unverified == ["A note. (Nope)"] and ps.unverified == []
 
 
 def test_combine_unverified_is_reported():
     llm = FakeLLM([notes("Intro"), summary_citing("Gone"), summary_citing("Gone"), critique_citing("Intro")])
     ps = read_in_parts(llm, "T", [("general", [S("Intro")])], 32768, read_mode="map_reduce", dropped=[])
-    assert ps.unverified == ["From Gone."] * 4
+    assert ps.unverified == ["From Gone."] * 4 and ps.notes_unverified == []
+
+
+def test_invented_titles_are_dropped_from_notes_before_combining():
+    mixed = Notes(claims=[
+        Claim(text="Half right.", sections=["Nope", "Intro"]),
+        Claim(text="All wrong.", sections=["Nope"]),
+        Claim(text="Fine.", sections=["Intro"]),
+    ])
+    llm = FakeLLM([mixed, mixed, summary_citing("Intro"), critique_citing("Intro")])
+    ps = read_in_parts(llm, "T", [("general", [S("Intro")])], 32768, read_mode="map_reduce", dropped=[])
+    combine = llm.calls[2][1]
+    block = combine[combine.index("<notes>"): combine.index("</notes>")]
+    assert "Nope" not in block and "All wrong." not in block
+    assert '- Half right. [sections: ["Intro"]]' in block and "Fine." in block
+    assert ps.notes_unverified == ["Half right.", "All wrong."]  # still recorded
+
+
+def test_condense_misses_are_notes_unverified():
+    num_ctx = 8192
+    b = budget(num_ctx)
+    titles = [f"{i} Part" for i in range(1, 13)]
+    llm = SchemaLLM(
+        note=lambda cite: Notes(claims=[Claim(text="y" * 200, sections=[cite])] * 10),
+        condensed=lambda: Notes(claims=[Claim(text="Made up.", sections=["Nope"]),
+                                        Claim(text="Real.", sections=[titles[0]])]),
+        cite=titles[0],
+    )
+    ps = read_in_parts(llm, "T", [("general", [S(t, b - 50) for t in titles])], num_ctx,
+                       read_mode="map_reduce", dropped=[])
+    assert ps.unverified == [] and "Made up." in ps.notes_unverified
+    combine = [u for s, u in llm.calls if s == COMBINE_SYSTEM][0]
+    assert "Made up." not in combine and "Real." in combine
 
 
 def test_notes_condense_when_too_long():
@@ -291,3 +324,10 @@ def test_resolve_mode_reasons_are_plain():
     assert resolve_mode("split", "ollama", 1.0, 57_344)[1].startswith("split: ")
     assert resolve_mode("auto", "claude-code", None, 200_000)[1].startswith("whole: ")
     assert SPLIT_BELOW_CTX == 26_624
+
+
+def test_resolve_mode_names_where_a_fixed_mode_was_set():
+    assert resolve_mode("split", "ollama", None, 8192) == (
+        "split", "split: set with `rpipe model set-mode split`")
+    assert resolve_mode("whole", "ollama", 0.0, 8192, set_with="--mode for this eval") == (
+        "whole", "whole: set with --mode for this eval")

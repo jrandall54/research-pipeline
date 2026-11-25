@@ -14,7 +14,7 @@ from research_pipeline.summary_models import Claim, Critique, Notes, Summary
 T = TypeVar("T", Summary, Critique, Notes)
 
 
-def _norm(title: str) -> str:
+def norm_title(title: str) -> str:
     return title.strip().casefold()
 
 
@@ -29,11 +29,11 @@ def claims(obj: Summary | Critique | Notes) -> list[Claim]:
 
 def unknown_citations(obj: Summary | Critique | Notes, titles: list[str]) -> list[str]:
     """Cited titles that match no section (ignoring case and surrounding whitespace)."""
-    known = {_norm(t) for t in titles}
+    known = {norm_title(t) for t in titles}
     bad: list[str] = []
     for claim in claims(obj):
         for cited in claim.sections:
-            if _norm(cited) not in known and cited not in bad:
+            if norm_title(cited) not in known and cited not in bad:
                 bad.append(cited)
     return bad
 
@@ -49,8 +49,8 @@ def generate_checked(  # noqa: UP047 (module-level constrained TypeVar T is shar
         if on_retry is not None:
             on_retry()
         result = llm.generate(system, user + citation_feedback(bad, titles), schema)
-    known = {_norm(t) for t in titles}
+    known = {norm_title(t) for t in titles}
     unverified = [
-        c.text for c in claims(result) if any(_norm(s) not in known for s in c.sections)
+        c.text for c in claims(result) if any(norm_title(s) not in known for s in c.sections)
     ]
     return result, unverified

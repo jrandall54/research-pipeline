@@ -183,8 +183,10 @@ class OllamaClient:
 
     def load(self) -> None:
         """Load the model at this client's context without asking it anything (an empty prompt
-        only loads it), so `gpu_share()` can then say where it sits. LlmError if it cannot."""
-        resp = self._request("POST", "/api/generate", json={
+        only loads it), so `gpu_share()` can then say where it sits. LlmError if it cannot.
+        A load is not a paper: it waits at most one normal call (CALL_TIMEOUT), even when this
+        client's limit was raised for a slow model."""
+        resp = self._request("POST", "/api/generate", timeout=min(self.timeout, CALL_TIMEOUT), json={
             "model": self.model_name, "prompt": "", "keep_alive": KEEP_ALIVE,
             "options": {"num_ctx": self.num_ctx}})
         try:

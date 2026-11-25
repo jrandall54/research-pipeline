@@ -51,7 +51,10 @@ class PaperSummary(BaseModel):
     body_cut: bool = False  # core paper text was trimmed to fit (not just non-paper text dropped)
     needed_ctx: int | None = None  # context (tokens) the core text needs uncut; only when body_cut
     dropped: list[Dropped] = []  # sections left out, with sizes (see pruning.py)
-    unverified: list[str]  # claim texts whose citations could not be verified
+    unverified: list[str]  # summary/critique claim texts whose citations could not be verified
+    # Reading in parts only: notes (and condensed notes) whose citations could not be verified.
+    # Not in the summary itself; their invented titles were dropped before combining.
+    notes_unverified: list[str] = []
     read_mode: Literal["whole", "split", "map_reduce"] = "whole"  # how the paper was read (old rows: whole)
     parts: int = 1  # how many parts it was read in (1 when read whole)
 

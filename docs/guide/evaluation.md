@@ -204,17 +204,27 @@ rpipe eval report            counts, PASS or FAIL, and which papers failed and w
 ```
 
 1. **`rpipe eval run`** refuses if the gold set is empty (and tells you to use `rpipe gold add`), warns if it has fewer than 10 papers, then for each gold paper fetches the full text (the same fetcher as the nightly run), writes a summary and critique with the same code as the nightly run, and records the result. A paper with no HTML version is summarized from its abstract (looked up on arXiv by id) and labelled `ABSTRACT ONLY`. A paper that fails (model error, no text and no abstract) gets an error entry and the others carry on.
-   Papers are read in the **reading mode** (whole or in parts; see "Choosing the mode" in `summaries.md`) given by `--mode auto|whole|split`, or by your `summarize_mode` setting when you leave it out. `auto` is resolved exactly as in `rpipe run` (a `reading mode` progress stage first). `--mode` applies to this eval only and is never saved. Unlike a nightly run, eval never waits for a rerun: a paper that would be cut in whole mode is read in parts at once (`fallback_above = 0`).
+   Papers are read in the **reading mode** (whole or in parts; see "Choosing the mode" in `summaries.md`) given by `--mode auto|whole|split`, or by your `summarize_mode` setting when you leave it out. `auto` is resolved exactly as in `rpipe run` (a `reading mode` progress stage first; with `--mode whole` or `--mode split` its note says `set with --mode for this eval`). `--mode` applies to this eval only and is never saved. Unlike a nightly run, eval never waits for a rerun: a paper that would be cut in whole mode is read in parts at once (`fallback_above = 0`).
    Progress goes to stderr (stdout is unchanged): a live bar on a terminal, plain lines otherwise, one step per gold paper (`ok` or `failed`, the same outcome the report records), and a `still waiting: ...` line after 30 s of silence:
 
    ```
+   reading mode…
+     split: set with --mode for this eval
+   reading mode done (0s)
    eval…
+     reading part 1 of 2 of 2401.00000
+     reading part 2 of 2 of 2401.00000
+     writing the summary for 2401.00000
+     writing the critique for 2401.00000
      [1/10] 2401.00000 ok
+     reading part 1 of 2 of 2401.00001
      [2/10] 2401.00001 failed: model fell over
    eval done (6m12s)
    ```
 
-2. It writes two files in `<vault>/eval/`, named by date: `2026-11-21.json` (entries and your grades) and `2026-11-21.md`, a report you can read in any editor. Per paper the markdown has the key facts as a checklist, a `Basis:` line (with "body cut" when core text was trimmed) and a `Left out:` line (the sections dropped, with sizes), the summary, and, under each claim, the text of the section it cites, so you can judge a claim without opening the PDF. It ends with the automatic result: how many papers have every citation verified (`citations_ok`).
+   Before each model call a note names the step and the paper, in the same words as `rpipe summarize` (`reading part i of N of ID`, `condensing notes for ID`, `writing the summary for ID`, `writing the critique for ID`, `retrying citations for ID`; `ID: judging` with `--judge`), so a long paper never looks frozen.
+
+2. It writes two files in `<vault>/eval/`, named by date: `2026-11-21.json` (entries and your grades) and `2026-11-21.md`, a report you can read in any editor. Per paper the markdown has the key facts as a checklist, a `Basis:` line (with how it was read when not whole, e.g. `Basis: full text (read in parts: split, 2 notes calls)` or `(read in parts: map-reduce, 3 notes calls)`, and "body cut" when core text was trimmed) and a `Left out:` line (the sections dropped, with sizes), the summary, and, under each claim, the text of the section it cites, so you can judge a claim without opening the PDF. A paper with claims citing a section that does not exist lists them under `Unverified claims`. A paper read in parts may also list `Notes with unverified citations (not in the summary)`: notes taken along the way whose citation could not be verified. Those made-up titles were removed before the summary was written, so these notes do not count against `citations_ok` or the unverified-citation counts, which mean the same thing in every reading mode (only the final summary's and critique's claims). It ends with the automatic result: how many papers have every citation verified (`citations_ok`).
 3. **`rpipe eval grade`** works on the latest eval (the newest file in `eval/`). For each paper not yet graded it shows the title, your key facts and the summary, then asks `Is this summary accurate? [y/n]` and an optional note. Each grade is written to disk (atomically) the moment you give it. Ctrl-C or end of input stops cleanly: grades already given are kept, and running `rpipe eval grade` again continues with the next ungraded paper.
 4. **`rpipe eval report`** prints the counts: graded, accurate, citation-clean, PASS or FAIL against the pass mark, then the failed papers with your notes and the papers not graded yet. Ungraded papers count as **not** accurate, so a PASS is never claimed early. If you have graded nothing by hand, these human lines are replaced by one line, `Human grades: none yet (optional: rpipe eval grade)`, and no human PASS/FAIL is shown; a judged run still shows its own score (see "Automatic grading"). A paper whose summary failed to generate counts as failed.
 
@@ -322,7 +332,7 @@ After a judged run, `rpipe eval report` compares it with a baseline: the earlier
 
 ### How it works
 
-The block first shows both setups (`Earlier:` and `Now:`: backend, model, context, prompts, reading mode and judge model), so you can see what changed. When the reading mode differs, an extra line says so: `Reading mode changed: mode whole → split`. Only papers judged in both runs count, and for each paper only the facts judged in both. Facts are matched by their **text** (whitespace and case ignored), not by position, because each run stores a snapshot of the key facts it used (`key_facts` on the entry). If you edited, added or removed a fact between the runs, the report says `facts changed for ID since the earlier run; compared only the unchanged ones` and compares just the facts present in both. Eval files from before the snapshot existed fall back to matching by position. The change passes when all three hold:
+The block first shows both setups (`Earlier:` and `Now:`: backend, model, context, prompts, reading mode and judge model), so you can see what changed. When the reading mode differs, an extra line says so: `Reading mode changed: mode whole -> split`. Only papers judged in both runs count, and for each paper only the facts judged in both. Facts are matched by their **text** (whitespace and case ignored), not by position, because each run stores a snapshot of the key facts it used (`key_facts` on the entry). If you edited, added or removed a fact between the runs, the report says `facts changed for ID since the earlier run; compared only the unchanged ones` and compares just the facts present in both. Eval files from before the snapshot existed fall back to matching by position. The change passes when all three hold:
 
 - facts covered dropped by **at most 1**;
 - contradicted facts did **not rise**;
@@ -354,7 +364,7 @@ The second run keeps the first as its baseline (see "Same-day re-runs"), so the 
 Compared with the earlier run today (2026-11-24) over 10 paper(s) judged in both:
   Earlier: ollama/some-model, context 32768, prompts 2026-11-p7, mode whole, judge some-judge-model
   Now: ollama/some-model, context 32768, prompts 2026-11-p7, mode split, judge some-judge-model
-  Reading mode changed: mode whole → split
+  Reading mode changed: mode whole -> split
   Facts covered: 31 -> 30
   Contradicted: 1 -> 1
   Unverified citations: 0 -> 0
@@ -365,7 +375,7 @@ Split mode is good enough when the change passes: facts covered drop by **no mor
 
 **Why it's built this way.** The mode is a flag rather than a setting change so a comparison never leaves your configuration changed. The mode stored is the one actually used (`auto` resolved to `whole` or `split`), because "auto" alone would not say how the papers were read. Both runs use `fallback_above = 0`, so a paper too long for the context is read in parts in either mode and the two runs differ only in the mode. Rejected: a dedicated `rpipe eval modes` command that runs both (it would double a long wait inside one command and hide the two runs behind one result; two plain runs reuse the existing baseline and report).
 
-**How to check it.** `tests/test_eval.py` checks that the mode is recorded and shown (`mode split`), that eval always passes `fallback_above = 0`, that an old eval file reads as `whole`, that the compare block shows `mode whole → split` only when the mode changed, and that `--mode` overrides the setting without saving it (a bad value is refused with the choices).
+**How to check it.** `tests/test_eval.py` checks that the mode is recorded and shown (`mode split`), that eval always passes `fallback_above = 0`, that an old eval file reads as `whole`, that the compare block shows `mode whole -> split` only when the mode changed, that `--mode` overrides the setting without saving it (a bad value is refused with the choices) and its note says `set with --mode for this eval`, that a split read whose notes cited a made-up section but whose summary is clean counts 0 unverified and stays citation-clean (the notes listed separately in the markdown), that the `Basis:` line says `read in parts: split, 2 notes calls`, and that each phase is noted with the paper id.
 
 ### Where the code is
 

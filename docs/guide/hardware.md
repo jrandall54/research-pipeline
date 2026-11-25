@@ -123,11 +123,11 @@ Because free memory is read at scan time, an app holding GPU memory when you run
 | --- | --- | --- |
 | On the GPU, with a context of 26,624 tokens or more (for example a 16 GB card at 57K) | all of the model in GPU memory | whole: one call per paper |
 | On the GPU, but only a small context fits (below 26,624 tokens) | all in GPU memory | split: a typical paper would be cut otherwise |
-| Partly in RAM (spill) | part of the model in RAM | split: shorter prompts, read faster |
+| Partly in RAM (spill) | part of the model in RAM | split: shorter prompts, expected to read faster |
 | On the CPU | none of it in GPU memory | split |
 | Claude Code (no local model) | not asked | whole |
 
-Split mode makes one notes call per part plus the summary and critique calls from the notes, each with a short prompt, instead of two calls that each read the whole paper; on a CPU or a spilled model, where reading a long prompt is the slow part, that is the cheaper way. Pin it either way with `rpipe model set-mode whole` or `rpipe model set-mode split`.
+Split mode makes one notes call per part plus the summary and critique calls from the notes, each with a short prompt, instead of two calls that each read the whole paper; on a CPU or a spilled model, where reading a long prompt is the slow part, that is expected to be the cheaper way (the reasoning behind the rule, not yet measured on real machines; see "Choosing the mode" in [summaries.md](summaries.md)). Pin it either way with `rpipe model set-mode whole` or `rpipe model set-mode split`.
 
 Order: GPU first, then spill, then CPU; inside each, models the catalog lists for this machine's band first, then bigger models by **dense-equivalent size** (quality first), then the bigger download (for two quantizations of the same model, the larger one keeps more detail, so a 16.8 GB Q4_K_M ranks above a 12 GB IQ3_XXS of the same 27B model when both fit), then ones already installed. The top five are shown. Dense-equivalent size is the parameter count for a dense model and `sqrt(total x active)` for a mixture of experts, so a 35B model with 3B active counts as about 10.2B and ranks below a 27B dense model.
 

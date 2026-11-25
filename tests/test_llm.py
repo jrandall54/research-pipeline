@@ -373,6 +373,17 @@ def test_load_sends_empty_prompt_with_context_and_keep_alive():
 
 
 @respx.mock
+def test_load_waits_at_most_one_normal_call():
+    from research_pipeline.llm import CALL_TIMEOUT
+
+    route = respx.post(f"{URL}/api/generate").mock(return_value=httpx.Response(200, json={"done": True}))
+    OllamaClient(URL, "qwen3:14b", 32768, timeout=5000.0).load()  # a slow model's raised limit
+    assert route.calls[-1].request.extensions["timeout"]["read"] == CALL_TIMEOUT
+    OllamaClient(URL, "qwen3:14b", 32768, timeout=30.0).load()
+    assert route.calls[-1].request.extensions["timeout"]["read"] == 30.0
+
+
+@respx.mock
 def test_load_failure_raises_llm_error():
     respx.post(f"{URL}/api/generate").mock(return_value=httpx.Response(500, json={"error": "out of memory"}))
     with pytest.raises(LlmError):

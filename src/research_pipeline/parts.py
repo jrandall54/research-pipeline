@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable
 from typing import Literal
 
-from research_pipeline.citations import generate_checked
+from research_pipeline.citations import generate_checked, norm_title
 from research_pipeline.llm import LLM
 from research_pipeline.models import Section
 from research_pipeline.prompts import (
@@ -187,6 +187,18 @@ def _trim(notes: list[Claim], limit: int) -> list[Claim]:
     return cut
 
 
+def _known_only(notes: list[Claim], titles: list[str]) -> list[Claim]:
+    """Notes with every cited title that is not a section of the paper removed; a note left
+    citing nothing is dropped (its text is already in ``notes_unverified``)."""
+    known = {norm_title(t) for t in titles}
+    out: list[Claim] = []
+    for c in notes:
+        kept = [t for t in c.sections if norm_title(t) in known]
+        if kept:
+            out.append(c if len(kept) == len(c.sections) else Claim(text=c.text, sections=kept))
+    return out
+
+
 def read_in_parts(
     llm: LLM,
     title: str,
@@ -221,7 +233,7 @@ def read_in_parts(
             on_phase(name)
 
     retry = (lambda: on_phase("retry")) if on_phase is not None else None
-    unverified: list[str] = []
+    notes_unverified: list[str] = []  # notes misses; not the summary's own claims
 
     notes: list[Claim] = []
     for part, (focus, chunk) in enumerate(chunks, start=1):
@@ -231,7 +243,9 @@ def read_in_parts(
             llm, *build_notes_prompt(title, chunk, focus, part, of), Notes, chunk_titles, retry
         )
         notes.extend(got.claims)
-        unverified.extend(bad)
+        notes_unverified.extend(bad)
+    # A title still invented after the retry is never passed on to condense or combine.
+    notes = _known_only(notes, titles)
 
     # The combine prompt also lists the valid titles; the notes get the rest of the budget.
     limit = max(0, _budget(num_ctx) - len(json.dumps(titles, ensure_ascii=False)))
@@ -250,8 +264,8 @@ def read_in_parts(
                 llm, *build_condense_prompt(title, batch, i, len(batches)), Notes, titles, retry
             )
             condensed.extend(got.claims)
-            unverified.extend(bad)
-        notes = condensed
+            notes_unverified.extend(bad)
+        notes = _known_only(condensed, titles)
 
     (s_sys, s_user), (c_sys, c_user) = build_combine_prompts(title, notes, titles)
     phase("summary")
@@ -265,7 +279,8 @@ def read_in_parts(
         body_cut=body_cut,
         needed_ctx=None,
         dropped=list(dropped),
-        unverified=unverified + bad_s + bad_c,
+        unverified=bad_s + bad_c,
+        notes_unverified=notes_unverified,
         read_mode=read_mode,
         parts=of,
     )
@@ -275,7 +290,7 @@ def read_in_parts(
 
 
 def resolve_mode(
-    setting: str, backend: str, gpu_share: float | None, num_ctx: int
+    setting: str, backend: str, gpu_share: float | None, num_ctx: int, *, set_with: str | None = None
 ) -> tuple[Literal["whole", "split"], str]:
     """The mode to read papers in, and a one-line plain reason for the progress note.
 
@@ -283,11 +298,12 @@ def resolve_mode(
     backend other than Ollama reads whole (cloud models have room); on Ollama, an unknown GPU
     share reads whole (the behaviour before split mode existed); any of the model in RAM
     (share below 1.0, CPU-only is 0.0) or a context below SPLIT_BELOW_CTX reads in parts.
+    ``set_with`` names where a fixed mode came from in the reason (default: the setting's command).
     """
     if setting == "whole":
-        return "whole", "whole: set with `rpipe model set-mode whole`"
+        return "whole", f"whole: set with {set_with or '`rpipe model set-mode whole`'}"
     if setting == "split":
-        return "split", "split: set with `rpipe model set-mode split`"
+        return "split", f"split: set with {set_with or '`rpipe model set-mode split`'}"
     if backend != "ollama":
         return "whole", f"whole: the {backend} backend has room to read a paper in one call"
     if gpu_share is None:

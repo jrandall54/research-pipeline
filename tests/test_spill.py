@@ -641,14 +641,29 @@ def set_cfg(vault, **values):
         yaml.dump(data, f)
 
 
+def queue_paper(vault, pid="2611.00001"):
+    """One triaged paper, so tonight's summarize queue is not empty."""
+    from research_pipeline.db import open_db, set_status, upsert_paper
+    from research_pipeline.models import Status
+
+    conn = open_db(vault / "vault.sqlite")
+    upsert_paper(conn, PaperMeta(id=pid, title="T", source="arxiv", url="http://x"))
+    set_status(conn, pid, Status.triaged)
+    conn.commit()
+    conn.close()
+
+
 def test_run_passes_mode_and_fallback(vault, monkeypatch):
     at_night(monkeypatch)
+    queue_paper(vault)
     llm = ModeOllama(share=1.0)
     seen = install_llm(monkeypatch, llm)
     res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
     assert seen["mode"] == "whole" and seen["fallback_above"] == 40_960 and llm.loaded == 1
     assert "whole: the model is fully in GPU memory" in res.stderr
+    # The load can take a while: a note says why before it starts.
+    assert res.stderr.index("loading m to see where it sits") < res.stderr.index("whole: the model is fully")
 
     profile_edit.set_night_deadline(vault, "off")
     seen = install_llm(monkeypatch, ModeOllama(share=0.62))
@@ -669,6 +684,7 @@ def test_run_claude_code_reads_whole_with_no_fallback_cap(vault, monkeypatch):
 
 def test_run_set_mode_is_kept_without_loading(vault, monkeypatch):
     at_night(monkeypatch)
+    queue_paper(vault)
     set_cfg(vault, summarize_mode="split")
     llm = ModeOllama(share=1.0)
     seen = install_llm(monkeypatch, llm)
@@ -677,8 +693,19 @@ def test_run_set_mode_is_kept_without_loading(vault, monkeypatch):
     assert seen["mode"] == "split" and llm.loaded == 0
 
 
+def test_run_with_nothing_queued_skips_the_mode_stage(vault, monkeypatch):
+    at_night(monkeypatch)
+    llm = ModeOllama(share=0.0)
+    seen = install_llm(monkeypatch, llm)
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert llm.loaded == 0 and seen["mode"] == "whole"
+    assert "reading mode" not in res.stderr and "loading m" not in res.stderr
+
+
 def test_run_auto_load_failure_is_whole(vault, monkeypatch):
     at_night(monkeypatch)
+    queue_paper(vault)
     llm = ModeOllama(share=0.0, load_error=LlmError("out of memory"))
     seen = install_llm(monkeypatch, llm)
     res = runner.invoke(cli.app, ["run", "--vault", str(vault)])

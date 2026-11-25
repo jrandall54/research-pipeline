@@ -403,7 +403,7 @@ def save_summary(
     """Store (or replace) a paper's summary and critique rows. Does not commit.
 
     The `summary` row's JSON also carries `basis`, `body_cut`, `needed_ctx`, `dropped`,
-    `unverified`, `read_mode` and `parts`, and, when `prompt_version` is given, a `provenance` dict (see `get_provenance`)
+    `unverified`, `notes_unverified`, `read_mode` and `parts`, and, when `prompt_version` is given, a `provenance` dict (see `get_provenance`)
     that includes `gpu_share` (share of the model on the GPU, None when unknown).
     """
     now = _now()
@@ -414,6 +414,7 @@ def save_summary(
         "needed_ctx": result.needed_ctx,
         "dropped": [d.model_dump() for d in result.dropped],
         "unverified": result.unverified,
+        "notes_unverified": result.notes_unverified,
         "read_mode": result.read_mode,
         "parts": result.parts,
     }
@@ -457,6 +458,7 @@ def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
     meta["needed_ctx"] = s.pop("needed_ctx", None)  # rows from before B.5 have no such key
     meta["read_mode"] = s.pop("read_mode", "whole")  # rows from before B.6 were read whole
     meta["parts"] = s.pop("parts", 1)
+    meta["notes_unverified"] = s.pop("notes_unverified", [])  # only reading in parts has notes
     return PaperSummary(
         summary=Summary.model_validate(s),
         critique=Critique.model_validate(rows["critique"]),

@@ -198,15 +198,17 @@ def test_summary_round_trip_keeps_read_mode_and_parts(tmp_path):
         summary=Summary(one_line="o", problem=c, approach=c, results=c, limitations=c),
         critique=Critique(strengths=[c], weaknesses=[], questions=[]),
         basis="full_text", unverified=[], read_mode="map_reduce", parts=5,
+        notes_unverified=["A note citing a made-up section."],
     )
     save_summary(conn, "2401.00001", result, "m")
     assert get_summary(conn, "2401.00001") == result
-    # Rows written before B.6 have neither key: they read as whole, one part.
     row = json.loads(conn.execute("SELECT text FROM summaries WHERE kind = 'summary'").fetchone()[0])
-    del row["read_mode"], row["parts"]
+    assert row["notes_unverified"] == ["A note citing a made-up section."]
+    # Rows written before B.6 have none of these keys: they read as whole, one part, no notes.
+    del row["read_mode"], row["parts"], row["notes_unverified"]
     conn.execute("UPDATE summaries SET text = ? WHERE kind = 'summary'", (json.dumps(row),))
     old = get_summary(conn, "2401.00001")
-    assert old.read_mode == "whole" and old.parts == 1
+    assert old.read_mode == "whole" and old.parts == 1 and old.notes_unverified == []
 
 
 def test_version_bump_drops_stale_fulltext_summary_and_retries(tmp_path):

@@ -21,7 +21,7 @@ from research_pipeline.models import Section
 from research_pipeline.profile_edit import normalise_text
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import PROMPT_VERSION
-from research_pipeline.summarize import Claim, PaperSummary, summarize_paper
+from research_pipeline.summarize import Claim, PaperSummary, phase_note, summarize_paper
 from research_pipeline.vault import ConfigError
 
 PASS_MARK = 0.9
@@ -158,7 +158,12 @@ def _entry_md(entry: EvalEntry, gold: GoldPaper | None, sections: list[Section])
         return "\n".join(lines)
     s = entry.summary
     basis = "full text" if s.basis == "full_text" else "ABSTRACT ONLY (no full text was available)"
-    lines += [f"Basis: {basis}" + (" (body cut to fit the context)" if s.body_cut else ""), ""]
+    how = ""
+    if s.read_mode != "whole":
+        mode = "map-reduce" if s.read_mode == "map_reduce" else "split"
+        how = f" (read in parts: {mode}, {s.parts} notes call{'s' if s.parts != 1 else ''})"
+    cut = " (body cut to fit the context)" if s.body_cut else ""
+    lines += [f"Basis: {basis}{how}{cut}", ""]
     if s.dropped:
         left_out = ", ".join(f"{normalise_text(d.title)} ({d.chars:,} chars)" for d in s.dropped)
         lines += [f"Left out: {left_out}", ""]
@@ -180,6 +185,9 @@ def _entry_md(entry: EvalEntry, gold: GoldPaper | None, sections: list[Section])
     if s.unverified:
         lines += ["", "Unverified claims (cited a section that does not exist):"]
         lines += [f"- {t}" for t in s.unverified]
+    if s.notes_unverified:
+        lines += ["", "Notes with unverified citations (not in the summary):"]
+        lines += [f"- {t}" for t in s.notes_unverified]
     lines.append("")
     return "\n".join(lines)
 
@@ -228,7 +236,11 @@ def run_eval(
                     sections_by_id[g.paper_id] = [Section(title="Abstract", text=abstract)]
                 else:
                     sections_by_id[g.paper_id] = sections
-                result = summarize_paper(llm, g.title, abstract, sections, num_ctx, mode=mode, fallback_above=0)
+                def on_phase(name: str) -> None:
+                    handle.note(phase_note(name, g.paper_id))  # noqa: B023 (called within this iteration)
+
+                result = summarize_paper(llm, g.title, abstract, sections, num_ctx, on_phase=on_phase,
+                                         mode=mode, fallback_above=0)
                 entry = EvalEntry(
                     paper_id=g.paper_id,
                     title=g.title,
@@ -346,7 +358,7 @@ def _mode_change(previous: EvalSetup | None, current: EvalSetup | None) -> list[
     """One line when the reading mode differs between the two runs (a missing setup reads as whole)."""
     before = previous.read_mode if previous else "whole"
     now = current.read_mode if current else "whole"
-    return [f"  Reading mode changed: mode {before} → {now}"] if before != now else []
+    return [f"  Reading mode changed: mode {before} -> {now}"] if before != now else []
 
 
 def compare(previous: EvalFile, current: EvalFile) -> str:

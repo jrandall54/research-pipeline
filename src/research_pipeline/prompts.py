@@ -225,6 +225,11 @@ def _quoted(items: list[str]) -> str:
     return defuse(json.dumps(items, ensure_ascii=False))
 
 
+def _title(title: str) -> str:
+    """The paper title as one JSON string, defused: it cannot break the line or close a block."""
+    return defuse(json.dumps(title, ensure_ascii=False))
+
+
 def notes_block(notes: list[Claim]) -> str:
     """Notes inside one ``<notes>`` block, one claim per line: ``- {text} [sections: [...]]``.
 
@@ -252,7 +257,7 @@ def build_notes_prompt(title: str, sections: list[Section], focus: Focus, part: 
 
 def build_condense_prompt(title: str, notes: list[Claim], part: int, of: int) -> tuple[str, str]:
     """(system, user) asking for fewer `Notes` from one batch of notes."""
-    head = f"Paper title: {defuse(title)}\nThese notes are part {part} of {of} of all the notes taken on the paper."
+    head = f"Paper title: {_title(title)}\nThese notes are part {part} of {of} of all the notes taken on the paper."
     task = (
         f"Task: condense these notes (part {part} of {of}): {_FOCUS['condense']}\n"
         f"{_NOTES_LIMITS}\n{REMINDER_NOTES}"
@@ -269,7 +274,7 @@ def build_combine_prompts(
     only in the task at the end, so a model server can reuse its reading of the notes.
     """
     prefix = (
-        f"Paper title: {defuse(title)}\n"
+        f"Paper title: {_title(title)}\n"
         f"Valid section titles (cite only these, copied exactly): {_quoted(titles)}\n\n"
         f"{notes_block(notes)}\n\n"
     )

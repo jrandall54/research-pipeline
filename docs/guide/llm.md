@@ -59,6 +59,7 @@ If you pinned only one setting, the other is still searched: a pinned model with
 - **The context is sent with each request, not baked into a model.** The `o` script can rebuild a model with a new default context and delete the old one. That edits and removes files that belong to the user, so this code never does it; it only sends `num_ctx` with each request (as `llm.py` already does).
 - **Best model = largest that fits.** Ollama has no quality ranking, so parameter count is a stand-in: bigger models are usually better, but not always (a newer 14B can beat an older 27B). The real comparison is the gold-set check in `evaluation.md`; if it disagrees with the automatic choice, pin your model.
 - **Rejected: a fixed list of preferred models.** It would go stale and would not know your hardware.
+- **The normal pass never spills; only reruns do.** The automatic choice still demands a context that fits 100% in GPU memory, so every normal paper runs at full speed. The few papers whose core text is cut at that context are read again after the normal pass at a bigger context, with part of the model in RAM, within free RAM and the morning deadline. That rerun stage is the only place `rpipe` deliberately lets the model spill; see "Reading cut papers whole: reruns" in `running.md`.
 
 ### What probing costs
 
@@ -97,7 +98,7 @@ One broken model never blocks the rest: if Ollama cannot describe one installed 
 
 ### Where the code is
 
-- `src/research_pipeline/ollama_fit.py`: `list_models`, `loaded_models`, `fits`, `max_context`, `choose`, `resolve`, `cached_fit`, and `ProbeSession` (the deadline and the once-only unload warning).
+- `src/research_pipeline/ollama_fit.py`: `list_models`, `loaded_models`, `unload` (used by the rerun stage), `fits`, `max_context`, `choose`, `resolve`, `cached_fit`, and `ProbeSession` (the deadline and the once-only unload warning).
 - `src/research_pipeline/cli.py`: `_release_gpu_memory` (called by `run` before the model is resolved), `_progress` (stderr probe lines outside a stage) and `_pull_progress` (turns download percentages into progress steps).
 - `tests/test_ollama_fit.py`: a small fake Ollama with a deterministic memory boundary (no real Ollama needed); `tests/test_e2e.py` ("auto model and context") runs `rpipe run` and `rpipe model fit` against it.
 

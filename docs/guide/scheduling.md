@@ -53,7 +53,7 @@ Quoting: systemd splits `ExecStart` on spaces and expands `%` and `$`, so paths 
 
 ## The morning deadline
 
-**What it governs: reruns only.** Some papers are too long for the model's context window, so part of their core text is cut before the model reads them (a *body cut*, see `glossary.md`). A later stage reads such papers again with a bigger context, which only fits with part of the model in ordinary RAM (a *spill*), so it is slow. These *reruns* happen after the normal work and must be finished by a morning time you choose, so the computer is free when you want it. Normal papers are never held back by the deadline: they always run, however late it gets.
+**What it governs: reruns only.** Some papers are too long for the model's context window, so part of their core text is cut before the model reads them (a *body cut*, see `glossary.md`). A later stage reads such papers again with a bigger context, which only fits with part of the model in ordinary RAM (a *spill*), so it is slow. These *reruns* happen after the normal work and must be finished by a morning time you choose, so the computer is free when you want it. Normal papers are never held back by the deadline: they always run, however late it gets. How the reruns use the deadline (time estimates, free RAM, grouping) is in `running.md`, "Reading cut papers whole: reruns".
 
 - Default: `07:00`. Set it with `rpipe schedule set-deadline 06:30`, which answers `Reruns of cut papers must finish by 06:30.`
 - `rpipe schedule set-deadline off` turns reruns off (answer: `Reruns of cut papers are off.`).

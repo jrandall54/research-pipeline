@@ -105,6 +105,7 @@ from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_tex
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
+from research_pipeline.spill import run_reruns
 from research_pipeline.summarize import run_summarize
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
@@ -376,6 +377,10 @@ def health_line(
         extras += f" · body cut {counts['body_cut']}"
     if counts.get("summary_failed"):
         extras += f" · summary failures {counts['summary_failed']}"
+    if counts.get("rerun"):
+        extras += f" · rerun {counts['rerun']}"
+    if counts.get("rerun_waiting"):
+        extras += f" · rerun waiting {counts['rerun_waiting']}"
     if counts.get("summaries_off"):
         extras += " · summaries off (abstracts-only mode)"
     if unknown_categories:
@@ -487,6 +492,19 @@ def _run_locked(ctx: _Context) -> None:
                             )
                         counts |= sum_counts
                         errors += sum_errors
+                        if getattr(llm, "name", "") == "ollama":
+                            stage = "rerun"
+                            try:
+                                with _reporter() as reporter:
+                                    rerun_counts, rerun_errors = run_reruns(
+                                        ctx.conn, llm, ctx.vault,
+                                        schedule.deadline_at(datetime.now(), ctx.config.night_deadline),
+                                        reporter=reporter,
+                                    )
+                                counts |= rerun_counts
+                                errors += rerun_errors
+                            except Exception as exc:  # noqa: BLE001 - a rerun problem never stops the digest
+                                errors.append(f"rerun: {' '.join(str(exc).split()) or type(exc).__name__}")
             except KeyboardInterrupt:
                 errors.append(f"{stage}: interrupted")
                 raise  # the user wants out: no digest, keep the conventional interrupt exit

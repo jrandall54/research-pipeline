@@ -42,7 +42,6 @@ This document fixes how the code is organized so the app can be built on the pip
 
 - CLAUDE.md: docs in the same commit as code; no documented workflow may require hand-editing files; nothing personal in the repo; tests offline (`uv run pytest -q`).
 - The owner's real vault (`vault.sqlite`) is used as is: no schema migration in this work except the new `requests` table, added the usual way (`CREATE TABLE IF NOT EXISTS` plus a `user_version` step in `db.py`).
-- Branches `phase-5-shareable` and `summarize-backlog` are unmerged. This work starts after they are merged to `main`.
 
 ## Approaches
 
@@ -76,11 +75,12 @@ Existing modules stay where they are; the split is declared and tested, not done
 
 | Group | Modules | May import |
 |---|---|---|
-| **Shared** | `models`, `summary_models`, `db` (connection, schema, timestamps, paper plumbing; it also still holds the pipeline's own writes such as `save_summary` and `start_run`), `vault`, `embed`, `llm`, `backends`, `defaults`, `seeds`, `profile_edit` (profile and config editing), `ids` (new: pure paper-id normalisation, extracted from `profile_edit.normalise_arxiv_id`), `progress` (the Phase 6 helper, when it exists) | shared only |
-| **Pipeline** | `collect`, `sources`, `triage`, `rank`, `fulltext`, `summarize`, `prompts`, `digest`, `evaluate`, `gold`, `schedule`, `ollama_fit`, `machine`, `run_lock`, `requests_queue` (new), `registry` (imports `ollama_fit` and `sources.*`, so it cannot be shared), `seed_input` and `onboarding` (setup flows that import `sources.arxiv`; `onboarding` also `prompts`) | shared, plus the read functions of `library` |
-| **App** | `library` (new: user-action reads and writes moved out of `db.py`), `shelf`, `review`, `serve`, `library_api` (new), `workbench/` (new, empty package for future features) | shared, `library`, `library_api`; **not** pipeline stage modules |
+| **Shared** | `models`, `summary_models`, `db` (connection, schema, timestamps, paper plumbing; it also still holds the pipeline's own writes such as `save_summary` and `start_run`), `vault`, `embed`, `llm` (imports `bench` only under `if TYPE_CHECKING:`, which the check skips), `backends`, `defaults`, `seeds`, `profile_edit` (profile and config editing), `ids` (new: pure paper-id normalisation), `progress`, `categories`, `schedule` (imports nothing from the package; `profile_edit` uses its `parse_time`) | shared only |
+| **Pipeline** | `collect`, `sources`, `triage`, `rank`, `fulltext`, `summarize`, `prompts`, `digest`, `evaluate`, `gold`, `judge`, `pruning`, `parts`, `citations`, `spill`, `ollama_fit`, `ollama_tune`, `bench`, `scan`, `catalog`, `recommender`, `machine`, `run_lock`, `requests_queue` (new), `registry` (imports `ollama_fit` and `sources.*`, so it cannot be shared), `seed_input` and `onboarding` (setup flows that import `sources.arxiv`; `onboarding` also `prompts`) | shared, plus the read functions of `library` (`library.PIPELINE_READS`) |
+| **App** | `library` (new: user-action reads and writes moved out of `db.py`), `shelf`, `review`, `serve`, `library_api` (new), `workbench/` (new, empty package for future features) | shared and app; **not** pipeline modules |
+| **Composition** | `cli`, `progress_render` (turns progress events into terminal text) | anything |
 
-- **Every module is classified.** `cli.py` is the composition layer; each other module and package under `src/research_pipeline` is in exactly one group above. A test fails when a new module is not classified, and a second test checks that shared modules import only shared modules (the first draft broke this by listing `registry` as shared).
+- **Every module is classified.** Each module and package under `src/research_pipeline` is in exactly one group above (`cli` and `progress_render` form the composition layer). A test fails when a new module is not classified, and a second test checks that shared modules import only shared modules (the first draft broke this by listing `registry` as shared).
 - **`cli.py` is the composition layer.** It may import both groups and wire them together (for example, `rpipe run` syncs the shelf and then runs the pipeline stages). The rules above apply to every other module.
 - **`library.py`** holds the user-action functions now in `db.py`: `record_vote`, `current_votes`, `set_saved`, `list_saved`, `record_skip`, `clear_skip` and the `shelf_*` functions. The pipeline uses only its read functions (`current_votes`, saved ids, `shelf_chunk_rows`) for ranking.
 - **Shelf sync moves out of `triage.py`.** Today triage calls `sync_shelf` so the index follows your files even on quiet nights. `rpipe run` and `rpipe triage` (composition layer) now call it just before triage, so triage itself only reads.

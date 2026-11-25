@@ -341,3 +341,11 @@
 **Paper-id normalisation** — turning the ways people write an arXiv id (`2611.25005v2`, `arXiv:2611.25005`, an arxiv.org link) into the bare id the database stores (`2611.25005`). Done by `ids.normalise_paper_id`. See "Paper-id spellings" in `data-model.md`.
 
 **Data object (view)** — what `library_api.py` hands back instead of printed text: a Pydantic object with named, typed fields (`PaperView` has `title`, `vote`, `saved`, `summary`, ...) that turns into JSON with one call. The terminal commands print it; a future web or desktop app can lay out the same object its own way. See "The app's door" in `architecture.md`.
+
+**Pipeline (code group)** — the modules that get and process material: collect, triage, fetch, summarize, digest, plus choosing and tuning the model, the lock and draining the request list. They run unattended and may not import app modules. See `architecture.md`.
+
+**App (code group)** — the modules for what you do with the papers: votes, saves, the review queue, the shelf, the browser view and `library_api`. They may not import pipeline modules; heavy work goes through the request list. See `architecture.md`.
+
+**Composition layer** — the code allowed to use both the pipeline and the app and wire them together: `cli.py` (every `rpipe` command) and `progress_render.py` (turns progress events into terminal lines). For example, `rpipe run` syncs the shelf (app) and then runs the pipeline stages. See `architecture.md`.
+
+**One door** — the rule that the app reaches the database only through `library_api.py`, so every front end (the terminal today, a web page or MCP tool later) uses the same functions and gets the same data. See `architecture.md`.

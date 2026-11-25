@@ -267,3 +267,158 @@ def test_drain_skipped_after_summarize_timeout(vault, monkeypatch):
     assert row["status"] == "pending" and row["tries"] == 0
     assert calls == [True]
     assert last_run_counts(vault)["requests_waiting"] == 1
+
+
+# ---- rpipe requests add ----
+
+def in_vault(vault, pid=PID, title="Old paper"):
+    conn = open_db(vault / "vault.sqlite")
+    upsert_paper(conn, meta(pid, title))
+    conn.commit()
+    conn.close()
+
+
+def all_requests(vault):
+    conn = open_db(vault / "vault.sqlite")
+    try:
+        return [dict(r) for r in conn.execute("SELECT * FROM requests ORDER BY id")]
+    finally:
+        conn.close()
+
+
+def test_requests_add_queues_a_summary(vault):
+    in_vault(vault)
+    res = runner.invoke(cli.app, ["requests", "add", PID, "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    rows = all_requests(vault)
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "summarize" and rows[0]["status"] == "pending"
+    assert json.loads(rows[0]["payload"]) == {"paper_id": PID}
+    assert f"request {rows[0]['id']}" in res.output.lower()
+    assert "rpipe run" in res.output and "rpipe requests run" in res.output
+
+
+def test_requests_add_accepts_a_versioned_id_and_a_title(vault):
+    in_vault(vault, title="Gradient masking revisited")
+    res = runner.invoke(cli.app, ["requests", "add", f"arXiv:{PID}v3", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert json.loads(all_requests(vault)[0]["payload"]) == {"paper_id": PID}
+    res = runner.invoke(cli.app, ["requests", "add", "masking revisited", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert len(all_requests(vault)) == 1  # the same paper: the waiting request is reused
+
+
+def test_requests_add_unknown_paper(vault):
+    res = runner.invoke(cli.app, ["requests", "add", "9999.99999", "--vault", str(vault)])
+    assert res.exit_code == 1
+    assert "No paper in your vault matches '9999.99999'" in res.output
+    assert all_requests(vault) == []
+
+
+def test_requests_add_twice_says_it_is_already_waiting(vault):
+    in_vault(vault)
+    first = runner.invoke(cli.app, ["requests", "add", PID, "--vault", str(vault)])
+    second = runner.invoke(cli.app, ["requests", "add", PID, "--vault", str(vault)])
+    assert first.exit_code == 0 and second.exit_code == 0, second.output
+    rows = all_requests(vault)
+    assert len(rows) == 1
+    assert f"request {rows[0]['id']}" in second.output.lower()
+    assert "already waiting" in second.output
+    assert "already waiting" not in first.output
+
+
+def test_requests_add_does_not_take_the_lock(vault):
+    in_vault(vault)
+    with run_lock(vault, "rpipe run"):
+        res = runner.invoke(cli.app, ["requests", "add", PID, "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert len(all_requests(vault)) == 1
+
+
+# ---- the night deadline reaches the drain ----
+
+def test_nightly_run_passes_the_night_deadline_to_the_drain(vault, monkeypatch):
+    from datetime import datetime
+
+    queue(vault)
+    seen = {}
+    at = datetime(2026, 11, 26, 7, 0)
+    monkeypatch.setattr(cli.schedule, "deadline_at", lambda now, value: at)
+
+    def drain(*a, **k):
+        seen.update(k)
+        return {"requests_done": 0, "requests_failed": 0, "requests_waiting": 1}, []
+
+    monkeypatch.setattr(cli, "drain_requests", drain)
+    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0))
+    install(monkeypatch, AlwaysSummary([]))
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["deadline"] == at
+
+
+def test_requests_run_passes_no_deadline(vault, monkeypatch):
+    queue(vault)
+    seen = {}
+
+    def drain(*a, **k):
+        seen.update(k)
+        return {"requests_done": 0, "requests_failed": 0, "requests_waiting": 0}, []
+
+    monkeypatch.setattr(cli, "drain_requests", drain)
+    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0))
+    install(monkeypatch, AlwaysSummary([]))
+    res = runner.invoke(cli.app, ["requests", "run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen.get("deadline") is None
+
+
+# ---- nights without a model still report waiting requests ----
+
+def _first_line(vault):
+    return next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+
+
+def test_backend_none_night_reports_waiting_requests(vault, monkeypatch):
+    rid = queue(vault)
+    install(monkeypatch, None)
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert request_row(vault, rid)["status"] == "pending"
+    assert last_run_counts(vault)["requests_waiting"] == 1
+    assert "requests waiting 1" in _first_line(vault)
+
+
+def test_model_unavailable_night_reports_waiting_requests(vault, monkeypatch):
+    queue(vault)
+
+    class Down(FakeLLM):
+        def check(self):
+            from research_pipeline.llm import LlmError
+
+            raise LlmError("Ollama is not running")
+
+    install(monkeypatch, Down([]))
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert last_run_counts(vault)["requests_waiting"] == 1
+
+
+def test_usage_limit_at_start_reports_waiting_requests(vault, monkeypatch):
+    queue(vault)
+
+    class Limited(FakeLLM):
+        def check(self):
+            raise LlmLimitReached("weekly limit")
+
+    install(monkeypatch, Limited([]))
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert last_run_counts(vault)["requests_waiting"] == 1
+
+
+def test_no_model_night_with_nothing_queued_adds_no_count(vault, monkeypatch):
+    install(monkeypatch, None)
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert "requests_waiting" not in last_run_counts(vault)

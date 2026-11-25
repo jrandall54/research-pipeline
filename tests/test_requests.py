@@ -124,3 +124,16 @@ def test_old_vault_gains_requests_table(tmp_path):
     assert "requests" in names
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     conn.close()
+
+
+@pytest.mark.parametrize("payload", [None, "2611.25005", ["2611.25005"], 7])
+def test_request_with_a_non_dict_payload_is_a_value_error(conn, payload):
+    with pytest.raises(ValueError, match="payload"):
+        library_api.request(conn, "summarize", payload)
+    assert requests_by_status(conn, "pending") == []
+
+
+def test_open_request_ids(conn):
+    assert library_api.open_request_ids(conn) == set()
+    rid = library_api.request(conn, "summarize", {"paper_id": PID})
+    assert library_api.open_request_ids(conn) == {rid}

@@ -52,8 +52,8 @@ The rules, each one a test:
 
 1. Every module is in exactly one group. Adding `src/research_pipeline/newthing.py` without listing it fails a test, so nobody forgets to decide.
 2. Shared modules import only shared modules. Otherwise "shared" would quietly drag one half into the other.
-3. Pipeline modules never import app modules, except `library`, and from `library` only the names in `PIPELINE_READS` (`current_votes`, `list_saved`, `is_saved`, `shelf_chunk_rows`, `shelf_embedding_id`). Ranking needs your votes and shelf; it may read them, never change them.
-4. App modules never import pipeline modules. Heavy work goes through the request list instead.
+3. Pipeline modules never import app modules, except `library`, and from `library` only the names in `PIPELINE_READS` (`current_votes`, `list_saved`, `is_saved`, `shelf_chunk_rows`, `shelf_embedding_id`). Ranking needs your votes and shelf; it may read them, never change them. Nor do they import the composition modules (`cli`, `progress_render`): those sit on top and wire the halves together, so nothing below may reach up into them.
+4. App modules never import pipeline modules, nor the composition modules (`cli`, `progress_render`). Heavy work goes through the request list instead.
 5. `library_api` never loads, even indirectly, `llm` or `backends`, so nothing in the app's door can send your library to a model.
 6. Every public `library_api` function returns data, never a `str` of display text.
 
@@ -67,7 +67,7 @@ The app reads and changes the database only through `library_api.py`, which retu
 
 ### The request list
 
-The app never runs a model. To get work done (today: "summarize this paper"), it calls `library_api.request(...)`, which adds a `pending` row to the `requests` table. The pipeline does the work: every night inside `rpipe run`, or at once with `rpipe requests run`. See "The request list" in [data-model.md](data-model.md) (the table) and in [running.md](running.md) (how it is worked through).
+The app never runs a model. To get work done (today: "summarize this paper", asked with `rpipe requests add PAPER`), it calls `library_api.request(...)`, which adds a `pending` row to the `requests` table. The pipeline does the work: every night inside `rpipe run`, or at once with `rpipe requests run`. See "The request list" in [data-model.md](data-model.md) (the table) and in [running.md](running.md) (how it is worked through).
 
 ### The lock
 
@@ -134,7 +134,7 @@ rpipe has two kinds of commands. The **pipeline** gets material on its own, usua
 | `ShelfItemView` | `name`, `added_at`, `chunks` | `shelf_items`, `shelf_add` |
 | `SyncResult` | `added`, `updated`, `removed`, `ignored` (lists of names) | `shelf_sync` |
 
-The changes it makes: `vote(conn, id, "up" | "down" | "clear")`, `save(conn, id, True | False)`, `skip` and `unskip` (the review-later list), `shelf_add`, `shelf_remove`, `shelf_sync`, and `request` (ask the pipeline to do work later; see "The request list" in [data-model.md](data-model.md); the pipeline side, `requests_queue.drain_requests`, does the work in the nightly `rpipe run` or `rpipe requests run`, see "The request list" in [running.md](running.md)). Each change is one short transaction and commits. A paper id that is not in the database raises `UnknownPaperError`.
+The changes it makes: `vote(conn, id, "up" | "down" | "clear")`, `save(conn, id, True | False)`, `skip` and `unskip` (the review-later list), `shelf_add`, `shelf_remove`, `shelf_sync`, and `request` (ask the pipeline to do work later; see "The request list" in [data-model.md](data-model.md); the pipeline side, `requests_queue.drain_requests`, does the work in the nightly `rpipe run` or `rpipe requests run`, see "The request list" in [running.md](running.md)). Each change is one short transaction and commits. A paper id that is not in the database raises `UnknownPaperError`. One plain read goes with `request`: `open_request_ids(conn)` returns the ids (a set of numbers) of requests still waiting or being worked on, so `rpipe requests add` can tell "queued now" from "already waiting" (a repeat `request` returns the existing id).
 
 `library_api` does not hold rules of its own about votes or the shelf. It passes each change on to the module that already owns it: `library.py` for votes, saves and skips, `shelf.py` for the shelf, `review.py` for the queue queries, `db.py` for papers and summaries.
 

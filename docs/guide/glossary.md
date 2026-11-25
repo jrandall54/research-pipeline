@@ -14,7 +14,7 @@
 
 **Rowid** — SQLite's internal integer row number. We give `papers` an explicit one so the search index can point at the same row reliably.
 
-**WAL (write-ahead log)** — a SQLite journal mode where changes are appended to a log before being merged into the main file. Readers do not block the writer and crashes are safer Writers still go one at a time (see busy timeout).
+**WAL (write-ahead log)** — a SQLite journal mode where changes are appended to a log before being merged into the main file. Readers do not block the writer and crashes are safer. Writers still go one at a time (see busy timeout).
 
 **Upsert** — "update or insert": add the record if it is new, otherwise merge it into the existing one. See `upsert_paper` in `data-model.md`.
 
@@ -308,7 +308,7 @@
 
 **Bucket (of reruns)** — a group of cut papers reread at the same context window. Each paper's needed context is rounded up to a multiple of 8,192 tokens; papers that land on the same number share one bucket, so the model is loaded once for all of them instead of once per paper (each load takes tens of seconds). Papers needing 61,440 and 63,488 tokens both go in the 65,536 bucket. See "Reading cut papers whole: reruns" in `running.md`.
 
-**Morning deadline (`night_deadline`)** — the clock time (default 07:00) by which reruns of cut papers must finish, or `off`. It never stops normal papers. If the next such time is more than 12 hours away there is no deadline and reruns are skipped. Set with `rpipe schedule set-deadline`. See `scheduling.md`.
+**Morning deadline (`night_deadline`)** — the clock time (default 07:00) by which reruns of cut papers must finish, or `off`. The nightly drain of the request list also starts no new request after it. It never stops normal papers. If the next such time is more than 12 hours away there is no deadline and reruns are skipped. Set with `rpipe schedule set-deadline`. See `scheduling.md`.
 
 **Call time limit** — how long one request to the local model may take before rpipe gives up on it (a timeout). Normally 600 seconds; on a machine `rpipe model bench` measured as slow it is raised to 1.5 times the time needed to read a full context and write the longest allowed answer at the measured speeds. See "The time limit for one call" in `llm.md`.
 
@@ -330,9 +330,9 @@
 
 **CUDA context** — the working state a program sets up on an NVIDIA graphics card the first time it uses it (through CUDA, NVIDIA's GPU programming toolkit): loaded GPU code, memory bookkeeping and the like. It takes a few hundred MB of GPU memory and stays until the program exits; it cannot be handed back earlier. This is why rpipe runs its embedding model on the CPU: a context created for embedding would hold GPU memory the summarizing model needs for the rest of the run. See "Why it's built this way" in `triage.md`.
 
-**Request list** — the `requests` table: work the app asks the pipeline to do later, such as "summarise this paper". Each request has a kind, details (payload) and a status (`pending`, `running`, `done`, `failed`). Asking for the same thing twice while it is still waiting gives back the first request. See "The request list" in `data-model.md`.
+**Request list** — the `requests` table: work the app asks the pipeline to do later, such as "summarise this paper". Each request has a kind, details (payload) and a status (`pending`, `running`, `done`, `failed`). Ask for a summary with `rpipe requests add PAPER`. Asking for the same thing twice while it is still waiting gives back the first request. See "The request list" in `data-model.md`.
 
-**Draining (the request list)** — working through the waiting requests until none is left to do; the nightly `rpipe run` and `rpipe requests run` do it. See "The request list" in `running.md`.
+**Draining (the request list)** — working through the waiting requests until none is left to do; the nightly `rpipe run` and `rpipe requests run` do it. In the nightly run it stops at the morning deadline; requests not started yet wait for the next night. See "The request list" in `running.md`.
 
 **Retry rule (requests)** — a request gets 3 tries (`requests.tries` counts them). A failed try puts it back to `pending`; the third failure leaves it `failed` for good (ask again to queue a fresh one). A usage-limit stop gives the try back, because it was not the request's fault; a try cut short by a crash or Ctrl-C still counts. See "The request list" in `running.md`.
 

@@ -12,6 +12,7 @@ This is a pipeline module: it must not import the app's modules (library_api, sh
 import json
 import sqlite3
 from collections.abc import Callable
+from datetime import datetime
 from typing import Literal
 
 from research_pipeline.db import (
@@ -75,6 +76,8 @@ def drain_requests(
     reporter: Reporter | None = None,
     mode: Literal["whole", "split"] = "whole",
     fallback_above: int | None = None,
+    deadline: datetime | None = None,
+    now: Callable[[], datetime] = datetime.now,
 ) -> tuple[dict[str, int], list[str]]:
     """Work through the pending requests, oldest first; return (counts, error lines).
 
@@ -104,6 +107,12 @@ def drain_requests(
     if todo:
         with stage(reporter, "requests", total=len(todo)) as handle:
             for i, row in enumerate(todo, start=1):
+                if deadline is not None and now() >= deadline:
+                    left = len(todo) - i + 1
+                    handle.note(f"{left} request{'s' if left != 1 else ''} wait for a later night: "
+                                f"the morning deadline {deadline:%H:%M} has passed")
+                    errors.append(f"requests: stopped at the night deadline {deadline:%H:%M}; {left} waiting")
+                    break
                 rid = row["id"]
                 pid = str(json.loads(row["payload"]).get("paper_id", ""))
                 mark_request(conn, rid, "running", add_try=True)

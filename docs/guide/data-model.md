@@ -145,6 +145,8 @@ The database carries a version number in SQLite's built-in `PRAGMA user_version`
 
 The reverse case is refused: if the file's `user_version` is *greater* than `SCHEMA_VERSION` (a vault last used by a newer `rpipe`), `open_db()` raises `SchemaTooNewError` and the CLI prints a message telling you to upgrade `rpipe`. The check runs before anything else touches the file (before the WAL setting, table creation or migration), so the file is left byte-for-byte unchanged. Code never downgrades a database.
 
+**Going back from version 4 to 3, if you ever must.** Why it matters: if you install an older `rpipe` (one that knows only version 3) on a vault that a newer one has opened, the older one refuses the vault as "too new" and stops. The only thing version 4 added is the `requests` table (the request list), so going back is two SQL lines, after a backup and with no `rpipe` command running: `sqlite3 <vault>/vault.sqlite 'DROP TABLE requests; PRAGMA user_version=3;'`. This deletes the request list (waiting requests are lost; ask again later with `rpipe requests add`); papers, votes, saves and summaries are untouched. This is a rare recovery step for power users, not part of any normal workflow: the usual fix is to upgrade `rpipe` instead.
+
 ### The request list
 
 The program is being split into two halves that share one database: the *pipeline* (collect, triage, summarise; it runs at night under a lock and may use a language model) and the *app* (the commands you use: vote, save, review, and later a request like "summarise this paper now"). The app must not run a model itself, so when it wants pipeline work done it writes a row in `requests` and the pipeline picks it up on its next run. That is the request list.
@@ -160,9 +162,9 @@ Each row has:
 | `error`, `result` | What went wrong, or what came out; empty until the pipeline fills them in. |
 | `created_at`, `updated_at` | Timestamps in the usual format. |
 
-How a request is added, step by step (`library_api.request(conn, "summarize", {"paper_id": "arXiv:2611.25005v2"})`):
+How a request is added, step by step (`library_api.request(conn, "summarize", {"paper_id": "arXiv:2611.25005v2"})`, which is what `rpipe requests add arXiv:2611.25005v2` calls):
 
-1. The kind is checked against `REQUEST_KINDS`; `fetch_url` would be refused with `ValueError`.
+1. The kind is checked against `REQUEST_KINDS`; `fetch_url` would be refused with `ValueError`. The payload must be a dict (JSON object); anything else (text, a list, nothing) is also a `ValueError`.
 2. For `summarize`, `paper_id` must be text, else `ValueError`.
 3. The id is normalised with `ids.normalise_paper_id` (see "Paper-id spellings" below): `arXiv:2611.25005v2` becomes `2611.25005`. Text that is not an id at all (`hello`) raises `UnknownPaperError`, the same error as a missing paper, so callers handle one error type.
 4. The paper must already be in `papers` (`get_paper`), else `UnknownPaperError`. There is no title search here: a request names a known paper.

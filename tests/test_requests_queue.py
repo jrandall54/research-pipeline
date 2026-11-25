@@ -1,5 +1,7 @@
 """The pipeline's side of the request list: `drain_requests` works through queued summaries."""
 
+from datetime import datetime, timedelta
+
 import pytest
 from conftest import SECTIONS, AlwaysSummary, FakeLLM
 
@@ -172,3 +174,68 @@ def test_runnable_requests_skips_rows_without_tries_left(conn):
     assert runnable_requests(conn) == []
     rid = insert_request(conn, "summarize", {"paper_id": B})
     assert [r["id"] for r in runnable_requests(conn)] == [rid]
+
+
+# ---- the night deadline (fix: the drain respects it like the rerun stage) ----
+
+NIGHT_END = datetime(2026, 11, 26, 7, 0)
+
+
+class Clock:
+    """A fake clock that moves on by `step` each time it is read."""
+
+    def __init__(self, start: datetime, step: timedelta = timedelta(0)) -> None:
+        self.t, self.step = start, step
+
+    def __call__(self) -> datetime:
+        t = self.t
+        self.t += self.step
+        return t
+
+
+def test_drain_past_the_deadline_starts_nothing(conn):
+    a = insert_request(conn, "summarize", {"paper_id": A})
+    b = insert_request(conn, "summarize", {"paper_id": B})
+    llm = AlwaysSummary([])
+    rep = ListReporter()
+    counts, errors = _drain(conn, llm, reporter=rep, deadline=NIGHT_END,
+                            now=Clock(NIGHT_END + timedelta(minutes=5)))
+    assert llm.calls == []
+    for rid in (a, b):
+        row = _row(conn, rid)
+        assert row["status"] == "pending" and row["tries"] == 0
+    assert counts == {"requests_done": 0, "requests_failed": 0, "requests_waiting": 2}
+    assert errors == ["requests: stopped at the night deadline 07:00; 2 waiting"]
+    notes = [e.label for e in rep.events if e.kind == "note"]
+    assert any("07:00" in n and "2 requests" in n for n in notes)
+
+
+def test_drain_stops_at_the_deadline_between_requests(conn):
+    a = insert_request(conn, "summarize", {"paper_id": A})
+    b = insert_request(conn, "summarize", {"paper_id": B})
+    # First read 06:50 (before the deadline), second 07:10 (after it).
+    clock = Clock(NIGHT_END - timedelta(minutes=10), step=timedelta(minutes=20))
+    counts, errors = _drain(conn, AlwaysSummary([]), deadline=NIGHT_END, now=clock)
+    assert _row(conn, a)["status"] == "done"
+    row = _row(conn, b)
+    assert row["status"] == "pending" and row["tries"] == 0
+    assert counts == {"requests_done": 1, "requests_failed": 0, "requests_waiting": 1}
+    assert errors == ["requests: stopped at the night deadline 07:00; 1 waiting"]
+
+
+def test_drain_before_the_deadline_runs_everything(conn):
+    insert_request(conn, "summarize", {"paper_id": A})
+    insert_request(conn, "summarize", {"paper_id": B})
+    counts, errors = _drain(conn, AlwaysSummary([]), deadline=NIGHT_END,
+                            now=Clock(NIGHT_END - timedelta(hours=2)))
+    assert counts["requests_done"] == 2 and errors == []
+
+
+def test_drain_without_a_deadline_never_reads_the_clock(conn):
+    insert_request(conn, "summarize", {"paper_id": A})
+
+    def clock():
+        raise AssertionError("the clock was read without a deadline")
+
+    counts, _ = _drain(conn, AlwaysSummary([]), now=clock)
+    assert counts["requests_done"] == 1

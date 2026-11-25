@@ -169,3 +169,63 @@ def test_a_job_that_starts_during_a_prompt_stops_the_command(tmp_path, monkeypat
     assert res.exit_code == cli.RUN_LOCKED_EXIT
     assert "rpipe run is already working" in res.stderr
     assert "nothing further was started" in res.stderr
+
+
+def test_acquire_closes_the_file_when_flock_fails_oddly(tmp_path, monkeypatch):
+    import errno
+
+    from research_pipeline import run_lock as run_lock_module
+
+    opened = []
+    real_open = open
+
+    def spy_open(*a, **k):
+        handle = real_open(*a, **k)
+        opened.append(handle)
+        return handle
+
+    def broken_flock(handle, flags):
+        raise OSError(errno.ENOLCK, "No locks available")
+
+    monkeypatch.setattr(run_lock_module, "open", spy_open, raising=False)
+    monkeypatch.setattr(run_lock_module.fcntl, "flock", broken_flock)
+    lock = VaultLock(tmp_path, "rpipe run")
+    with pytest.raises(OSError) as info:
+        lock.acquire()
+    assert info.value.errno == errno.ENOLCK
+    assert len(opened) == 1 and opened[0].closed
+    assert not lock.held
+
+
+def test_acquire_closes_and_unlocks_when_writing_the_holder_fails(tmp_path, monkeypatch):
+    from research_pipeline import run_lock as run_lock_module
+
+    opened = []
+    real_open = open
+
+    class FailingWrite:
+        def __init__(self, handle):
+            self._h = handle
+
+        def __getattr__(self, name):
+            return getattr(self._h, name)
+
+        def fileno(self):
+            return self._h.fileno()
+
+        def write(self, text):
+            raise OSError(28, "No space left on device")
+
+    def spy_open(*a, **k):
+        handle = FailingWrite(real_open(*a, **k))
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(run_lock_module, "open", spy_open, raising=False)
+    lock = VaultLock(tmp_path, "rpipe run")
+    with pytest.raises(OSError, match="No space"):
+        lock.acquire()
+    assert opened[0]._h.closed and not lock.held
+    monkeypatch.undo()
+    with run_lock(tmp_path, "rpipe run"):  # the lock was let go of with the file
+        pass

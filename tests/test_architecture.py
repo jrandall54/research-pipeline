@@ -11,7 +11,7 @@ CLI = PACKAGE_ROOT / "cli.py"
 # The commands that belong to the app (the person using rpipe), by function name in cli.py.
 APP_COMMANDS = {
     "vote", "_save_command", "feedback", "review", "show", "_show_paper",
-    "shelf_add", "shelf_list", "shelf_remove", "shelf_sync",
+    "shelf_add", "shelf_list", "shelf_remove", "shelf_sync", "requests_add",
 }
 # Write helpers: by name pattern, wherever they come from.
 WRITE_PREFIXES = ("record_", "upsert_", "delete_", "mark_", "save_")

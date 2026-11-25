@@ -410,6 +410,13 @@ def health_line(
     )
 
 
+def _count_waiting_requests(conn: sqlite3.Connection, counts: dict[str, int]) -> None:
+    """On a night with no model to use, still show the requests that wait (`requests waiting N`)."""
+    waiting = len(runnable_requests(conn))
+    if waiting:
+        counts["requests_waiting"] = waiting
+
+
 def _ready_llm(pipeline: Pipeline) -> LLM | None:
     """The model client, checked: raises LlmError (with a fix hint) if it cannot be used.
     None means the backend is `none` (nothing to check)."""
@@ -602,13 +609,17 @@ def _run_locked(ctx: _Context) -> None:
                     llm = _ready_llm(pipeline)
                 except LlmLimitReached:
                     errors.append(LIMIT_STOPPED)
+                    _count_waiting_requests(ctx.conn, counts)
                 except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
                     errors.append(f"summaries skipped, model unavailable: {exc}")
+                    _count_waiting_requests(ctx.conn, counts)
                 else:
                     if llm is None:
                         counts["summaries_off"] = 1  # chosen, not a failure: abstracts-only digest
+                        _count_waiting_requests(ctx.conn, counts)
                     else:
-                        # None when reruns are off or the deadline is over 12 hours away.
+                        # The morning deadline for the drain and the reruns.
+                        # None when it is "off" or over 12 hours away.
                         deadline = schedule.deadline_at(datetime.now(), ctx.config.night_deadline)
                         with _reporter() as reporter:
                             # The setting, not tonight's clock: a paper cut in a daytime run is
@@ -629,15 +640,14 @@ def _run_locked(ctx: _Context) -> None:
                         stage = "requests"
                         if LIMIT_STOPPED in sum_errors or timed_out:
                             # The model just stopped: don't spend a call (or a timeout) on requests.
-                            waiting = len(runnable_requests(ctx.conn))
-                            if waiting:
-                                counts["requests_waiting"] = waiting
+                            _count_waiting_requests(ctx.conn, counts)
                         else:
                             try:
                                 with _reporter() as reporter:
                                     req_counts, req_errors = drain_requests(
                                         ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
                                         reporter=reporter, mode=mode, fallback_above=fallback_above,
+                                        deadline=deadline,
                                     )
                                 counts |= req_counts
                                 errors += req_errors
@@ -877,6 +887,29 @@ requests_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(requests_app, name="requests")
+
+
+@requests_app.command("add")
+def requests_add(
+    paper: Annotated[str, typer.Argument(help="Paper id (any spelling, e.g. 2611.25005v2 or an arXiv URL), or part of its title.")],
+    vault: VaultOption = None,
+) -> None:
+    """Ask for a paper to be summarized: tonight in `rpipe run`, or now with `rpipe requests run`."""
+    ctx = _open(vault)
+    try:
+        pid = _resolve_paper(ctx.conn, paper)
+        before = library_api.open_request_ids(ctx.conn)
+        rid = library_api.request(ctx.conn, "summarize", {"paper_id": pid})
+    except UnknownPaperError as exc:
+        raise _fail(str(exc)) from exc
+    finally:
+        ctx.conn.close()
+    if rid in before:
+        typer.echo(f"Request {rid} to summarize {pid} is already waiting; nothing new was added.")
+    else:
+        typer.echo(f"Request {rid}: summarize {pid}.")
+    typer.echo("It runs during tonight's `rpipe run`, or now with `rpipe requests run`. "
+               "`rpipe requests list` shows how it went.")
 
 
 @requests_app.command("run")

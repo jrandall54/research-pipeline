@@ -266,7 +266,8 @@ def shelf_sync(
 def request(conn: sqlite3.Connection, kind: str, payload: dict) -> int:
     """Ask the pipeline to do some work later; return the request's id. Commits.
 
-    Only kinds in ``db.REQUEST_KINDS`` are accepted (ValueError otherwise). For
+    Only kinds in ``db.REQUEST_KINDS`` are accepted, and ``payload`` must be a dict
+    (ValueError otherwise). For
     ``summarize`` the payload must hold a string ``paper_id``; it is normalised
     (``arXiv:2611.25005v2`` -> ``2611.25005``) and must name a paper already in the
     database, else UnknownPaperError. Asking again while an identical request is still
@@ -274,6 +275,8 @@ def request(conn: sqlite3.Connection, kind: str, payload: dict) -> int:
     """
     if kind not in REQUEST_KINDS:
         raise ValueError(f"Unknown request kind {kind!r}; expected one of {', '.join(REQUEST_KINDS)}.")
+    if not isinstance(payload, dict):
+        raise ValueError(f"A request payload must be a dict, not {type(payload).__name__}.")
     if kind == "summarize":
         raw = payload.get("paper_id")
         if not isinstance(raw, str):
@@ -286,3 +289,12 @@ def request(conn: sqlite3.Connection, kind: str, payload: dict) -> int:
             raise UnknownPaperError(f"No paper with id {paper_id!r} in the database.")
         payload = {**payload, "paper_id": paper_id}
     return db.insert_request(conn, kind, payload)
+
+
+def open_request_ids(conn: sqlite3.Connection) -> set[int]:
+    """Ids of the requests still waiting (`pending`) or being worked on (`running`).
+
+    `rpipe requests add` asks this before ``request`` to tell "queued now" from "already
+    waiting" (``request`` returns the existing id for a repeat).
+    """
+    return {row["id"] for row in db.requests_by_status(conn, "pending", "running")}

@@ -40,15 +40,20 @@ class VaultLock:
         """Take the lock, or raise RunLocked at once (never waits) if someone else has it."""
         handle = open(self.vault / LOCK_NAME, "a+", encoding="utf-8")
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            handle.seek(0)
-            holder = handle.read().strip() or "unknown"
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                handle.seek(0)
+                holder = handle.read().strip() or "unknown"
+                raise RunLocked(self.vault, holder) from exc
+            handle.truncate(0)
+            handle.write(self.holder)  # "a+" appends, and the file is empty now, so this is the whole text
+            handle.flush()
+        except BaseException:
+            # Refused, or something odd (no locks on this filesystem, disk full): never keep the
+            # file open. Closing it also lets go of the lock if flock had already granted it.
             handle.close()
-            raise RunLocked(self.vault, holder) from exc
-        handle.truncate(0)
-        handle.write(self.holder)  # "a+" appends, and the file is empty now, so this is the whole text
-        handle.flush()
+            raise
         self._handle = handle
 
     def release(self) -> None:

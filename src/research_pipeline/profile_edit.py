@@ -18,6 +18,7 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
 from research_pipeline.backends.claude_code import resolve_model
 from research_pipeline.categories import describe_unknown, unknown
+from research_pipeline.ids import normalise_paper_id
 from research_pipeline.llm import NO_MODEL
 from research_pipeline.models import ALL_CATEGORIES, CATEGORY_RE, Config, Profile, normalise_deadline
 from research_pipeline.schedule import parse_time
@@ -27,8 +28,6 @@ CATEGORY_ERROR_HINT = (
     "use names like cs.CR, stat.ML or hep-th (full list: https://arxiv.org/category_taxonomy), "
     "or the single word all"
 )
-_NEW_ID_RE = re.compile(r"^\d{4}\.\d{4,5}$")
-_OLD_ID_RE = re.compile(r"^[a-z-]+(\.[A-Z]{2})?/\d{7}$")
 
 
 # C0/C1 control characters (incl. ESC) become a space; invisible bidi controls (which can
@@ -49,15 +48,11 @@ def _key(s: str) -> str:
 
 
 def normalise_arxiv_id(s: str) -> str:
-    """Bare arXiv id without a version suffix; ValueError if `s` is not an id."""
-    t = s.strip()
-    t = re.sub(r"^https?://arxiv\.org/(abs|pdf)/", "", t)
-    t = re.sub(r"^arxiv:", "", t, flags=re.IGNORECASE)
-    t = re.sub(r"\.pdf$", "", t)
-    t = re.sub(r"v\d+$", "", t)
-    if _NEW_ID_RE.match(t) or _OLD_ID_RE.match(t):
-        return t
-    raise ValueError(f"{s!r} is not an arXiv id (expected something like 2307.15043)")
+    """Bare arXiv id without a version suffix; ValueError if `s` is not an id.
+
+    Kept for the profile code; the rule itself lives in ``ids.normalise_paper_id``.
+    """
+    return normalise_paper_id(s)
 
 
 def seed_key(s: str) -> str:

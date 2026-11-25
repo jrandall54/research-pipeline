@@ -2,7 +2,7 @@
 
 ## What it does
 
-`rpipe review` walks you through the digest papers you have not decided about yet, one at a time, in the terminal. For each paper it shows the title, id, why it was picked, the summary (or the abstract when there is no summary yet) and the link. You answer with one letter: **u**p (thumbs up), **d**own (thumbs down), **s**kip (not now) or **q**uit. `rpipe review --later` goes through the papers you skipped earlier. Up and down are ordinary votes, exactly like `rpipe vote ID up|down`, so they feed the implicit profile the next triage uses ([triage.md](triage.md)). A skip is not a vote and never changes your ranking.
+`rpipe review` walks you through the digest papers you have not decided about yet, one at a time, in the terminal. For each paper it shows the title, id, why it was picked, the summary (or the abstract when there is no summary yet) and the link. You answer with one letter: **u**p (thumbs up), **d**own (thumbs down), **s**kip (not now) or **q**uit. `rpipe review --later` goes through the papers you skipped earlier. Up and down are ordinary votes, exactly like `rpipe vote ID up|down` (where `ID` may be written `2611.25005`, `2611.25005v2`, `arXiv:2611.25005` or as an arxiv.org link; all mean the same paper), so they feed the implicit profile the next triage uses ([triage.md](triage.md)). A skip is not a vote and never changes your ranking.
 
 ## How it works
 
@@ -78,7 +78,7 @@ rpipe show --recent 1            # everything in the latest digest
 rpipe show --recent 3            # the latest three digest days, newest day first
 ```
 
-Ids and titles are resolved exactly like `rpipe vote`: an exact id first, then a title fragment; if several titles match you pick from a numbered list, and if none match it exits 1 with `No paper in your vault matches ...`. `--recent N` takes N of 1 or more and lists the papers of the latest N distinct digest dates, newest date first, and within a date in digest order (triage score best first, then id), the same order `review` uses. With neither an id nor `--recent` it exits 1 with a hint. Code: `show` in `cli.py` (reuses `_resolve_paper` and `_show_paper`) and `recent_digest_papers` in `review.py`; tests in `tests/test_cli_show.py`.
+Ids and titles are resolved exactly like `rpipe vote`: an id first, in any common spelling (`2611.25005`, `2611.25005v2`, `arXiv:2611.25005` or an arxiv.org link; see "Paper-id spellings" in [data-model.md](data-model.md)), then the exact text as an id, then a title fragment; if several titles match you pick from a numbered list, and if none match it exits 1 with `No paper in your vault matches ...`. `--recent N` takes N of 1 or more and lists the papers of the latest N distinct digest dates, newest date first, and within a date in digest order (triage score best first, then id), the same order `review` uses. With neither an id nor `--recent` it exits 1 with a hint. Code: `show` in `cli.py` (reuses `_resolve_paper` and `_show_paper`) and `recent_digest_papers` in `review.py`; tests in `tests/test_cli_show.py`.
 
 ## Why it's built this way
 

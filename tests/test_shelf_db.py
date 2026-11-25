@@ -1,4 +1,4 @@
-from research_pipeline.db import open_db
+from research_pipeline.db import SCHEMA_VERSION, open_db
 from research_pipeline.library import (
     delete_shelf_item,
     list_shelf_items,
@@ -20,14 +20,14 @@ def _emb_ids(conn):
     return sorted(r[0] for r in conn.execute("SELECT item_id FROM embeddings"))
 
 
-def test_fresh_db_has_shelf_tables_and_version_3(tmp_path):
+def test_fresh_db_has_shelf_tables_and_current_version(tmp_path):
     conn = open_db(tmp_path / "v.sqlite")
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"shelf_items", "shelf_chunks"} <= names
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
-def test_v2_db_migrates_to_v3(tmp_path):
+def test_v2_db_migrates_to_current(tmp_path):
     path = tmp_path / "v.sqlite"
     conn = open_db(path)
     conn.execute("DROP TABLE shelf_chunks")
@@ -38,7 +38,7 @@ def test_v2_db_migrates_to_v3(tmp_path):
     conn = open_db(path)
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"shelf_items", "shelf_chunks"} <= names
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_embedding_id_format():

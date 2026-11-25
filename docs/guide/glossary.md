@@ -329,3 +329,9 @@
 **Condensing notes** — when the notes from all parts of a paper are too long to send in one call, they are sent back to the model in batches to be merged into fewer notes, keeping every cited section. At most 3 rounds; if they still do not fit, every note is shortened by the same share and the summary is marked `body_cut`. See `summaries.md`.
 
 **CUDA context** — the working state a program sets up on an NVIDIA graphics card the first time it uses it (through CUDA, NVIDIA's GPU programming toolkit): loaded GPU code, memory bookkeeping and the like. It takes a few hundred MB of GPU memory and stays until the program exits; it cannot be handed back earlier. This is why rpipe runs its embedding model on the CPU: a context created for embedding would hold GPU memory the summarizing model needs for the rest of the run. See "Why it's built this way" in `triage.md`.
+
+**Request list** — the `requests` table: work the app asks the pipeline to do later, such as "summarise this paper". Each request has a kind, details (payload) and a status (`pending`, `running`, `done`, `failed`). Asking for the same thing twice while it is still waiting gives back the first request. See "The request list" in `data-model.md`.
+
+**Canonical JSON** — JSON written one fixed way (here with keys sorted), so two copies of the same data are always the same text and can be compared directly. See `data-model.md`.
+
+**Paper-id normalisation** — turning the ways people write an arXiv id (`2611.25005v2`, `arXiv:2611.25005`, an arxiv.org link) into the bare id the database stores (`2611.25005`). Done by `ids.normalise_paper_id`. See "Paper-id spellings" in `data-model.md`.

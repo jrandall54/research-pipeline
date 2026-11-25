@@ -155,3 +155,10 @@ def test_init_exits_cleanly_on_too_new_database(vault):
     res = runner.invoke(cli.app, ["init", "--vault", str(vault)])
     assert res.exit_code == 1 and "upgrade rpipe" in res.output
     assert isinstance(res.exception, SystemExit) and res.exception.code == 1
+
+
+@pytest.mark.parametrize("spelling", ["2307.15043v2", "arXiv:2307.15043", "https://arxiv.org/abs/2307.15043v1"])
+def test_vote_accepts_versioned_and_prefixed_ids(vault, spelling):
+    res = run(vault, "vote", spelling, "up")
+    assert res.exit_code == 0, res.output
+    assert votes(vault) == [("2307.15043", 1)]

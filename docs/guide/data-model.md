@@ -118,7 +118,7 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 
 ### Other tables
 
-Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; Phase 3 uses `votes` and `saves`; the review loop uses `skips`; the shelf ([shelf design](../superpowers/specs/2026-11-22-shelf-design.md)) uses `shelf_items` and `shelf_chunks`.
+Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; Phase 3 uses `votes` and `saves`; the review loop uses `skips`; the shelf ([shelf design](../superpowers/specs/2026-11-22-shelf-design.md)) uses `shelf_items` and `shelf_chunks`; the pipeline/app split (Phase 7) adds `requests`, the request list (below).
 
 **Who writes which tables.** The code is split in two halves. `db.py` owns the schema, the connection and the pipeline's own writes (`papers`, `runs`, `summaries`, `fulltexts`, `embeddings`, and `papers_fts`). `library.py` owns the writes you make by hand: `votes`, `saves`, `skips`, `shelf_items` and `shelf_chunks`. Its functions are the ones `rpipe vote`, `save`, `review` and `shelf` call. The pipeline (`triage.py`, `rank.py`, `digest.py`) reads only the names listed in `library.PIPELINE_READS`, so the nightly code never writes your votes. Both halves share one database file. `library.py` imports two helpers from `db.py`: `_now()` (the timestamp format) and `_require_paper()` (the check that a paper id exists).
 
@@ -132,6 +132,7 @@ Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; 
 | `skips` | `paper_id` (primary key, references `papers`), `skipped_at` | Papers you chose to "review later" in `rpipe review`. One row per paper; skipping again refreshes `skipped_at` (the paper moves to the back of the later list). `record_skip()` (raises `UnknownPaperError` for a bad id) and `clear_skip()` (idempotent) both commit. A skip is not a vote and never feeds the profile. `review.py` reads it: `review_queue()` (digest papers with no active vote and no skip, oldest digest first, then triage score high to low), `later_queue()` (skipped papers with no active vote, oldest skip first) and `queue_progress()` (handled and total for one digest date). |
 | `shelf_items` | `name` (primary key), `content_hash`, `added_at` | One row per piece of your own work on the shelf (a note, draft or paper of yours). `content_hash` lets a later sync skip unchanged files. `added_at` really means "last indexed": re-indexing an item deletes and re-inserts it, so the timestamp resets. |
 | `shelf_chunks` | `item_name` (references `shelf_items`, cascade delete), `chunk_idx`, `text`; primary key (`item_name`, `chunk_idx`) | The pieces each item is cut into; each chunk is embedded and compared with papers. `upsert_shelf_item()` replaces all of an item's chunks and deletes its `shelf:<name>#%` embedding rows (so stale vectors never linger); `delete_shelf_item()` removes the item, its chunks and its embeddings (both are idempotent and commit). `list_shelf_items()` adds `n_chunks`; `shelf_chunk_rows()` returns every chunk. Embedding ids are `shelf:<name>#<chunk number>`. A `LIKE` match narrows the candidates (with `%` and `_` in the name escaped, so `a_b` never touches `axb`), then only ids whose text after `shelf:<name>#` is purely digits are deleted. That second check matters because file names may contain `#`: deleting item `notes` must not wipe item `notes#2`, whose ids (`shelf:notes#2#0`) also start with `shelf:notes#`. |
+| `requests` | `id`, `kind`, `payload` (JSON text), `status`, `tries`, `error`, `result`, `created_at`, `updated_at` | The request list: work the app asks the pipeline to do later. See "The request list" below. |
 | `links` | `src_id`, `dst_id`, `kind`, `created_at`; primary key (all three) | Relations between items, e.g. a paper and a note (later phase). |
 | `runs` | `id`, `started_at`, `finished_at`, `counts` (JSON object), `errors` (JSON list) | One row per pipeline run: `start_run()` opens it, `finish_run()` fills in counts per stage and error messages. |
 | `papers_fts` | `title`, `abstract` | Full-text search index (below). |
@@ -140,9 +141,38 @@ Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; 
 
 Every `created_at` / `updated_at` is UTC ISO 8601 to the second with an explicit offset, e.g. `2026-11-21T09:30:00+00:00` (made by `_now()` in `db.py`: `datetime.now(UTC).isoformat(timespec="seconds")`). Anything that writes rows directly, such as a Datasette SQL insert into `votes` or `saves`, must use the same format so rows sort correctly; in SQL: `strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now')`.
 
-The database carries a version number in SQLite's built-in `PRAGMA user_version` (a spare integer stored in the file header; new files start at 0). `open_db()` compares it with `SCHEMA_VERSION` (now 3) and, if the file is older, runs `_migrate()` and stamps the new number. Tables are created with `CREATE TABLE IF NOT EXISTS`, so adding a table (as `saves`, `skips`, `shelf_items` and `shelf_chunks` were) needs no work beyond bumping the version; changes to existing tables (new column, data fix) get an `if from_version < N:` step in `_migrate()`. An existing vault therefore upgrades itself the next time it is opened.
+The database carries a version number in SQLite's built-in `PRAGMA user_version` (a spare integer stored in the file header; new files start at 0). `open_db()` compares it with `SCHEMA_VERSION` (now 4) and, if the file is older, runs `_migrate()` and stamps the new number. Tables are created with `CREATE TABLE IF NOT EXISTS`, so adding a table (as `saves`, `skips`, `shelf_items`, `shelf_chunks` and, in version 4, `requests` were) needs no work beyond bumping the version; changes to existing tables (new column, data fix) get an `if from_version < N:` step in `_migrate()`. An existing vault therefore upgrades itself the next time it is opened.
 
 The reverse case is refused: if the file's `user_version` is *greater* than `SCHEMA_VERSION` (a vault last used by a newer `rpipe`), `open_db()` raises `SchemaTooNewError` and the CLI prints a message telling you to upgrade `rpipe`. The check runs before anything else touches the file (before the WAL setting, table creation or migration), so the file is left byte-for-byte unchanged. Code never downgrades a database.
+
+### The request list
+
+The program is being split into two halves that share one database: the *pipeline* (collect, triage, summarise; it runs at night under a lock and may use a language model) and the *app* (the commands you use: vote, save, review, and later a request like "summarise this paper now"). The app must not run a model itself, so when it wants pipeline work done it writes a row in `requests` and the pipeline picks it up on its next run. That is the request list.
+
+Each row has:
+
+| Column | Meaning |
+| --- | --- |
+| `kind` | What to do. Only names in `db.REQUEST_KINDS` are accepted; today that is just `summarize`. |
+| `payload` | The details as JSON, written *canonically* (`json.dumps(payload, sort_keys=True)`: keys in alphabetical order, so the same details always give exactly the same text). For `summarize`: `{"paper_id": "2611.25005"}`. |
+| `status` | `pending` (waiting), `running` (the pipeline is working on it), `done` or `failed`. New rows start `pending`. |
+| `tries` | How many times the pipeline has attempted it (starts at 0). |
+| `error`, `result` | What went wrong, or what came out; empty until the pipeline fills them in. |
+| `created_at`, `updated_at` | Timestamps in the usual format. |
+
+How a request is added, step by step (`library_api.request(conn, "summarize", {"paper_id": "arXiv:2611.25005v2"})`):
+
+1. The kind is checked against `REQUEST_KINDS`; `fetch_url` would be refused with `ValueError`.
+2. For `summarize`, `paper_id` must be text, else `ValueError`.
+3. The id is normalised with `ids.normalise_paper_id` (see "Paper-id spellings" below): `arXiv:2611.25005v2` becomes `2611.25005`. Text that is not an id at all (`hello`) raises `UnknownPaperError`, the same error as a missing paper, so callers handle one error type.
+4. The paper must already be in `papers` (`get_paper`), else `UnknownPaperError`. There is no title search here: a request names a known paper.
+5. `db.insert_request` writes the row with the normalised id and commits, and returns its `id`. If a `pending` or `running` row with the same kind and the same canonical payload already exists, it returns that row's id instead of adding a second one, so pressing "summarise" twice queues the work once. A `done` or `failed` request does not block a new one: asking again after it finished adds a fresh row.
+
+`requests_by_status(conn, "pending", "running")` lists rows in any of the given statuses, oldest first (by `id`). Later tasks in Phase 7 add the code that runs the requests and moves them through the statuses.
+
+### Paper-id spellings
+
+People write an arXiv id in several ways: `2611.25005`, `2611.25005v2` (a specific version), `arXiv:2611.25005`, `https://arxiv.org/abs/2611.25005v1`, `https://arxiv.org/pdf/2611.25005.pdf`. The database stores the bare id without a version (`2611.25005`; old-style ids look like `cs/0112017`). `ids.normalise_paper_id()` turns any of those spellings into the bare id and raises `ValueError` for anything else. `ids.py` uses only Python's standard library so both halves can import it. `profile_edit.normalise_arxiv_id()` (used for seeds and the gold set) now simply calls it, and `rpipe vote`, `rpipe save` and `rpipe show` use it too (see [review.md](review.md)).
 
 ### Active vote
 
@@ -198,14 +228,18 @@ Note that the query string itself is FTS5 syntax (quotes, `*`, `AND`/`OR`), so u
 - **Version number + migration ladder**: tables used to be created up front on the assumption that no migration would ever be needed. Phase 3 proved that wrong (`saves`), so `user_version` records which schema a file has and `_migrate()` upgrades old vaults in place. Rejected: a migrations framework (Alembic), far too heavy for one file with a handful of tables.
 - **Foreign keys on, plus explicit checks**: the `REFERENCES` clauses were decoration while enforcement was off, so a typo'd id could be stored silently. The pragma is the safety net for every writer that goes through `rpipe` (the Datasette connection behind `rpipe serve` does not set it, see `browsing.md`, which is why the web forms check ids themselves); the explicit check in `record_vote`/`set_saved` gives a clear message instead of a raw `IntegrityError`. Rejected: relying on the pragma alone (cryptic error), or checks alone (a future writer could forget).
 - **Refuse a newer database, never downgrade**: an old `rpipe` cannot know what a newer schema changed, so touching the file could corrupt it. It stops and says to upgrade.
+- **A request list instead of the app running the pipeline**: the app stays free of model code and never fights the nightly run for the lock; the pipeline does the work when it runs. Rejected: the app calling the summariser directly (it would need the model stack and the lock).
+- **Dedupe on canonical JSON, only while pending or running**: sorting the keys makes "the same request" a plain text comparison. Finished requests do not count, so you can ask for a paper again (for example after a failure). Rejected: a unique index (it would also block re-asking after `done`).
 - **Votes are append-only**: keeping the history lets later ranking use how your taste changed, and an undo is just another row.
 
 ## How to run / check the database
 
-`uv run pytest tests/test_db.py tests/test_feedback_db.py tests/test_library.py -v`
+`uv run pytest tests/test_db.py tests/test_feedback_db.py tests/test_library.py tests/test_requests.py tests/test_ids.py -v`
+
+To see a vault's request list: `sqlite3 <vault>/vault.sqlite 'SELECT id, kind, payload, status, tries FROM requests'`.
 
 To see a vault's schema version: `sqlite3 <vault>/vault.sqlite 'PRAGMA user_version'`.
 
 ## Where the database code is
 
-`src/research_pipeline/db.py`, `src/research_pipeline/library.py`, `src/research_pipeline/summary_models.py`, `tests/test_db.py`, `tests/test_feedback_db.py`, `tests/test_library.py`
+`src/research_pipeline/db.py` (schema, `REQUEST_KINDS`, `insert_request`, `requests_by_status`), `src/research_pipeline/library.py`, `src/research_pipeline/library_api.py` (`request`; the app's door into the database), `src/research_pipeline/ids.py` (`normalise_paper_id`), `src/research_pipeline/summary_models.py`, `tests/test_db.py`, `tests/test_feedback_db.py`, `tests/test_library.py`, `tests/test_requests.py`, `tests/test_ids.py`

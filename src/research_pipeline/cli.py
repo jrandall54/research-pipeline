@@ -78,6 +78,7 @@ from research_pipeline.gold import (
     remove_gold,
     suggest_papers,
 )
+from research_pipeline.ids import normalise_paper_id
 from research_pipeline.library import (
     clear_skip,
     current_votes,
@@ -2695,6 +2696,12 @@ def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
 def _resolve_paper(conn: sqlite3.Connection, text: str) -> str:
     """Turn an id or a title fragment into a paper id from the vault, or fail."""
     text = text.strip()
+    try:  # an id in any accepted spelling: 2611.25005v2, arXiv:2611.25005, an arxiv.org URL
+        pid = normalise_paper_id(text)
+    except ValueError:
+        pid = None
+    if pid is not None and get_paper(conn, pid) is not None:
+        return pid
     if get_paper(conn, text) is not None:
         return text
     escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")

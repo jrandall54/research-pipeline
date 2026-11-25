@@ -357,11 +357,11 @@ def test_open_db_upgrades_v1_to_v2(tmp_path):
 def test_open_db_still_refuses_newer_version(tmp_path):
     import pytest
 
-    from research_pipeline.db import SchemaTooNewError
+    from research_pipeline.db import SCHEMA_VERSION, SchemaTooNewError
 
     path = tmp_path / "too_new.db"
     conn = open_db(path)
-    conn.execute("PRAGMA user_version = 4")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
     conn.commit()
     conn.close()
     with pytest.raises(SchemaTooNewError):

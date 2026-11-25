@@ -102,6 +102,19 @@ CREATE TABLE IF NOT EXISTS shelf_chunks (
     PRIMARY KEY (item_name, chunk_idx)
 );
 
+-- The request list: work the app asks the pipeline to do (e.g. summarize one paper now).
+CREATE TABLE IF NOT EXISTS requests (
+    id         INTEGER PRIMARY KEY,
+    kind       TEXT NOT NULL,
+    payload    TEXT NOT NULL,          -- canonical JSON: json.dumps(payload, sort_keys=True)
+    status     TEXT NOT NULL DEFAULT 'pending',  -- pending | running | done | failed
+    tries      INTEGER NOT NULL DEFAULT 0,
+    error      TEXT,
+    result     TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts
     USING fts5(title, abstract, tokenize = 'unicode61');
 """
@@ -114,7 +127,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class SchemaTooNewError(RuntimeError):
@@ -133,6 +146,8 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         pass  # v1 -> v2: the `skips` table is added by CREATE TABLE IF NOT EXISTS
     if from_version < 3:
         pass  # v2 -> v3: `shelf_items` and `shelf_chunks` are added by CREATE TABLE IF NOT EXISTS
+    if from_version < 4:
+        pass  # v3 -> v4: the `requests` table is added by CREATE TABLE IF NOT EXISTS
 
 
 def open_db(path: Path) -> sqlite3.Connection:
@@ -158,6 +173,44 @@ def open_db(path: Path) -> sqlite3.Connection:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
     return conn
+
+
+# Kinds of work the app may put on the request list. The pipeline knows how to do each one.
+REQUEST_KINDS: tuple[str, ...] = ("summarize",)
+
+
+def insert_request(conn: sqlite3.Connection, kind: str, payload: dict) -> int:
+    """Add a `pending` request and return its id. Commits.
+
+    If a `pending` or `running` request with the same kind and payload is already on the
+    list, return that one's id instead, so asking twice does not queue the work twice.
+    Callers validate `kind` and `payload` (see ``library_api.request``).
+    """
+    canonical = json.dumps(payload, sort_keys=True)
+    existing = conn.execute(
+        "SELECT id FROM requests WHERE kind = ? AND payload = ? AND status IN ('pending', 'running')"
+        " ORDER BY id LIMIT 1",
+        (kind, canonical),
+    ).fetchone()
+    if existing is not None:
+        return existing["id"]
+    now = _now()
+    cur = conn.execute(
+        "INSERT INTO requests (kind, payload, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        (kind, canonical, now, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def requests_by_status(conn: sqlite3.Connection, *statuses: str) -> list[sqlite3.Row]:
+    """Requests whose status is one of `statuses`, oldest first (none named -> empty list)."""
+    if not statuses:
+        return []
+    marks = ", ".join("?" * len(statuses))
+    return conn.execute(
+        f"SELECT * FROM requests WHERE status IN ({marks}) ORDER BY id", statuses
+    ).fetchall()
 
 
 def _require_paper(conn: sqlite3.Connection, paper_id: str) -> None:

@@ -10,6 +10,7 @@ Commands (`install` and `show` take `--time` and `--vault`; no file editing need
 - `rpipe schedule show [--time HH:MM] [--vault PATH]` prints the units without writing anything, so you can review them first.
 - `rpipe schedule status` shows when the timer last fired and when it fires next; if the timer is not enabled it says so and suggests `rpipe schedule install`. It first checks that `systemctl` exists (the same clean message as `install`, no traceback), then that the systemd user manager can be reached; if not, it says exactly that (and exits 1) instead of claiming the timer is not installed, because then the real state is unknown and reinstalling would not help.
 - `rpipe schedule remove` disables the timer and deletes both files (and reloads systemd only if something was removed). If disabling fails it warns and still removes the files. With nothing installed it just says so.
+- `rpipe schedule set-deadline HH:MM|off [--vault PATH]` sets the morning deadline for reruns of cut papers (default 07:00). See "The morning deadline" below. `show` prints the current value on its first line.
 
 ## How it works
 
@@ -50,6 +51,33 @@ Quoting: systemd splits `ExecStart` on spaces and expands `%` and `$`, so paths 
 
 **Linger.** A user timer normally only runs while you have a login session. `loginctl enable-linger $USER` (run once, by you) tells systemd to keep your user services alive while logged out, so a 03:00 run happens even if nobody is logged in. It changes machine-wide login behaviour, which is why `rpipe` never runs it for you.
 
+## The morning deadline
+
+**What it governs: reruns only.** Some papers are too long for the model's context window, so part of their core text is cut before the model reads them (a *body cut*, see `glossary.md`). A later stage reads such papers again with a bigger context, which only fits with part of the model in ordinary RAM (a *spill*), so it is slow. These *reruns* happen after the normal work and must be finished by a morning time you choose, so the computer is free when you want it. Normal papers are never held back by the deadline: they always run, however late it gets. How the reruns use the deadline (time estimates, free RAM, grouping) is in `running.md`, "Reading cut papers whole: reruns".
+
+- Default: `07:00`. Set it with `rpipe schedule set-deadline 06:30`, which answers `Reruns of cut papers must finish by 06:30.`
+- `rpipe schedule set-deadline off` turns reruns off (answer: `Reruns of cut papers are off.`).
+- Accepted: a 24-hour time (`7:00` is stored as `07:00`) or `off`, in any case. Anything else (`7pm`, `25:00`) is refused with an example and the setting is left unchanged (exit 1).
+- It is stored as `night_deadline` in `config.yaml` (quoted, see below) and printed by `rpipe schedule show` as `# Reruns of cut papers: deadline 07:00`. Because of that line, `show` now reads `config.yaml`: if the file is invalid it prints the config error and exits 1. The line comes first, before the unit files, so the deadline is shown even when the units cannot be printed (for example no `rpipe` with the embed extra, or a bad `--time`; `show` then exits 1 after it).
+- How the reruns themselves work (which papers, how much RAM, the time estimate) is in `running.md`, "Reading cut papers whole: reruns".
+
+How the clock time becomes a deadline (`schedule.deadline_at`): take the next 07:00 strictly after now, local time. If that is more than 12 hours away (`MAX_NIGHT_HOURS`) there is no deadline tonight and reruns do not start.
+
+| Now | Setting | Deadline |
+| --- | --- | --- |
+| 03:00 | 07:00 | today 07:00 (4 h left) |
+| 23:00 | 07:00 | tomorrow 07:00 (8 h left) |
+| 10:00 | 07:00 | none: tomorrow 07:00 is 21 h away, so this is a daytime run |
+| 07:00 exactly | 07:00 | none: the next 07:00 is 24 h away |
+| any | off | none |
+
+Why it's built this way:
+
+- **Reruns only, never normal papers.** A late night must not leave you with no digest. Reruns improve papers you already have a summary for, so skipping them costs little.
+- **A clock time, not a duration.** "Done by 07:00" is what you care about whether the run started at 03:00 or was caught up at 05:00 after the machine slept (`Persistent=true`). Rejected: "at most 4 hours of reruns", which would run past breakfast after a late start.
+- **The 12-hour cut-off.** If you run `rpipe run` by hand at 10:00, "the next 07:00" is tomorrow morning; spending the whole day spilling would hog the machine, so reruns are skipped. Rejected: always using the next occurrence.
+- **Stored quoted, either form loads.** The YAML reader treats an unquoted `23:00` as a number of minutes after midnight (base 60: 23 x 60 = 1380), so the command always writes `"23:00"` in quotes. A hand-written unquoted `23:00` or `7:00` still works: the config check turns 1380 back into `23:00` and pads `7:00` to `07:00`. Rejected: refusing the unquoted form, which would stop every command (even `set-deadline`, which reads the file first) until you fixed the file by hand.
+
 ## Checks when you install
 
 - **Linux only.** `rpipe schedule install`, `status` and `remove` use systemd. On macOS or Windows they print "rpipe schedule uses systemd, which only exists on Linux. On <OS>, run `rpipe run` once a day from your own scheduler (see the README)." and exit 1 without writing anything.
@@ -76,6 +104,8 @@ rpipe schedule status                # exits 1 with a clear message if systemctl
 systemctl --user start research-pipeline.service   # run it now to test
 journalctl --user -u research-pipeline.service     # its output
 rpipe runs                           # the run record, as always
+rpipe schedule set-deadline 06:30   # reruns of cut papers must finish by 06:30
+rpipe schedule set-deadline off     # no reruns
 rpipe schedule remove
 ```
 
@@ -83,4 +113,4 @@ Tests: `uv run pytest tests/test_schedule.py -q` (offline, fake runner, temporar
 
 ## Where the code is
 
-`src/research_pipeline/schedule.py` (`render_service`, `render_timer`, `install`, `remove`, `status`, `ScheduleError`) and the `schedule` commands at the bottom of `src/research_pipeline/cli.py`. Tests: `tests/test_schedule.py`.
+`src/research_pipeline/schedule.py` (`render_service`, `render_timer`, `install`, `remove`, `status`, `ScheduleError`, `parse_time`, `deadline_at`, `MAX_NIGHT_HOURS`), `set_night_deadline` in `src/research_pipeline/profile_edit.py` (checks the time with `parse_time`), `Config.night_deadline` and `normalise_deadline` in `src/research_pipeline/models.py`, and the `schedule` commands at the bottom of `src/research_pipeline/cli.py`. Tests: `tests/test_schedule.py`; the deadline setting is also tested in `tests/test_models.py` (`normalise_deadline`, `Config.night_deadline`) and `tests/test_profile_edit.py` (`set_night_deadline`).

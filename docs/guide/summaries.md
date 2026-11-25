@@ -22,13 +22,13 @@ Every point in both (a *claim*) names the paper section(s) it came from. Code th
                                       |                                             |
                                       |            critique prompt --> model --> same check
                                       v                                             v
-                                PaperSummary(summary, critique, basis, body_cut, dropped, unverified)
+                                PaperSummary(summary, critique, basis, body_cut, needed_ctx, dropped, unverified)
 ```
 
 Step by step:
 
 1. **Pick the text.** With full text, the input is the stored sections and `basis` is `full_text`. Without it (`sections=None`, which also happens when a page had less than 50 characters of section text, see `fulltext.md`), the abstract becomes one pseudo-section titled `Abstract` and `basis` is `abstract`.
-2. **Fit the budget** (`fit_to_budget` in `pruning.py`, below). Non-paper text is always dropped; if the paper is still too long, appendices go, then core text is trimmed (`body_cut` becomes `True` only for that last case).
+2. **Fit the budget** (`fit_to_budget` in `pruning.py`, below). Non-paper text is always dropped; if the paper is still too long, appendices go, then core text is trimmed (`body_cut` becomes `True` only for that last case, and `needed_ctx` records how big a context the uncut core text would need, see "The context needed" below).
 3. **Build the prompt** (`build_summary_prompt`). Both calls (summary and critique) use the same layout, in this order:
 
    ```
@@ -99,6 +99,18 @@ Example: Abstract 1,000 characters, Introduction 100,000, Method 100,000, Refere
 
 Every dropped section is listed, in order, with its size and reason (`non_paper` or `appendix`).
 
+### The context needed (`needed_ctx`)
+
+When core text had to be cut (`body_cut`), the summary also records **`needed_ctx`**: the context window, in tokens, that would have fit the core text whole. It is the budget rule run backwards, rounded up to the next multiple of 1024 (`NEEDED_STEP`, the step context sizes are measured in):
+
+```
+needed_ctx = roundup( ceil(core characters / 3) + 4000 , 1024 )
+```
+
+"Core characters" counts the sections kept as paper (titles included); non-paper text and appendices are not counted, because a bigger context would still drop them first. Worked example: the core text is 300,000 characters. `300,000 / 3 = 100,000` tokens, plus the 4,000 reserved, is 104,000; the next multiple of 1024 is `102 * 1024 = 104,448`. So a summary written at `num_ctx` 32768 stores `needed_ctx: 104448`.
+
+A paper that fit (nothing cut, or only appendices dropped) stores `needed_ctx: null`: there is nothing to win from a bigger context. The number is there so a later step can find cut papers and read them again at a bigger context, with part of the model in ordinary memory (RAM) if the GPU cannot hold it; this task only records it.
+
 ### Stopping early: usage limit versus timeout
 
 `run_summarize` can stop before the end of the list for two different reasons, and they are treated differently on purpose:
@@ -108,12 +120,16 @@ Every dropped section is listed, in order, with its size and reason (`non_paper`
 
 ### Provenance: which model and prompt wrote this
 
-Every summary saved by `rpipe summarize` / `rpipe run` also records where it came from: `{"backend", "model", "prompt_version", "paper_version", "num_ctx", "created_at"}`. Worked example: `{"backend": "ollama", "model": "qwen3:14b", "prompt_version": "2026-11-p3", "paper_version": 2, "num_ctx": 32768, "created_at": "2026-11-21T03:00:00+00:00"}` means the `ollama` backend ran qwen3:14b and it wrote it from version 2 of the paper, with prompt wording `2026-11-p3` and a 32768-token context window. It is stored as an extra `provenance` key in the summary row's JSON (like `basis`) and read with `db.get_provenance()`; `get_summary()` removes it before building `PaperSummary`. The digest footer shows the backend first, e.g. `_ollama · qwen3:14b · prompt 2026-11-p3_`. Summaries saved before this feature have no such key (and those saved before backends existed have no `backend`, so their footer is unchanged): they load and render exactly as before, and `get_provenance()` returns `None`.
+Every summary saved by `rpipe summarize` / `rpipe run` also records where it came from: `{"backend", "model", "prompt_version", "paper_version", "num_ctx", "gpu_share", "created_at"}`. Worked example: `{"backend": "ollama", "model": "qwen3:14b", "prompt_version": "2026-11-p3", "paper_version": 2, "num_ctx": 32768, "gpu_share": 1.0, "created_at": "2026-11-21T03:00:00+00:00"}` means the `ollama` backend ran qwen3:14b and it wrote it from version 2 of the paper, with prompt wording `2026-11-p3`, a 32768-token context window, and the whole model on the GPU. It is stored as an extra `provenance` key in the summary row's JSON (like `basis`) and read with `db.get_provenance()`; `get_summary()` removes it before building `PaperSummary`. The digest footer shows the backend first, e.g. `_ollama · qwen3:14b · prompt 2026-11-p3_`. Summaries saved before this feature have no such key (and those saved before backends existed have no `backend`, so their footer is unchanged): they load and render exactly as before, and `get_provenance()` returns `None`.
+
+**`gpu_share`** is the share of the model that sat in GPU memory just after the summary was written: Ollama's `/api/ps` lists each loaded model with its total `size` and the part in GPU memory (`size_vram`), and `gpu_share = size_vram / size`, rounded to 2 places. `1.0` means fully on the GPU; `0.93` means 7% of the model ran from ordinary RAM (slower). It is `null` when it is unknown: a backend that is not Ollama (a cloud model has no GPU of yours), the model was not listed, or Ollama could not be asked. Asking never fails a summary: any error there just stores `null`. Provenance saved before this field has no `gpu_share` key.
 
 **When to bump `PROMPT_VERSION`** (in `prompts.py`): whenever `SHARED_SYSTEM`, `SUMMARY_TASK` or `CRITIQUE_TASK` change in any way that could change the output. Use the form `YYYY-MM-<tag>`. Without the bump, summaries from different wordings look identical and you cannot tell which ones to regenerate or compare.
 
 ## Why it's built this way
 
+- **`needed_ctx` is stored, not worked out later.** The full sections are still in the database, so the number could be recomputed, but that would mean loading every paper's text and re-running the pruning rules each night just to find the cut ones. One integer in the existing JSON costs nothing and lets a query find the cut papers directly. Rejected: storing just `body_cut` and recomputing, and storing the exact token count unrounded (context sizes are set in 1024 steps anyway).
+- **`gpu_share` is read right after the summary.** That is when the model is certainly loaded at the context it used. It goes in provenance because it describes how the summary was made, not what it says.
 - **Provenance is stored, not inferred.** When you change model, prompt or context size, old summaries stay in the vault. Without a record you could not say which model wrote a surprising claim, nor which summaries are stale after a prompt change. It lives in the existing JSON (no schema migration), so old rows need no conversion. Rejected: a new table or columns, which would need a migration for little gain.
 
 - **Citations are checked by code, not trusted.** A language model can write a fluent, confident sentence that the paper never says (a *hallucination*). Asking it to cite a section makes it point at its source, but it can invent the citation too. Checking cited titles against the real headings is cheap, exact and cannot be talked out of. It proves the cited section exists, not that the section says what the claim says; that is what the gold-set evaluation measures.
@@ -136,12 +152,13 @@ Rejected alternatives:
 uv run pytest tests/test_summarize.py -q
 ```
 
-The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They check the happy path, the progress events (notes in order, one result per paper, the citation-retry note, backlog counted in the total), that the paper sits inside `<paper>` tags and the system prompt warns about instructions, that injected text (including a fake `</paper>`) stays inside the block, the one-retry rule and its feedback, flagging after a failed retry, abstract-only labelling, the context budget, and that model errors (`LlmError`) are passed on to the caller. `tests/test_db.py` checks that a saved summary loads back unchanged and that provenance round-trips (and is `None` for old rows).
+The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They check the happy path, the progress events (notes in order, one result per paper, the citation-retry note, backlog counted in the total), that the paper sits inside `<paper>` tags and the system prompt warns about instructions, that injected text (including a fake `</paper>`) stays inside the block, the one-retry rule and its feedback, flagging after a failed retry, abstract-only labelling, the context budget, and that model errors (`LlmError`) are passed on to the caller. `tests/test_db.py` checks that a saved summary loads back unchanged, that `needed_ctx` round-trips (and is `None` for old rows) and that provenance, `gpu_share` included, round-trips (and is `None` for old rows). `tests/test_pruning.py` checks `needed_ctx` against the formula above, and that it is `None` when the paper fits or only appendices overflow; `tests/test_llm.py` checks `gpu_share` against a faked `/api/ps` reply (listed, not listed, HTTP error, unreachable).
 
 ## Where the code is
 
 - `src/research_pipeline/summarize.py`: `Claim`, `Summary`, `Critique`, `PaperSummary`, `unknown_citations`, `summarize_paper`
-- `src/research_pipeline/pruning.py`: `classify`, `fit_to_budget`, `Fit`
+- `src/research_pipeline/pruning.py`: `classify`, `fit_to_budget`, `Fit` (with `needed_ctx`), `NEEDED_STEP`
+- `src/research_pipeline/llm.py`: `OllamaClient.gpu_share` (reads `/api/ps`)
 - `src/research_pipeline/prompts.py`: `PROMPT_VERSION`, `build_summary_prompt`, `build_critique_prompt`, `citation_feedback`, `defuse`, `SHARED_SYSTEM`, `SUMMARY_TASK`, `CRITIQUE_TASK`, `REMINDER`
 - `src/research_pipeline/db.py`: `save_summary` (replaces an existing summary, which is what makes a re-summary work), `get_summary`, `get_provenance`, `papers_missing_summary`, `papers_by_ids`
 - `tests/test_summarize.py`, `tests/test_db.py`

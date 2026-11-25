@@ -321,3 +321,33 @@ def test_setter_on_old_config_with_rss_feeds_and_no_max_results(vault):
     assert "# my note" in text and "embedding_model: x/y" in text and "rss_feeds: []" in text
     c = cfg(vault)
     assert c.arxiv_max_results == 200 and c.embedding_model == "x/y"
+
+
+def test_set_night_deadline_normalises(vault):
+    pe.set_night_deadline(vault, "7:00")
+    assert load_config(vault / "config.yaml").night_deadline == "07:00"
+    pe.set_night_deadline(vault, "OFF")
+    assert load_config(vault / "config.yaml").night_deadline == "off"
+    pe.set_night_deadline(vault, " 23:15 ")
+    assert load_config(vault / "config.yaml").night_deadline == "23:15"
+    for bad in ("25:00", "7pm", "", "12:60"):
+        with pytest.raises(ValueError, match="HH:MM"):
+            pe.set_night_deadline(vault, bad)
+    assert load_config(vault / "config.yaml").night_deadline == "23:15"
+
+
+def test_night_deadline_default_and_stored_quoted(vault):
+    assert load_config(vault / "config.yaml").night_deadline == "07:00"
+    pe.set_night_deadline(vault, "9:05")
+    # Quoted, so YAML never reads it as a number of minutes (sexagesimal).
+    assert 'night_deadline: "09:05"' in (vault / "config.yaml").read_text()
+
+
+@pytest.mark.parametrize(("written", "loaded"), [("23:00", "23:00"), ("7:00", "07:00")])
+def test_unquoted_hand_written_deadline_loads_and_can_be_changed(vault, written, loaded):
+    path = vault / "config.yaml"
+    path.write_text(path.read_text().replace('night_deadline: "07:00"', f"night_deadline: {written}"))
+    assert f"night_deadline: {written}\n" in path.read_text()
+    assert load_config(path).night_deadline == loaded
+    pe.set_night_deadline(vault, "06:15")
+    assert load_config(path).night_deadline == "06:15"

@@ -102,3 +102,15 @@ def test_llm_effort_rejects_others(tmp_path, value):
     from research_pipeline.models import Config
     with pytest.raises(ValidationError):
         Config(vault_path=tmp_path, llm_effort=value)
+
+
+def test_config_night_deadline_minutes_int_becomes_hh_mm():
+    # PyYAML reads unquoted 23:00 as 1380 (base 60); it must still load.
+    assert Config(vault_path="/v", night_deadline=1380).night_deadline == "23:00"
+    assert Config(vault_path="/v", night_deadline=420).night_deadline == "07:00"
+    assert Config(vault_path="/v", night_deadline=0).night_deadline == "00:00"
+    for bad in (1440, -1, "7pm", "24:00"):
+        with pytest.raises(ValidationError):
+            Config(vault_path="/v", night_deadline=bad)
+    with pytest.raises(ValidationError):
+        Config(vault_path="/v", night_deadline=True)

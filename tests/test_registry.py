@@ -93,3 +93,38 @@ def test_plugin_that_calls_sys_exit_on_import_is_reported_not_fatal(monkeypatch)
     monkeypatch.setattr(registry, "_entry_points", lambda group: [fake_ep("quitter", exits)])
     p = registry.plugins(registry.SOURCE_GROUP)
     assert p["quitter"].factory is None and "SystemExit" in p["quitter"].error
+
+
+def test_make_ollama_uses_bench(tmp_path, monkeypatch):
+    from datetime import datetime
+
+    from research_pipeline import bench as bench_mod
+    from research_pipeline.llm import call_timeout
+
+    monkeypatch.setattr(registry.ollama_fit, "resolve",
+                        lambda *a, **k: SimpleNamespace(model="slow:14b", num_ctx=32768))
+    slow = bench_mod.Bench(model="slow:14b", num_ctx=16384, read_tps=80.0, write_tps=18.0,
+                           seconds_per_paper=1.0, paper_tokens=22000, measured_at=datetime(2026, 11, 24))
+    bench_mod.save_bench(tmp_path, slow)
+    client = registry.make_ollama(Config(vault_path=str(tmp_path)), tmp_path, lambda s: None)
+    assert client.timeout == call_timeout(32768, slow)
+    assert client.timeout > 900
+
+
+def test_make_ollama_matches_untagged_bench_name(tmp_path, monkeypatch):
+    from datetime import datetime
+
+    from research_pipeline import bench as bench_mod
+
+    monkeypatch.setattr(registry.ollama_fit, "resolve",
+                        lambda *a, **k: SimpleNamespace(model="slow:latest", num_ctx=32768))
+    bench_mod.save_bench(tmp_path, bench_mod.Bench(
+        model="slow", num_ctx=32768, read_tps=80.0, write_tps=18.0, seconds_per_paper=1.0,
+        paper_tokens=22000, measured_at=datetime(2026, 11, 24)))
+    assert registry.make_ollama(Config(vault_path=str(tmp_path)), tmp_path, lambda s: None).timeout > 900
+
+
+def test_make_ollama_without_bench_keeps_600(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry.ollama_fit, "resolve",
+                        lambda *a, **k: SimpleNamespace(model="m:7b", num_ctx=8192))
+    assert registry.make_ollama(Config(vault_path=str(tmp_path)), tmp_path, lambda s: None).timeout == 600.0

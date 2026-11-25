@@ -398,17 +398,20 @@ def save_summary(
     paper_version: int | None = None,
     num_ctx: int | None = None,
     backend: str | None = None,
+    gpu_share: float | None = None,
 ) -> None:
     """Store (or replace) a paper's summary and critique rows. Does not commit.
 
-    The `summary` row's JSON also carries `basis`, `body_cut`, `dropped` and `unverified`, and, when
-    `prompt_version` is given, a `provenance` dict (see `get_provenance`).
+    The `summary` row's JSON also carries `basis`, `body_cut`, `needed_ctx`, `dropped` and
+    `unverified`, and, when `prompt_version` is given, a `provenance` dict (see `get_provenance`)
+    that includes `gpu_share` (share of the model on the GPU, None when unknown).
     """
     now = _now()
     summary_json = {
         **result.summary.model_dump(),
         "basis": result.basis,
         "body_cut": result.body_cut,
+        "needed_ctx": result.needed_ctx,
         "dropped": [d.model_dump() for d in result.dropped],
         "unverified": result.unverified,
     }
@@ -419,6 +422,7 @@ def save_summary(
             "prompt_version": prompt_version,
             "paper_version": paper_version,
             "num_ctx": num_ctx,
+            "gpu_share": gpu_share,
             "created_at": now,
         }
     conn.executemany(
@@ -448,6 +452,7 @@ def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
     meta = {k: s.pop(k) for k in ("basis", "unverified")}
     meta["body_cut"] = s.pop("body_cut", s.pop("truncated", False))  # old rows say `truncated`
     meta["dropped"] = s.pop("dropped", [])
+    meta["needed_ctx"] = s.pop("needed_ctx", None)  # rows from before B.5 have no such key
     return PaperSummary(
         summary=Summary.model_validate(s),
         critique=Critique.model_validate(rows["critique"]),

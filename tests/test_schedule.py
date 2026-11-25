@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 from typer.testing import CliRunner
 
@@ -312,3 +314,77 @@ def test_schedule_refuses_off_linux(fake, monkeypatch, sub):
     assert ("rpipe schedule uses systemd, which only exists on Linux. On Darwin, run `rpipe run` "
             "once a day from your own scheduler (see the README).") in res.output
     assert calls == [] and not unit_dir.exists()
+
+
+# --- The morning deadline for reruns (deadline_at, rpipe schedule set-deadline) ---
+
+def test_deadline_same_night():
+    assert schedule.deadline_at(datetime(2026, 11, 24, 3, 0), "07:00") == datetime(2026, 11, 24, 7, 0)
+
+
+def test_deadline_after_midnight():
+    assert schedule.deadline_at(datetime(2026, 11, 24, 23, 0), "07:00") == datetime(2026, 11, 25, 7, 0)
+
+
+def test_deadline_none_when_more_than_12h_away():
+    assert schedule.deadline_at(datetime(2026, 11, 24, 10, 0), "07:00") is None
+
+
+def test_deadline_off():
+    assert schedule.deadline_at(datetime(2026, 11, 24, 3, 0), "off") is None
+
+
+def test_deadline_exactly_now_is_tomorrow_so_none():
+    assert schedule.deadline_at(datetime(2026, 11, 24, 7, 0), "07:00") is None
+
+
+def test_deadline_exactly_12h_away_is_kept():
+    assert schedule.deadline_at(datetime(2026, 11, 24, 19, 0), "07:00") == datetime(2026, 11, 25, 7, 0)
+
+
+def test_cli_set_deadline_writes_config_and_show_prints_it(fake):
+    from research_pipeline.vault import load_config
+
+    _, _, vault = fake
+    res = runner.invoke(cli.app, ["schedule", "set-deadline", "06:30", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert "Reruns of cut papers must finish by 06:30." in res.output
+    assert load_config(vault / "config.yaml").night_deadline == "06:30"
+    res = runner.invoke(cli.app, ["schedule", "show", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert "deadline 06:30" in res.output
+
+
+def test_cli_set_deadline_off(fake):
+    _, _, vault = fake
+    res = runner.invoke(cli.app, ["schedule", "set-deadline", "OFF", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert "off" in res.output.lower()
+    res = runner.invoke(cli.app, ["schedule", "show", "--vault", str(vault)])
+    assert "deadline off" in res.output
+
+
+def test_cli_set_deadline_bad_value_exits_1(fake):
+    from research_pipeline.vault import load_config
+
+    _, _, vault = fake
+    res = runner.invoke(cli.app, ["schedule", "set-deadline", "7pm", "--vault", str(vault)])
+    assert res.exit_code == 1
+    assert "HH:MM" in res.output
+    assert load_config(vault / "config.yaml").night_deadline == "07:00"
+
+
+def test_cli_show_prints_deadline_even_when_units_cannot_be_rendered(fake, monkeypatch):
+    _, _, vault = fake
+
+    def broken(*_args):
+        raise schedule.ScheduleError("The rpipe path contains a control character")
+
+    monkeypatch.setattr(schedule, "render_service", broken)
+    res = runner.invoke(cli.app, ["schedule", "show", "--vault", str(vault)])
+    assert res.exit_code == 1
+    assert "deadline 07:00" in res.output
+    assert "control character" in res.output
+    res = runner.invoke(cli.app, ["schedule", "show", "--time", "25:00", "--vault", str(vault)])
+    assert res.exit_code == 1
+    assert "deadline 07:00" in res.output

@@ -254,6 +254,31 @@ def test_old_summary_without_provenance_loads(tmp_path):
     assert get_provenance(conn, "2401.00001") is None
 
 
+def test_summary_round_trips_needed_ctx(tmp_path):
+    from research_pipeline.db import get_summary, save_summary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    result = _result().model_copy(update={"body_cut": True, "needed_ctx": 65536})
+    save_summary(conn, "2401.00001", result, "m")
+    assert get_summary(conn, "2401.00001").needed_ctx == 65536
+    assert get_summary(conn, "2401.00001") == result
+    # An old row has no `needed_ctx` key: it reads as None.
+    row = json.loads(conn.execute("SELECT text FROM summaries WHERE kind = 'summary'").fetchone()["text"])
+    del row["needed_ctx"]
+    conn.execute("UPDATE summaries SET text = ? WHERE kind = 'summary'", (json.dumps(row),))
+    assert get_summary(conn, "2401.00001").needed_ctx is None
+
+
+def test_provenance_has_gpu_share(tmp_path):
+    from research_pipeline.db import get_provenance, save_summary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    save_summary(conn, "2401.00001", _result(), "m", prompt_version="v", gpu_share=0.93)
+    assert get_provenance(conn, "2401.00001")["gpu_share"] == 0.93
+
+
 def test_newer_database_is_refused_and_left_untouched(tmp_path):
     import sqlite3
 

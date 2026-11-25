@@ -16,6 +16,8 @@ RESERVED_TOKENS = 4000
 CHARS_PER_TOKEN = 3
 TRIM_MARK = " [...]"
 TRIM_FLOOR = 0.25  # the ordered trim never cuts a trimmable section below this share of its text
+# A cut paper records the context it would need, rounded up to this step (Ollama sizes go in steps).
+NEEDED_STEP = 1024
 STATEMENT_CHARS = 1500  # a "data availability" section this short is a statement, not content
 
 SectionClass = Literal["paper", "non_paper", "appendix"]
@@ -88,10 +90,18 @@ class Fit:
     sections: list[Section]
     dropped: list[Dropped]
     body_cut: bool  # True only when core paper text had to be trimmed to fit
+    # Context (tokens) the core text would need to fit uncut; set only when body_cut.
+    needed_ctx: int | None = None
 
 
 def _size(sections: list[Section]) -> int:
     return sum(len(s.title) + len(s.text) for s in sections)
+
+
+def _needed_ctx(core: list[Section]) -> int:
+    """Context that fits `core` whole: its tokens plus the reserve, rounded up to NEEDED_STEP."""
+    tokens = -(-_size(core) // CHARS_PER_TOKEN) + RESERVED_TOKENS
+    return -(-tokens // NEEDED_STEP) * NEEDED_STEP
 
 
 def _cut(s: Section, ratio: float) -> Section:
@@ -114,7 +124,8 @@ def fit_to_budget(sections: list[Section], num_ctx: int) -> Fit:
 
     Non-paper text is always dropped. If the rest does not fit, appendices go next. Only then
     is core text trimmed (``body_cut``): first the long method/background/related-work
-    sections, then, if that is not enough, every section by the same fraction.
+    sections, then, if that is not enough, every section by the same fraction. A cut fit also
+    says how much context the core text needs whole (``needed_ctx``), for a later rerun.
     """
     budget = max(0, (num_ctx - RESERVED_TOKENS) * CHARS_PER_TOKEN)
     classes = _classes(sections)
@@ -129,6 +140,7 @@ def fit_to_budget(sections: list[Section], num_ctx: int) -> Fit:
     if _size(kept) <= budget:
         return Fit(kept, dropped, False)
 
+    needed = _needed_ctx(kept)
     trim = [i for i, s in enumerate(kept) if _words(s.title).startswith(_TRIMMABLE)]
     other = _size([s for i, s in enumerate(kept) if i not in trim])
     text_t = sum(len(kept[i].text) for i in trim)
@@ -136,5 +148,7 @@ def fit_to_budget(sections: list[Section], num_ctx: int) -> Fit:
         room = budget - other - sum(len(kept[i].title) for i in trim) - len(TRIM_MARK) * len(trim)
         ratio = room / text_t
         if ratio >= TRIM_FLOOR:
-            return Fit([_cut(s, ratio) if i in trim else s for i, s in enumerate(kept)], dropped, True)
-    return Fit(_uniform(kept, budget), dropped, True)
+            return Fit(
+                [_cut(s, ratio) if i in trim else s for i, s in enumerate(kept)], dropped, True, needed
+            )
+    return Fit(_uniform(kept, budget), dropped, True, needed)

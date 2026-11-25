@@ -1,6 +1,9 @@
 """Machine scan: CPU, memory, disk, every GPU, and the Ollama server's own settings. Fully offline."""
+import math
 from pathlib import Path
 
+import httpx
+import respx
 from typer.testing import CliRunner
 
 from research_pipeline import cli
@@ -66,11 +69,96 @@ def test_systemd_server_detected():
 
 
 def test_host_mismatch_flagged():
-    server = detect_ollama_server("http://localhost:11434", systemd_run(), version=lambda url: "0.34.0")
+    server = detect_ollama_server("http://localhost:11434", systemd_run(), version=lambda url: "0.34.0",
+                                  tags=lambda url: None)
     assert server.host_matches is False
     no_host = detect_ollama_server("http://localhost:11434", systemd_run("Environment=OLLAMA_NUM_PARALLEL=1"),
                                    version=lambda url: None)
     assert no_host.host_matches is True
+
+
+RPIPE_TAGS = "http://localhost:11434/api/tags"
+SERVICE_TAGS = "http://127.0.0.1:11436/api/tags"
+ONE_MODEL = {"models": [{"name": "m:latest", "digest": "abc"}]}
+
+
+def detect_via_proxy():
+    return detect_ollama_server("http://localhost:11434", systemd_run(), version=lambda url: "0.34.0")
+
+
+@respx.mock
+def test_proxy_with_same_models_is_same_server():
+    respx.get(RPIPE_TAGS).mock(return_value=httpx.Response(200, json=ONE_MODEL))
+    respx.get(SERVICE_TAGS).mock(return_value=httpx.Response(200, json=ONE_MODEL))
+    server = detect_via_proxy()
+    assert server.host_matches is True and server.proxied is True
+
+
+@respx.mock
+def test_proxy_with_different_models_is_mismatch():
+    respx.get(RPIPE_TAGS).mock(return_value=httpx.Response(200, json=ONE_MODEL))
+    respx.get(SERVICE_TAGS).mock(return_value=httpx.Response(
+        200, json={"models": [{"name": "m:latest", "digest": "def"}]}))
+    server = detect_via_proxy()
+    assert server.host_matches is False and server.proxied is False
+
+
+@respx.mock
+def test_proxy_unreadable_is_mismatch():
+    respx.get(RPIPE_TAGS).mock(return_value=httpx.Response(200, json=ONE_MODEL))
+    respx.get(SERVICE_TAGS).mock(return_value=httpx.Response(500))
+    server = detect_via_proxy()
+    assert server.host_matches is False and server.proxied is False
+
+
+@respx.mock
+def test_proxy_both_empty_is_mismatch():
+    respx.get(RPIPE_TAGS).mock(return_value=httpx.Response(200, json={"models": []}))
+    respx.get(SERVICE_TAGS).mock(return_value=httpx.Response(200, json={"models": []}))
+    assert detect_via_proxy().host_matches is False
+
+
+@respx.mock
+def test_same_port_does_not_call_tags():
+    route = respx.get(url__regex=r".*/api/tags").mock(return_value=httpx.Response(200, json=ONE_MODEL))
+    server = detect_ollama_server("http://localhost:11436", systemd_run(), version=lambda url: "0.34.0")
+    assert server.host_matches is True and server.proxied is False
+    assert not route.called
+
+
+def test_ollama_tag_digests_sorted_and_none_on_failure():
+    from research_pipeline.scan import ollama_tag_digests
+    with respx.mock:
+        respx.get("http://h:1/api/tags").mock(return_value=httpx.Response(
+            200, json={"models": [{"name": "b", "digest": "2"}, {"name": "a", "digest": "1"}]}))
+        assert ollama_tag_digests("http://h:1") == [("a", "1"), ("b", "2")]
+    with respx.mock:
+        respx.get("http://h:1/api/tags").mock(return_value=httpx.Response(200, text="not json"))
+        assert ollama_tag_digests("http://h:1") is None
+    with respx.mock:
+        respx.get("http://h:1/api/tags").mock(side_effect=httpx.ConnectError("down"))
+        assert ollama_tag_digests("http://h:1") is None
+
+
+def test_model_scan_prints_proxy_line(tmp_path, monkeypatch):
+    from research_pipeline.vault import init_vault
+    vault = tmp_path / "vault"
+    init_vault(vault, topics=["x"])
+    server = OllamaServer("0.34.0", "systemd", {"OLLAMA_HOST": "127.0.0.1:11436"}, [], True, proxied=True)
+    machine = MachineInfo(os="Linux", ram_gb=32.0, gpu=None, ollama_installed=True, ollama_running=True,
+                          ollama_models=[], claude_path=None, claude_logged_in=False, ollama=server)
+    monkeypatch.setattr(cli, "detect_machine", lambda config: machine)
+    out = CliRunner().invoke(cli.app, ["model", "scan", "--vault", str(vault)]).output
+    assert ("rpipe reaches this Ollama through a pass-through proxy on port 11434 (same models): "
+            "its settings apply.") in out
+    assert "note:" not in out and "set-url" not in out
+
+
+def test_service_url_lives_in_scan_and_tune():
+    from research_pipeline import ollama_tune, scan
+    assert ollama_tune.service_url is scan.service_url
+    proxied = OllamaServer("1", "systemd", {"OLLAMA_HOST": "127.0.0.1:11436"}, [], True, proxied=True)
+    assert scan.service_url(proxied, "http://localhost:11434") == "http://localhost:11434"
 
 
 def test_missing_tools_mean_unknown():
@@ -128,6 +216,7 @@ def test_model_scan_command_prints_sections(tmp_path, monkeypatch):
 def test_machine_key_collects_version_settings_and_gpus(monkeypatch):
     from research_pipeline import scan
     monkeypatch.setattr(scan, "ollama_version", lambda url: "0.6.0")
+    monkeypatch.setattr(scan, "ollama_tag_digests", lambda url: None)
     run = fake_run({
         "systemctl is-active ollama": (0, "active\n"),
         "systemctl show ollama --property=Environment": (0, ENV_LINE + "\n"),
@@ -172,3 +261,12 @@ def test_scan_display_treats_true_as_flash_on(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "detect_machine", lambda config: machine)
     out = CliRunner().invoke(cli.app, ["model", "scan", "--vault", str(vault)]).output
     assert "flash attention: on" in out
+
+
+def test_nvidia_na_free_memory_is_unknown():
+    """Some drivers print [N/A] (or N/A) for free memory: keep the card, free memory unknown."""
+    query = "nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits"
+    for na in ("[N/A]", "N/A"):
+        (gpu,) = all_gpus(fake_run({query: (0, f"NVIDIA GeForce RTX 4060, 8188, {na}\n")}), "Linux", "x86_64")
+        assert gpu.name == "NVIDIA GeForce RTX 4060"
+        assert math.isclose(gpu.vram_gb, 8.0, abs_tol=0.01) and gpu.free_gb is None

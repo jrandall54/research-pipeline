@@ -43,6 +43,7 @@ class PaperSummary(BaseModel):
     critique: Critique
     basis: Literal["full_text", "abstract"]
     body_cut: bool = False  # core paper text was trimmed to fit (not just non-paper text dropped)
+    needed_ctx: int | None = None  # context (tokens) the core text needs uncut; only when body_cut
     dropped: list[Dropped] = []  # sections left out, with sizes (see pruning.py)
     unverified: list[str]  # claim texts whose citations could not be verified
 

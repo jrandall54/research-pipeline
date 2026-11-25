@@ -1,8 +1,23 @@
-# Handoff — after Phase 6 Part B.1 (answer key) (2026-11-22)
+# Handoff — after Phase 6 Part B.5 (spill reruns) (2026-11-24)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
 
-## B.4 built (2026-11-24, branch `part-b4-scan-recommend`, not merged)
+## B.5 built (2026-11-24, branch `part-b5-spill-reruns`, not merged)
+
+Plan `plans/2026-11-24-part-b5-spill-reruns.md`. `uv run pytest -q`: 1310 passing, ruff clean. Every task had a spec+quality review; whole-branch review (opus) + one fix wave.
+
+- **Proxy seen through:** when `llm_url` and the Ollama service's own address list the same models (names + digests), they count as one server (`OllamaServer.proxied`). On the owner's machine the false mismatch note should be gone and `recommend` should now estimate with q8_0 (about double the context it showed before). Check: `rpipe model scan`.
+- **B.4 parked fixes done:** nvidia-smi `[N/A]` free memory = unknown (card kept); CPU fallback whenever no catalog model fits the GPU (8 GB busy card); placement reason names usable memory; hardware.md worked example 0.245 GiB.
+- **Summaries record** `needed_ctx` (only when the body was cut) and provenance `gpu_share` (from `/api/ps`).
+- **Night deadline:** `night_deadline` (default `07:00`, or `off`), `rpipe schedule set-deadline HH:MM|off`, shown first by `rpipe schedule show`. Reruns only start if the deadline is at most 12 h away (a 03:00 run gets them; a 10:00 manual run does not).
+- **Rerun stage (`spill.py`)** after the normal summarize pass in `rpipe run`, Ollama only: candidates = Ollama summaries with `body_cut` whose `needed_ctx` exceeds the context they ran with; grouped in 8,192-token buckets; memory cost per token measured with two loads (fit context and 8,192); each bucket must fit in free RAM − 4 GiB (re-checked after loading, previous bucket unloaded first); time estimated from the last rerun, else bench × 3, else needs ≥ 1 h left. Skipped when the normal pass timed out, another model holds the GPU, RAM can't be read, or no deadline. Health line: `rerun N`, `rerun waiting M`. Digest is written after reruns.
+- **Call time limit:** with a bench for the fitted model, each call may take `max(600, 1.5 × (ctx/read + 4096/write))` s (CPU 14B ≈ 957 s); without one, 600 s.
+- **Owner model names scrubbed** from the working tree (guide, handoff, plans, phase-6 spec); still in older git history.
+- **Not run on the real machine.** First real-night checks: `rpipe runs` / digest health line shows `rerun` / `rerun waiting` only if some paper was cut (nights so far had `body cut 0`, so likely nothing happens); `rpipe show ID` on a summary shows provenance `gpu_share` 1.0.
+- **Deferred minors:** DST edge in `deadline_at` near the 12 h limit; duplicate `/api/tags` probes in scan; recommend note sizes the raised limit by the bench's context; time estimate omits bucket load time; rerun load cap stays 600 s; no cache of the per-token memory measurement (~1 min on nights with candidates).
+- **Next:** owner decides merge; then B.6 (task splitting / map-reduce, measured with `rpipe eval`), refresh the Phase 7 plan.
+
+## B.4 built (2026-11-24, merged)
 
 Plan `plans/2026-11-24-part-b4-scan-recommend.md`. New: `rpipe model scan`, `recommend`, `tune [--undo]`, `bench`, `catalog show|update`; modules `scan.py`, `catalog.py`, `recommender.py`, `ollama_tune.py`, `bench.py`; data `defaults/model_catalog.yaml` (20 researched entries, version 1); guide page `docs/guide/hardware.md`. The setup wizard now uses the recommender (old `ollama_models.yaml` deleted); CPU-only and small-GPU machines get a CPU model instead of "none". The fit cache key now includes Ollama version, server settings and GPUs, so **the first nightly run after this probes the context once more (1-3 min)**. `uv run pytest -q`: 1233 passing, ruff clean. Every task had a spec+quality review; whole-branch review (opus) + one fix wave, approved.
 
@@ -54,11 +69,11 @@ Results are in the owner's vault (`model-comparison-2026-11-23/README.md`), not 
 
 | Model | Facts covered | Unverified citations | Time, 10 papers |
 |---|---|---|---|
-| q3.8-27b-34k, 57K ctx, fully on GPU | 19 of 50 | 0 | 8m55s |
+| a 27B dense model (IQ3_S), 57K ctx, fully on GPU | 19 of 50 | 0 | 8m55s |
 | Qwen3.6-35B-A3B UD-IQ3_S, 49K ctx, ~95% on GPU | 16 of 50 | 5 (one paper) | 4m43s |
 | Gemma4-26B-A4B UD-IQ4_XS (3 papers only) | 6 of 15 (27B: 5) | 2 | 2m16s |
 
-- **Decision: the 27B stays the default** (Qwen 3.6 fails the pass rule: covered -3, unverified +5). Owner's `rpipe model` is **pinned to `q3.8-27b-34k:latest`** (not `auto`): with the two new models installed, `auto` could have switched the nightly run untested. `rpipe model set auto` undoes it.
+- **Decision: the 27B stays the default** (Qwen 3.6 fails the pass rule: covered -3, unverified +5). Owner's `rpipe model` is **pinned to the owner's 27B dense model** (not `auto`): with the two new models installed, `auto` could have switched the nightly run untested. `rpipe model set auto` undoes it.
 - **The fit gate only accepts models 100% on the GPU**, so `rpipe model fit` refuses Gemma and Qwen 3.6 (both ~93-96% on GPU at these sizes). To test them, pin model and context in a throwaway vault: copy `config.yaml`, `profile.yaml` and `gold/gold.json` to a temp folder, set `llm_model` and `llm_num_ctx` there, run `rpipe eval run --judge --vault TEMPDIR`. The real config is never touched. This is the case B.5 (RAM-spill reruns) is meant to serve; it also argues for letting B.4 recommend spill-tolerant mixture-of-experts models. Unload the previous model first (`ollama stop NAME`), or the next fit probe sees a busy GPU.
 - **Untried:** Qwen3.6 `UD-IQ4_XS` (17.7 GB, more spill); Qwen 3.5 35B-A3B; smaller quants of Gemma that fit fully (`UD-Q3_K_M` 12.7 GB, `UD-IQ3_S` 11.3 GB). Exact Hub file sizes come from the Hugging Face API (`/api/models/REPO/tree/main`). The Google guide's Q3_K_M size for the 35B models (~14.2 GB) was wrong (really 16.4-16.6 GB); its claims on layer counts were checked against the models' config files (Qwen3.6: 30 of 40 layers linear attention; Gemma 4: 25 of 30 sliding-window, `num_kv_shared_layers = 0`).
 - **arXiv API returned HTTP 429** during `gold auto`. Fixed: `gold auto` takes titles from the vault (no metadata API call), and the API and HTML fetches now retry 429/503 (15 s, 45 s, 120 s or `Retry-After`, three retries, announced in progress). `gold draft` and `gold add` still need the metadata API.

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
 import typer
 
@@ -84,7 +85,17 @@ from research_pipeline.gold import (
     remove_gold,
     suggest_papers,
 )
-from research_pipeline.llm import CALL_TIMEOUT, LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
+from research_pipeline.llm import (
+    CALL_TIMEOUT,
+    LLM,
+    NO_MODEL,
+    LlmError,
+    LlmLimitReached,
+    OllamaClient,
+    _with_tag,
+    call_timeout,
+    pull_model,
+)
 from research_pipeline.machine import OLLAMA_INSTALL, _generation_models, detect_machine, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
@@ -92,13 +103,20 @@ from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_r
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
 from research_pipeline.run_lock import RunLocked, run_lock
-from research_pipeline.scan import detect_ollama_server, flash_on, setting_source, system_cmd
+from research_pipeline.scan import (
+    DEFAULT_OLLAMA_PORT,
+    detect_ollama_server,
+    flash_on,
+    setting_source,
+    system_cmd,
+)
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
-from research_pipeline.summarize import run_summarize
+from research_pipeline.spill import run_reruns
+from research_pipeline.summarize import TIMEOUT_STOPPED, run_summarize
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
     DEFAULT_TOPICS,
@@ -369,6 +387,10 @@ def health_line(
         extras += f" · body cut {counts['body_cut']}"
     if counts.get("summary_failed"):
         extras += f" · summary failures {counts['summary_failed']}"
+    if counts.get("rerun"):
+        extras += f" · rerun {counts['rerun']}"
+    if counts.get("rerun_waiting"):
+        extras += f" · rerun waiting {counts['rerun_waiting']}"
     if counts.get("summaries_off"):
         extras += " · summaries off (abstracts-only mode)"
     if unknown_categories:
@@ -480,6 +502,20 @@ def _run_locked(ctx: _Context) -> None:
                             )
                         counts |= sum_counts
                         errors += sum_errors
+                        if getattr(llm, "name", "") == "ollama":
+                            stage = "rerun"
+                            try:
+                                with _reporter() as reporter:
+                                    rerun_counts, rerun_errors = run_reruns(
+                                        ctx.conn, llm, ctx.vault,
+                                        schedule.deadline_at(datetime.now(), ctx.config.night_deadline),
+                                        reporter=reporter,
+                                        model_timed_out=TIMEOUT_STOPPED in sum_errors,
+                                    )
+                                counts |= rerun_counts
+                                errors += rerun_errors
+                            except Exception as exc:  # noqa: BLE001 - a rerun problem never stops the digest
+                                errors.append(f"rerun: {' '.join(str(exc).split()) or type(exc).__name__}")
             except KeyboardInterrupt:
                 errors.append(f"{stage}: interrupted")
                 raise  # the user wants out: no digest, keep the conventional interrupt exit
@@ -2046,6 +2082,13 @@ def _describe_ollama_server(server, llm_url: str) -> None:
     typer.echo(f"  context memory type (KV cache): {server.env.get('OLLAMA_KV_CACHE_TYPE', 'f16 (default)')}"
                + (source("OLLAMA_KV_CACHE_TYPE") if "OLLAMA_KV_CACHE_TYPE" in server.env else ""))
     typer.echo(f"  parallel slots: {server.env.get('OLLAMA_NUM_PARALLEL', 'automatic (default)')}")
+    if server.proxied:
+        try:
+            proxy_port = urlparse(llm_url).port or DEFAULT_OLLAMA_PORT
+        except ValueError:
+            proxy_port = DEFAULT_OLLAMA_PORT
+        typer.echo(f"  rpipe reaches this Ollama through a pass-through proxy on port {proxy_port} "
+                   "(same models): its settings apply.")
     if server.host_matches is False:
         port = server.env.get("OLLAMA_HOST", "").rpartition(":")[2]
         typer.echo(f"  note: the Ollama service listens on port {port} but rpipe talks to "
@@ -2152,17 +2195,19 @@ def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
     return True
 
 
-def _warn_call_limit(bench: bench_mod.Bench | None) -> None:
-    """Warn when reading a typical paper alone would take longer than one model call may last."""
+def _note_call_limit(bench: bench_mod.Bench | None) -> None:
+    """When reading a typical paper takes longer than CALL_TIMEOUT, say the measured speed lifts the limit."""
     if bench is None or bench.read_tps <= 0:
         return
     seconds = bench.paper_tokens / bench.read_tps
     if seconds > CALL_TIMEOUT:
+        limit = call_timeout(bench.num_ctx, bench)
         typer.echo(
-            f"Warning: at the measured {bench.read_tps:.0f} tokens/s, reading a {bench.paper_tokens:,}-token "
-            f"paper takes about {seconds:,.0f} s, more than the {CALL_TIMEOUT:.0f}-second limit each model "
-            "call has today. Long papers will time out and fall back to their abstracts. A later update "
-            "(B.5/B.6) lifts this limit; a smaller or faster model avoids it now.")
+            f"Note: at the measured {bench.read_tps:.0f} tokens/s, reading a {bench.paper_tokens:,}-token "
+            f"paper takes about {seconds:,.0f} s, longer than the usual {CALL_TIMEOUT:.0f}-second limit for "
+            f"one model call. Because this speed was measured, calls to this model may take up to about "
+            f"{limit:,.0f} s, so long papers still finish; a night of them just takes longer. A smaller or "
+            "faster model makes the night shorter.")
 
 
 def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
@@ -2201,7 +2246,8 @@ def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
             _measure_speed(ctx.vault, ctx.conn, new_cfg)
         except (LlmError, OSError, ValueError) as exc:
             typer.echo(f"Speed not measured: {exc}")
-    _warn_call_limit(bench_mod.load_benches(ctx.vault).get(entry.pull))
+    _note_call_limit({_with_tag(k): b for k, b in bench_mod.load_benches(ctx.vault).items()}
+                     .get(_with_tag(entry.pull)))
     _go_back_hint(*previous)
     if not ok:
         raise typer.Exit(code=1)
@@ -2284,7 +2330,8 @@ def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> No
     if not ranked or ranked[0].placement == "gpu":
         return
     if pulled is not None:
-        where = recommender.place(pulled, info)
+        # Reaching here means nothing fits on the GPU, so rank allowed CPU choices: do the same here.
+        where = recommender.place(pulled, info, allow_cpu=True)
         if where is not None and where[0] != "gpu":
             _pin_off_gpu(vault, pulled.pull)
             return
@@ -2743,8 +2790,14 @@ def schedule_show(
     time: Annotated[str, typer.Option(help="Time of day, 24-hour HH:MM.")] = "03:00",
     vault: VaultOption = None,
 ) -> None:
-    """Print the unit files that `install` would write, without writing anything."""
+    """Print the night deadline and the unit files that `install` would write, without writing anything."""
     path = _schedule_vault(vault)
+    # The deadline comes first, so it is shown even when the unit files cannot be rendered.
+    try:
+        deadline = load_config(path / "config.yaml").night_deadline
+    except ConfigError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"# Reruns of cut papers: deadline {deadline} (change with `rpipe schedule set-deadline`)")
     try:
         timer = schedule.render_timer(time)
     except ValueError as exc:
@@ -2755,6 +2808,22 @@ def schedule_show(
         raise _fail(str(exc)) from exc
     typer.echo(f"# {schedule.SERVICE_NAME}\n{service}")
     typer.echo(f"# {schedule.TIMER_NAME}\n{timer}")
+
+
+@schedule_app.command("set-deadline")
+def schedule_set_deadline(
+    value: Annotated[str, typer.Argument(help="24-hour time such as 07:00, or off for no reruns.")],
+    vault: VaultOption = None,
+) -> None:
+    """Set the morning time by which reruns of cut papers must finish (normal papers always run)."""
+    path = _schedule_vault(vault)
+    with _clean_errors():
+        profile_edit.set_night_deadline(path, value)
+    stored = load_config(path / "config.yaml").night_deadline
+    if stored == "off":
+        typer.echo("Reruns of cut papers are off.")
+    else:
+        typer.echo(f"Reruns of cut papers must finish by {stored}.")
 
 
 @schedule_app.command("install")

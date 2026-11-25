@@ -20,7 +20,7 @@ Every client is a **backend** with two class attributes: `name` and `local`. Thi
 
 A **usage limit** (a subscription plan saying "you have used your allowance until later") is reported by a backend as `LlmLimitReached`, a subclass of `LlmError`. The summarize stage treats it differently from a timeout: it stops calling the model, records no failure and burns no retry, so the remaining papers wait for the next run (see `summaries.md`). The Ollama client never raises it.
 
-Failures become `LlmError`: server not running (hint: `ollama serve`), model not installed (HTTP 404, hint: `ollama pull <model>`), timeout (the subclass `LlmTimeout`; after the first one a `rpipe run` stops calling the model for the rest of that run, see `running.md`), other HTTP errors, and invalid output after the retry.
+Failures become `LlmError`: server not running (hint: `ollama serve`), model not installed (HTTP 404, hint: `ollama pull <model>`), timeout (the subclass `LlmTimeout`, when a call takes longer than its time limit, below; after the first one a `rpipe run` stops calling the model for the rest of that run, see `running.md`), other HTTP errors, and invalid output after the retry.
 
 ## Why it's built this way
 
@@ -30,6 +30,28 @@ Failures become `LlmError`: server not running (hint: `ollama serve`), model not
 - **Thinking off and temperature 0.** Qwen3 models can write a long hidden "thinking" section first; it costs time and can leak into the answer. Temperature 0 makes the model pick its most likely word each time, so the same paper gives the same summary, which matters when we measure accuracy.
 - **Local, not a cloud API.** Papers and your profile stay on your machine, there is no per-call cost and no key to manage. The price is needing a decent computer. Rejected: a cloud API.
 - **One retry, then fail.** A second try fixes most formatting slips; a third rarely does and wastes minutes.
+
+## The time limit for one call
+
+**What it does.** Each call to Ollama may take a limited time; after that the client gives up and raises `LlmTimeout`. The limit is 600 seconds (`CALL_TIMEOUT`), or longer when `rpipe model bench` has measured this machine as slow for this model. Without the longer limit, a slow computer (for example one with no graphics card) could need more than 600 s for one long paper, and that first timeout stops the model for the rest of the night.
+
+**How it works.**
+1. When the nightly run (or any command that summarizes) sets up the Ollama client, it resolves the model and context as usual, then looks in `VAULT/cache/bench.json` for a speed measurement of that same model. Names are compared with the tag spelled out, so a measurement saved as `llama3.2` counts for `llama3.2:latest`.
+2. No measurement for that model: the limit is 600 s, as before.
+3. With one, `call_timeout(num_ctx, bench)` works out the worst case for one call: reading a prompt that fills the whole context window at the measured reading speed, plus writing the most the model is allowed to write (`num_predict`, 4,096 tokens) at the measured writing speed. It adds half again as a safety margin (times 1.5). The limit is that number or 600 s, whichever is larger, so a fast machine never gets less time than before.
+
+Worked example: a CPU-only machine measured at 80 tokens/s reading and 18 tokens/s writing, with a 32,768-token context. Reading a full context takes 32,768 / 80 ≈ 410 s and writing the maximum takes 4,096 / 18 ≈ 228 s, so the limit is 1.5 × (410 + 228) ≈ 957 s. A fast GPU reading 3,000 tokens/s and writing 40 tokens/s gets 1.5 × (11 + 102) ≈ 170 s, less than 600, so it keeps 600 s.
+
+**Why it's built this way.**
+- **Measured, not guessed.** The bench already records reading and writing speed per model; using it means the limit grows only on a machine that really is slow, and by how slow it is. Rejected: a bigger fixed limit for everyone, which would make a hung Ollama on a fast machine waste far more time before the run gives up.
+- **The worst case, not the typical paper.** A full context and the full output limit bound what one call can legitimately need, so a slow but working call is never cut off. The 1.5 margin covers a busier machine than at bench time.
+- **Never below 600 s.** The bench is one short measurement; it should only ever add time, never take away the margin a fast machine had.
+- **A measurement of another model is ignored.** Speeds differ a lot between models, so the limit uses only the bench of the model actually in use.
+- **Not a setting.** It follows from the measurement; run `rpipe model bench` again after changing hardware or model. The rerun stage for cut papers sets its own per-call limits from the time left before the morning deadline (see `running.md`).
+
+**How to run / check it.** `rpipe model bench` measures the speeds; `rpipe model recommend` prints the longer limit when a typical paper takes more than 600 s to read. `uv run pytest tests/test_llm.py tests/test_registry.py -q`.
+
+**Where the code is.** `call_timeout` and `CALL_TIMEOUT` in `src/research_pipeline/llm.py`; `make_ollama` in `src/research_pipeline/registry.py` looks up the measurement.
 
 ## Choosing the model and context automatically
 
@@ -47,9 +69,9 @@ Instead of you naming a model and a context window, the pipeline can ask Ollama 
 5. **Safety margin.** The measured maximum is not used as is: the pipeline subtracts 1024 tokens (one step) and never goes below 8192. The margin is kept even for a model that fits at its full trained context: it guards against memory fluctuation, not just overflow. The nightly run can have a little less memory free than the probe saw (the CUDA driver and other programs fluctuate), and a context that only just fits would then spill onto the CPU. The margin is applied only to a context that was measured; a context you pinned yourself is used exactly.
 6. **Pick and cache.** The first acceptable model wins, with its largest fitting context less the margin. The result is saved in `<vault>/cache/llm_fit.json`, keyed by the Ollama address, the settings, every installed model's name and digest, and the machine: the Ollama version, the server settings that change memory use (`OLLAMA_FLASH_ATTENTION`, `OLLAMA_KV_CACHE_TYPE`, `OLLAMA_NUM_PARALLEL`) and the list of GPUs with their memory (`scan.machine_key`). Install, remove or re-pull a model, upgrade Ollama, change a server setting with `rpipe model tune` or swap a GPU and the key changes, so the next run probes again. A cache file written before the machine was part of the key misses once: the first nightly run after this change probes again (about 1-3 minutes) and saves the new key. Reading the machine takes one version request and a few quick commands and never fails a run: anything unreadable is left out of the key. A cached choice is also re-checked when it is loaded: its context must still be no more than the model's trained context, and (when the context was chosen automatically) at least 8192, otherwise it is ignored with a note (`the saved context of N tokens for X is outside what it supports ... probing again`) and probed again, so a damaged or hand-edited cache file cannot make a run send an impossible window. The 8192 floor is not applied to a context you pinned yourself (`rpipe model set-context` refuses values below 8192, so only hand-editing `config.yaml` can produce one): that value is your choice, so it is cached like any other instead of being rejected and re-probed every night. If nothing is acceptable you get an error listing every model tried and why; that outcome is cached under the same key too, so a small machine does not spend minutes re-probing every night: the same error is raised at once until you install a model, change a setting, or run `rpipe model fit` (which always probes again). The error says to pin **both** settings, `rpipe model set NAME` and `rpipe model set-context N`: a pinned model with an `auto` context must still fit on the GPU at 8192 tokens, so pinning only the model does not help a machine where nothing fits.
 
-Worked example with models installed on the owner's machine (the numbers are illustrative). Sorted by parameter count the candidates are `q3.8-27b-34k` (27.3B), `ds2-16b-20k` (15.7B), `q2.5c-14b-32k` and `q3-14b-22k` (14.77B each), then `q3f-14b-143k` (13.76B). `q3.8-27b-34k` is tried first and does not fit at 16384 tokens next to the other programs using the card, so it is skipped. `ds2-16b-20k` fits at 16384, so the search runs up to its trained limit of 20480, finds that 20480 fits, subtracts the 1024 margin and the pipeline uses that model with a 19456 context. The other three are never probed.
+Worked example with five installed models, given generic names here (the numbers are illustrative). Sorted by parameter count the candidates are `dense-27b` (27.3B), `coder-16b` (15.7B), `coder-14b` and `general-14b` (14.77B each), then `longctx-14b` (13.76B). `dense-27b` is tried first and does not fit at 16384 tokens next to the other programs using the card, so it is skipped. `coder-16b` fits at 16384, so the search runs up to its trained limit of 20480, finds that 20480 fits, subtracts the 1024 margin and the pipeline uses that model with a 19456 context. The other three are never probed.
 
-This example also shows the limit of the heuristic: parameter count is only a stand-in for quality, and here an older coder model (`ds2-16b-20k`) wins on size over the newer 14B models that may summarise papers better and could hold a larger context. If you disagree with the pick, pin the model you prefer with `rpipe model set NAME` (the context stays `auto`), or compare them with the gold-set check in `evaluation.md`.
+This example also shows the limit of the heuristic: parameter count is only a stand-in for quality, and here an older coder model (`coder-16b`) wins on size over the newer 14B models that may summarise papers better and could hold a larger context. If you disagree with the pick, pin the model you prefer with `rpipe model set NAME` (the context stays `auto`), or compare them with the gold-set check in `evaluation.md`.
 
 If you pinned only one setting, the other is still searched: a pinned model with `auto` context is probed alone (any fitting context of 8192 or more is accepted); an `auto` model with a pinned context picks the largest model that fits at exactly that context.
 
@@ -59,6 +81,7 @@ If you pinned only one setting, the other is still searched: a pinned model with
 - **The context is sent with each request, not baked into a model.** The `o` script can rebuild a model with a new default context and delete the old one. That edits and removes files that belong to the user, so this code never does it; it only sends `num_ctx` with each request (as `llm.py` already does).
 - **Best model = largest that fits.** Ollama has no quality ranking, so parameter count is a stand-in: bigger models are usually better, but not always (a newer 14B can beat an older 27B). The real comparison is the gold-set check in `evaluation.md`; if it disagrees with the automatic choice, pin your model.
 - **Rejected: a fixed list of preferred models.** It would go stale and would not know your hardware.
+- **The normal pass never spills; only reruns do.** The automatic choice still demands a context that fits 100% in GPU memory, so every normal paper runs at full speed. The few papers whose core text is cut at that context are read again after the normal pass at a bigger context, with part of the model in RAM, within free RAM and the morning deadline. That rerun stage is the only place `rpipe` deliberately lets the model spill; see "Reading cut papers whole: reruns" in `running.md`.
 
 ### What probing costs
 
@@ -97,7 +120,7 @@ One broken model never blocks the rest: if Ollama cannot describe one installed 
 
 ### Where the code is
 
-- `src/research_pipeline/ollama_fit.py`: `list_models`, `loaded_models`, `fits`, `max_context`, `choose`, `resolve`, `cached_fit`, and `ProbeSession` (the deadline and the once-only unload warning).
+- `src/research_pipeline/ollama_fit.py`: `list_models`, `loaded_models`, `unload` (used by the rerun stage), `fits`, `max_context`, `choose`, `resolve`, `cached_fit`, and `ProbeSession` (the deadline and the once-only unload warning).
 - `src/research_pipeline/cli.py`: `_release_gpu_memory` (called by `run` before the model is resolved), `_progress` (stderr probe lines outside a stage) and `_pull_progress` (turns download percentages into progress steps).
 - `tests/test_ollama_fit.py`: a small fake Ollama with a deterministic memory boundary (no real Ollama needed); `tests/test_e2e.py` ("auto model and context") runs `rpipe run` and `rpipe model fit` against it.
 
@@ -142,7 +165,8 @@ Working caching shows the second time far smaller than the first (only the task 
 
 ## Where the code is
 
-- `src/research_pipeline/llm.py`: `LLM` protocol (with `name` and `local`), `OllamaClient`, `LlmError`, `LlmTimeout`, `LlmLimitReached`, `PrivacyError`, `require_local`, `NO_MODEL`.
+- `src/research_pipeline/llm.py`: `LLM` protocol (with `name` and `local`), `OllamaClient`, `LlmError`, `LlmTimeout`, `LlmLimitReached`, `PrivacyError`, `require_local`, `NO_MODEL`, `CALL_TIMEOUT`, `call_timeout` (the per-call time limit).
+- `src/research_pipeline/registry.py`: `make_ollama` (builds the client with the measured time limit).
 - `src/research_pipeline/models.py`: `Config.llm_model`, `llm_url`, `llm_num_ctx`.
 - `src/research_pipeline/profile_edit.py`: `set_llm_model`, `set_llm_num_ctx`.
 - `src/research_pipeline/cli.py`: the `model` commands, `build_llm`.

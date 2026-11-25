@@ -4,12 +4,16 @@ import os
 import re
 import subprocess
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 
 SERVICE_NAME = "research-pipeline.service"
 TIMER_NAME = "research-pipeline.timer"
 
 Runner = Callable[[list[str]], int]
+
+# A deadline further away than this is not "tonight's" (for example 07:00 seen at 10:00).
+MAX_NIGHT_HOURS = 12
 
 
 class ScheduleError(Exception):
@@ -66,7 +70,8 @@ def render_service(vault: Path, rpipe_cmd: str) -> str:
     )
 
 
-def _parse_time(time: str) -> tuple[int, int]:
+def parse_time(time: str) -> tuple[int, int]:
+    """(hour, minute) from a strict 24-hour HH:MM; ValueError with an example otherwise."""
     m = re.fullmatch(r"(\d{2}):(\d{2})", time)
     if not m or int(m[1]) > 23 or int(m[2]) > 59:
         raise ValueError(f"time must be HH:MM in 24-hour form (for example 03:00), got {time!r}")
@@ -74,7 +79,7 @@ def _parse_time(time: str) -> tuple[int, int]:
 
 
 def render_timer(time: str = "03:00") -> str:
-    hour, minute = _parse_time(time)
+    hour, minute = parse_time(time)
     return (
         "[Unit]\n"
         "Description=Run the research pipeline every night\n"
@@ -140,3 +145,19 @@ def status(runner: Runner) -> bool:
     if runner(["systemctl", "--user", "list-timers", TIMER_NAME, "--all"]) != 0:
         raise ScheduleError("systemctl could not list the timer.")
     return True
+
+
+def deadline_at(now: datetime, value: str) -> datetime | None:
+    """The next `value` (HH:MM, local) strictly after `now`; None if "off" or over 12 h away.
+
+    `now` is a naive local time. Only reruns of cut papers obey this deadline.
+    """
+    if value == "off":
+        return None
+    hour, minute = parse_time(value)
+    at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if at <= now:
+        at += timedelta(days=1)
+    if at - now > timedelta(hours=MAX_NIGHT_HOURS):
+        return None
+    return at

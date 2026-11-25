@@ -104,7 +104,7 @@ def _round_ctx(n: float) -> int:
     return int(n) // 1024 * 1024
 
 
-def place(entry: CatalogEntry, info: MachineInfo) -> tuple[Placement, int] | None:
+def place(entry: CatalogEntry, info: MachineInfo, allow_cpu: bool | None = None) -> tuple[Placement, int] | None:
     """Where `entry` would run on this machine and with how much context, or None if nowhere.
 
     All sizes in GiB.
@@ -116,9 +116,11 @@ def place(entry: CatalogEntry, info: MachineInfo) -> tuple[Placement, int] | Non
        model's trained context and CONTEXT_CEILING. At least MIN_USEFUL_CTX -> ("gpu", ctx).
     3. Spill (mixture-of-experts models only, on a machine with a GPU band): if the weights plus
        a CPU_CTX context fit in vram + free RAM - RAM_SAFETY_GB -> ("spill", CPU_CTX).
-    4. CPU (machines in the "cpu" or "small" band, i.e. under 8 GB of GPU memory): if the active
-       parameters (all parameters for a dense model) are at most CPU_MAX_ACTIVE_B and the weights
-       plus a CPU_CTX context fit in total RAM - RAM_SAFETY_GB -> ("cpu", CPU_CTX).
+    4. CPU (when `allow_cpu` is None: only machines in the "cpu" or "small" band, i.e. under 8 GB
+       of GPU memory; True allows it on any machine, False on none): if the active parameters
+       (all parameters for a dense model) are at most CPU_MAX_ACTIVE_B and the weights plus a
+       CPU_CTX context fit in total RAM - RAM_SAFETY_GB -> ("cpu", CPU_CTX). `rank` passes True
+       when no catalog model fits on the GPU, so a big card with little free memory still gets options.
     5. Otherwise None.
     """
     vram = usable_vram(info)
@@ -134,7 +136,8 @@ def place(entry: CatalogEntry, info: MachineInfo) -> tuple[Placement, int] | Non
     if entry.arch == "moe" and band != "cpu":
         if need <= vram + (info.ram_free_gb or 0) - RAM_SAFETY_GB:
             return "spill", CPU_CTX
-    if band in ("cpu", "small") and info.ram_gb is not None:
+    cpu_ok = band in ("cpu", "small") if allow_cpu is None else allow_cpu
+    if cpu_ok and info.ram_gb is not None:
         if (entry.active_b or entry.params_b) <= CPU_MAX_ACTIVE_B and need <= info.ram_gb - RAM_SAFETY_GB:
             return "cpu", CPU_CTX
     return None
@@ -162,8 +165,8 @@ def _installed(info: MachineInfo) -> set[str]:
 
 def _placement_reason(entry: CatalogEntry, placement: Placement, ctx: int, info: MachineInfo) -> str:
     if placement == "gpu":
-        return (f"fits fully in {total_vram(info):.1f} GB of GPU memory with about {ctx / 1000:.0f}K tokens "
-                "of context (estimate; rpipe model fit measures it)")
+        return (f"fits fully in the {usable_vram(info):.1f} GB of GPU memory free for models with about "
+                f"{ctx / 1000:.0f}K tokens of context (estimate; rpipe model fit measures it)")
     if placement == "spill":
         active = f"{entry.active_b:g}B" if entry.active_b else "a few billion"
         return (f"mixture of experts: {active} of {entry.params_b:g}B parameters work per token, so part of "
@@ -183,13 +186,19 @@ def rank(info: MachineInfo, catalog: Catalog, benches: dict[str, Bench], top: in
 
     Order: on the GPU, then partly in RAM (spill), then on the CPU; within each, models listed
     for this machine's band first, then bigger models by dense-equivalent size (quality first),
-    then the bigger download (a higher-quality quantization of the same model), then installed ones."""
+    then the bigger download (a higher-quality quantization of the same model), then installed ones.
+
+    CPU choices normally appear only on machines under 8 GB of GPU memory. When no catalog model
+    fits on the GPU (say an 8 GB card with most of its memory taken), every model is placed again
+    with CPU allowed, so the machine still gets options."""
     band = band_for(info)
     installed = _installed(info)
     measured = {_norm(name): b for name, b in benches.items()}
+    places = [(entry, place(entry, info)) for entry in catalog.entries]
+    if not any(where is not None and where[0] == "gpu" for _, where in places):
+        places = [(entry, place(entry, info, allow_cpu=True)) for entry in catalog.entries]
     out: list[Candidate] = []
-    for entry in catalog.entries:
-        where = place(entry, info)
+    for entry, where in places:
         if where is None:
             continue
         placement, ctx = where

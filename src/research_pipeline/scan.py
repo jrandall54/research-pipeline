@@ -52,7 +52,10 @@ class OllamaServer:
     how: Literal["systemd", "systemd-user", "manual", "docker", "app", "unknown"]
     env: dict[str, str]
     drop_ins: list[str]
-    host_matches: bool | None  # service OLLAMA_HOST port == port of config.llm_url; None if unknown
+    # True when rpipe's llm_url reaches the service: same port, or a pass-through proxy (`proxied`).
+    # False when they look like different servers; None when unknown (not a systemd service).
+    host_matches: bool | None
+    proxied: bool = False  # ports differ, but both addresses list the same models: one server
 
 
 def system_cmd(argv: list[str], timeout: float) -> tuple[int, str]:
@@ -68,6 +71,9 @@ def system_cmd(argv: list[str], timeout: float) -> tuple[int, str]:
 
 # ---- GPUs ----
 
+_NOT_AVAILABLE = {"[N/A]", "N/A"}  # what nvidia-smi prints for a figure it cannot read
+
+
 def _nvidia_all(run: CmdRunner) -> list[Gpu]:
     code, out = run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"],
                     PROBE_TIMEOUT)
@@ -76,18 +82,21 @@ def _nvidia_all(run: CmdRunner) -> list[Gpu]:
     gpus: list[Gpu] = []
     for line in out.splitlines():
         parts = [p.strip() for p in line.split(",")]
-        numbers: list[float] = []
+        numbers: list[float | None] = []
         while len(parts) > 1 and len(numbers) < 2:  # up to two numbers at the end: total, free (MiB)
-            try:
-                numbers.insert(0, float(parts[-1]))
-            except ValueError:
-                break
+            if parts[-1] in _NOT_AVAILABLE:  # some drivers cannot report a figure: unknown, keep going
+                numbers.insert(0, None)
+            else:
+                try:
+                    numbers.insert(0, float(parts[-1]))
+                except ValueError:
+                    break
             parts.pop()
         name = ", ".join(parts)  # a card name may itself contain a comma
-        if not numbers or not name:
-            continue
+        if not numbers or numbers[0] is None or not name:
+            continue  # without the total memory the card is of no use to the recommender
         total = numbers[0] / 1024  # MiB -> GiB
-        free = numbers[1] / 1024 if len(numbers) == 2 else None
+        free = numbers[1] / 1024 if len(numbers) == 2 and numbers[1] is not None else None
         gpus.append(Gpu(name, total, "nvidia", free))
     return gpus
 
@@ -207,6 +216,16 @@ def ollama_version(url: str) -> str | None:
         return None
 
 
+def ollama_tag_digests(url: str) -> list[tuple[str, str]] | None:
+    """The installed models as sorted (name, digest) pairs from GET /api/tags; None on any failure."""
+    try:
+        resp = httpx.get(f"{url}/api/tags", timeout=PROBE_TIMEOUT)
+        resp.raise_for_status()
+        return sorted((str(m["name"]), str(m["digest"])) for m in resp.json()["models"])
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
 def flash_on(value: str | None) -> bool:
     """Ollama reads OLLAMA_FLASH_ATTENTION as on for "1" or "true" (any case)."""
     return value is not None and value.strip().lower() in ("1", "true")
@@ -225,7 +244,7 @@ def machine_key(url: str, run: CmdRunner = system_cmd) -> dict:
     env: dict[str, str] = {}
     gpus: list[str] = []
     try:
-        server = detect_ollama_server(url, run, version=ollama_version)
+        server = detect_ollama_server(url, run, version=ollama_version, tags=ollama_tag_digests)
         version = server.version
         env = {k: server.env[k] for k in MACHINE_KEY_SETTINGS if k in server.env}
     except Exception:  # a key must never stop a run
@@ -272,10 +291,36 @@ def _port_of_host(value: str | None) -> int:
         return DEFAULT_OLLAMA_PORT
 
 
+def _own_url(env: dict[str, str]) -> str:
+    """The service's own address from its OLLAMA_HOST (default host 127.0.0.1; 0.0.0.0 or :: mean
+    "every address", so this computer reaches it on 127.0.0.1)."""
+    host_value = env.get("OLLAMA_HOST", "")
+    parsed = urlparse(host_value if "//" in host_value else f"//{host_value}")
+    host = parsed.hostname or "127.0.0.1"
+    if host in ("0.0.0.0", "::"):
+        host = "127.0.0.1"
+    return f"http://{host}:{_port_of_host(host_value)}"
+
+
+def service_url(server: OllamaServer, rpipe_url: str) -> str:
+    """Where to wait for the service just restarted: rpipe's own URL when it reaches the service
+    (same port, or through a pass-through proxy that forwards to it), else the service's own address."""
+    if server.host_matches is not False:
+        return rpipe_url
+    return _own_url(server.env)
+
+
 def detect_ollama_server(
-    url: str, run: CmdRunner, version: Callable[[str], str | None] = ollama_version
+    url: str,
+    run: CmdRunner,
+    version: Callable[[str], str | None] = ollama_version,
+    tags: Callable[[str], list[tuple[str, str]] | None] = ollama_tag_digests,
 ) -> OllamaServer:
-    """How the Ollama server runs and which OLLAMA_* settings it was started with."""
+    """How the Ollama server runs and which OLLAMA_* settings it was started with.
+
+    When the service's port differs from rpipe's URL, both addresses are asked for their installed
+    models: the same non-empty list (names and digests) means rpipe goes through a pass-through
+    proxy to this same service, so it counts as one server (`proxied`)."""
     system = platform.system()
     ver = version(url)
     how: Literal["systemd", "systemd-user", "manual", "docker", "app", "unknown"]
@@ -292,6 +337,7 @@ def detect_ollama_server(
     env: dict[str, str] = {}
     drop_ins: list[str] = []
     host_matches: bool | None = None
+    proxied = False
     if how in ("systemd", "systemd-user"):
         user = how == "systemd-user"
         env = parse_systemd_env(_property(run, user, "Environment"))
@@ -301,7 +347,12 @@ def detect_ollama_server(
         except ValueError:
             config_port = DEFAULT_OLLAMA_PORT
         host_matches = _port_of_host(env.get("OLLAMA_HOST")) == config_port
-    return OllamaServer(ver, how, env, drop_ins, host_matches)
+        if not host_matches:
+            ours = tags(url)
+            theirs = tags(_own_url(env))
+            if ours and ours == theirs:
+                host_matches = proxied = True
+    return OllamaServer(ver, how, env, drop_ins, host_matches, proxied)
 
 
 def ollama_models_dir(server: OllamaServer) -> Path:

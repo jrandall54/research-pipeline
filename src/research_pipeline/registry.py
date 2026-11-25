@@ -6,9 +6,10 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
 
+from research_pipeline import bench as bench_mod
 from research_pipeline import ollama_fit
 from research_pipeline.backends.claude_code import ClaudeCodeClient, find_claude
-from research_pipeline.llm import LLM, LlmError, OllamaClient
+from research_pipeline.llm import LLM, LlmError, OllamaClient, _with_tag, call_timeout
 from research_pipeline.models import Config
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source
@@ -40,7 +41,11 @@ SETUP_HINT = "run `rpipe model setup`"
 def make_ollama(config: Config, vault: Path, log: Callable[[str], None]) -> LLM:
     """Ollama, with `auto` settings resolved to a concrete model and context (cached in the vault)."""
     fit = ollama_fit.resolve(config.llm_url, vault, config.llm_model, config.llm_num_ctx, log=log)
-    return OllamaClient(config.llm_url, fit.model, fit.num_ctx)
+    # A speed measurement of this model (any `:latest` spelling) lets the per-call limit grow on a slow machine.
+    benches = {_with_tag(name): b for name, b in bench_mod.load_benches(vault).items()}
+    bench = benches.get(_with_tag(fit.model))
+    return OllamaClient(config.llm_url, fit.model, fit.num_ctx,
+                        timeout=call_timeout(fit.num_ctx, bench, model=fit.model))
 
 
 def make_claude_code(config: Config, vault: Path, log: Callable[[str], None]) -> LLM:

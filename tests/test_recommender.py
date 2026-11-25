@@ -127,7 +127,7 @@ def test_small_gpu_with_shipped_catalog_offers_a_cpu_model():
     assert any(c.entry.pull == "qwen3:8b" for c in ranked)
     rec = recommend(info, shipped)
     assert rec.backend == "ollama" and rec.pull is not None
-    assert rec.reasons == ["the GPU's 4.0 GB is too little for a model; a small model runs on the CPU overnight (slow)"]
+    assert rec.reasons == ["no catalog model fits in the GPU memory free now; a small model runs on the CPU overnight (slow)"]
 
 
 def test_none_reason_does_not_blame_ram_it_did_not_check():
@@ -166,7 +166,7 @@ def test_rank_orders_gpu_before_spill_and_bigger_first():
     lean = rank(machine(vram=16.0, ram=64.0, free=40.0, env=FA_Q8), CATALOG, {})
     assert [(c.entry.id, c.placement) for c in lean][2:] == [("moe35", "gpu"), ("d8", "gpu")]
     top = ranked[0]
-    assert any(r.startswith("fits fully in 16.0 GB of GPU memory with about") and "rpipe model fit" in r
+    assert any(r.startswith("fits fully in the 13.5 GB of GPU memory free for models with about") and "rpipe model fit" in r
                for r in top.reasons)
     assert "Strong writer." in top.reasons
 
@@ -379,16 +379,43 @@ def test_recommend_says_when_it_cannot_read_settings(vault, monkeypatch):
     assert "now: not set" not in result.output
 
 
-def test_recommend_warns_when_a_paper_would_outlast_the_call_limit(vault, monkeypatch):
+def test_recommend_explains_the_longer_call_limit_on_a_slow_machine(vault, monkeypatch):
     slow = Bench(model="test:14b", num_ctx=32768, read_tps=20.0, write_tps=3.0, seconds_per_paper=1933.0,
                  paper_tokens=22000, measured_at=datetime(2026, 11, 24, 12))
     bench_mod.save_bench(vault, slow)
     result, _, _ = recommend_run(vault, monkeypatch, machine(ram=16.0, models=["test:14b"]), "1\nn\n")
     assert result.exit_code == 0, result.output
-    assert "1,100 s" in result.output and "600-second limit" in result.output
+    out = " ".join(result.output.split())
+    assert "1,100 s" in out and "longer than the usual 600-second limit" in out
+    assert "Warning" not in out and "time out" not in out
 
 
-def test_recommend_no_limit_warning_for_fast_model(vault, monkeypatch):
+def test_recommend_no_limit_note_for_fast_model(vault, monkeypatch):
     bench_mod.save_bench(vault, make_bench("test:14b"))  # 1000 tokens/s: 22 s to read
     result, _, _ = recommend_run(vault, monkeypatch, machine(ram=16.0, models=["test:14b"]), "1\nn\n")
     assert "600-second limit" not in result.output
+
+
+def test_8gb_card_with_little_free_gets_cpu_models():
+    """An 8 GiB card with only 5 GiB free fits no shipped model on the GPU: fall back to RAM and CPU."""
+    info = machine(gpus=[Gpu("RTX 4060", 8.0, "nvidia", 5.0)], ram=32.0, free=24.0)
+    ranked = rank(info, catalog_mod.shipped_catalog(), {}, top=None)
+    assert ranked
+    assert {c.placement for c in ranked} <= {"cpu", "spill"}
+    assert any(c.placement == "cpu" for c in ranked)
+
+
+def test_mid_band_with_gpu_fits_gets_no_cpu_models():
+    info = machine(gpus=[Gpu("RTX 5070 Ti", 16.0, "nvidia", 15.0)], ram=32.0, free=24.0)
+    ranked = rank(info, catalog_mod.shipped_catalog(), {}, top=None)
+    assert any(c.placement == "gpu" for c in ranked)
+    assert all(c.placement != "cpu" for c in ranked)
+
+
+def test_placement_reason_names_usable_memory():
+    info = machine(gpus=[Gpu("Test GPU", 16.0, "nvidia", 12.0)])  # usable = 12.0 - 2.0 = 10.0 GiB
+    top = rank(info, CATALOG, {})[0]
+    assert top.placement == "gpu"
+    reason = top.reasons[0]
+    assert reason.startswith("fits fully in the 10.0 GB of GPU memory free for models with about")
+    assert "16.0" not in reason

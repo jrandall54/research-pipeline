@@ -28,7 +28,7 @@ Finish the pipeline before the app is built on it. The nightly run must be trust
 
 ## Constraints
 - Offline test suite (fake embedder, fake model); no network or GPU in tests.
-- Owner hardware: RTX 5070 Ti, 16 GB. Installed models include `q3.8-27b-34k` (27B, ~34K context; what `auto` picks today) and `q3f-14b-143k` (14B, 143K context).
+- Owner hardware: RTX 5070 Ti, 16 GB. Installed models include a 27B dense model (IQ3_S, ~34K context; what `auto` picks today) and a 14B long-context model (143K context).
 - Measured 2026-11-22 on the owner's vault: stored full texts are 90K–198K characters (median ~106K). The prompt budget at 34K context is about 90K characters, so most papers are truncated today.
 - `typer` already brings `rich`; no new dependency is needed for progress display.
 - Phase 7 will route the app through `library_api`, which returns data objects: progress must be data, not pre-formatted text.
@@ -51,7 +51,7 @@ Finish the pipeline before the app is built on it. The nightly run must be trust
 ## Part B — Long papers and the Ollama check
 
 ### Approaches considered
-1. **Bigger context window (owner's first choice).** Use a long-context model (`q3f-14b-143k`) so the whole paper fits. Simple; costs model size (14B vs 27B) and speed.
+1. **Bigger context window (owner's first choice).** Use a long-context model (the 14B one, 143K context) so the whole paper fits. Simple; costs model size (14B vs 27B) and speed.
 2. **Chunked summaries (map-reduce).** Summarize sections in parts, then merge. Keeps the bigger model but costs more calls, a merge step that can drop or duplicate claims, and weaker cross-section critique. Owner's second choice.
 3. **Smarter trimming.** Keep the current model; cut by section priority (methods and results kept, related work and appendices dropped first) instead of trimming every section by the same fraction. Cheapest; still loses text.
 

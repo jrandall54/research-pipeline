@@ -152,6 +152,11 @@ def _unload(url: str, model: str, session: ProbeSession) -> None:
         session.warn_unload(model, str(e) or type(e).__name__)
 
 
+def unload(url: str, model: str, log: Callable[[str], None] = lambda s: None) -> None:
+    """Ask Ollama to drop `model` from memory now; a failure is reported to `log`, never raised."""
+    _unload(url, model, ProbeSession(log=log))
+
+
 def loaded_models(url: str) -> list[str]:
     """Names of the models Ollama currently holds in memory (`/api/ps`); [] if unknown."""
     try:

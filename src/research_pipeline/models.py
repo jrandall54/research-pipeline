@@ -4,7 +4,7 @@ import re
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -55,6 +55,21 @@ class Profile(BaseModel):
 NAME_PATTERN = r"^[a-z0-9][a-z0-9_-]*$"
 
 
+def normalise_deadline(v: Any) -> Any:
+    """Canonical spelling of a night deadline, before the HH:MM/off check.
+
+    "OFF" -> "off", "7:00" -> "07:00". An int is minutes after midnight: PyYAML reads an
+    unquoted 23:00 as 1380 (base 60), so 1380 -> "23:00". Anything else is returned unchanged
+    for the pattern to reject.
+    """
+    if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 24 * 60:
+        return f"{v // 60:02d}:{v % 60:02d}"
+    if isinstance(v, str):
+        text = v.strip().lower()
+        return "0" + text if re.fullmatch(r"\d:\d\d", text) else text
+    return v
+
+
 class Config(BaseModel):
     """Pipeline settings (config.yaml in the vault)."""
 
@@ -79,6 +94,14 @@ class Config(BaseModel):
     llm_cli_path: str | None = None
     # Enabled paper sources, in collection order (see `rpipe sources list`).
     sources: list[str] = Field(default_factory=lambda: ["arxiv", "hf_daily"])
+    # Morning deadline (24-hour HH:MM, local time) by which reruns of cut papers must finish,
+    # or "off" for no reruns. Normal papers always run. See docs/guide/scheduling.md.
+    night_deadline: str = Field(default="07:00", pattern=r"^(off|([01]\d|2[0-3]):[0-5]\d)$")
+
+    @field_validator("night_deadline", mode="before")
+    @classmethod
+    def _normalise_deadline(cls, v: Any) -> Any:
+        return normalise_deadline(v)
 
     @field_validator("sources")
     @classmethod

@@ -26,6 +26,11 @@ from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summ
 
 T = TypeVar("T", Summary, Critique)
 
+# The error line when the model timed out and the stage stopped (`rpipe run` then skips reruns).
+TIMEOUT_STOPPED = (
+    "summarize: stopped calling the model after the first timeout; remaining papers show abstracts only"
+)
+
 
 def _norm(title: str) -> str:
     return title.strip().casefold()
@@ -66,6 +71,18 @@ def _generate_checked(  # noqa: UP047 (module-level constrained TypeVar T is sha
     return result, unverified
 
 
+def _gpu_share(llm: LLM) -> float | None:
+    """Share of the model on the GPU right after a summary, if the backend can say; never raises."""
+    ask = getattr(llm, "gpu_share", None)
+    if ask is None:
+        return None
+    try:
+        share = ask()
+    except Exception:  # noqa: BLE001 - a record of where the model sat must never fail a summary
+        return None
+    return share if isinstance(share, (int, float)) and not isinstance(share, bool) else None
+
+
 def summarize_paper(
     llm: LLM, title: str, abstract: str, sections: list[Section] | None, num_ctx: int,
     on_phase: Callable[[str], None] | None = None,
@@ -102,6 +119,7 @@ def summarize_paper(
         critique=critique,
         basis=basis,
         body_cut=fit.body_cut,
+        needed_ctx=fit.needed_ctx,
         dropped=fit.dropped,
         unverified=bad_s + bad_c,
     )
@@ -217,7 +235,7 @@ def run_summarize(
                 save_summary(
                     conn, pid, result, llm.model_name,
                     prompt_version=PROMPT_VERSION, paper_version=paper["version"], num_ctx=llm.num_ctx,
-                    backend=getattr(llm, "name", None),
+                    backend=getattr(llm, "name", None), gpu_share=_gpu_share(llm),
                 )
                 clear_error(conn, pid)
                 if listed:
@@ -245,9 +263,6 @@ def run_summarize(
                 report("failed", " ".join(message.split())[:120])
                 if isinstance(exc, LlmTimeout):
                     # A hung model would make every remaining paper wait out the full timeout.
-                    errors.append(
-                        "summarize: stopped calling the model after the first timeout;"
-                        " remaining papers show abstracts only"
-                    )
+                    errors.append(TIMEOUT_STOPPED)
                     break
     return counts, errors

@@ -313,3 +313,7 @@
 **Task splitting** — reading a long paper as two jobs instead of one: notes on the front matter (abstract, introduction, conclusion: what is claimed) and notes on the body (method and results: how well it is backed), then one step that combines the notes. Stored as `read_mode: split`. See `summaries.md`.
 
 **Map-reduce** — a general way to handle input too big for one pass: cut it into pieces, do the same job on each piece separately ("map"), then merge the pieces' results into one ("reduce"). Here the pieces are size-based chunks of a paper, the job is taking notes, and the merge is condensing the notes and writing the summary from them. The last resort for a paper that does not fit any other way. Stored as `read_mode: map_reduce`. See `summaries.md`.
+
+**Front matter** — the parts of a paper that state what it claims: abstract, introduction, conclusion (also discussion, limitations, future work, summary). When a paper is read in parts, the front matter is one group and everything else (method, experiments, results) is the body. Subsections go with their parent. See "Reading a paper in parts" in `summaries.md`.
+
+**Condensing notes** — when the notes from all parts of a paper are too long to send in one call, they are sent back to the model in batches to be merged into fewer notes, keeping every cited section. At most 3 rounds; if they still do not fit, every note is shortened by the same share and the summary is marked `body_cut`. See `summaries.md`.

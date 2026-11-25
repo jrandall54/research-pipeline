@@ -1,15 +1,17 @@
-"""Summary and critique schemas, the citation check, and per-paper summarisation.
+"""Per-paper summarisation (summary and critique) and the summarize stage.
 
 The model writes claims that cite paper sections; code (not the model) checks every cited
-title against the real section titles. See docs/guide/summaries.md.
+title against the real section titles (citations.py). See docs/guide/summaries.md.
 """
 
 import sqlite3
 import time
 from collections.abc import Callable
 from datetime import date
-from typing import Literal, TypeVar
+from typing import Literal
 
+# `claims` and `unknown_citations` are re-exported: callers and tests import them from here.
+from research_pipeline.citations import claims, generate_checked, unknown_citations  # noqa: F401
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.llm import LLM, LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section, Status
@@ -18,57 +20,15 @@ from research_pipeline.prompts import (
     PROMPT_VERSION,
     build_critique_prompt,
     build_summary_prompt,
-    citation_feedback,
 )
 from research_pipeline.pruning import fit_to_budget
 from research_pipeline.sources.base import SourceError
-from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
-
-T = TypeVar("T", Summary, Critique)
+from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary  # noqa: F401 (re-exported)
 
 # The error line when the model timed out and the stage stopped (`rpipe run` then skips reruns).
 TIMEOUT_STOPPED = (
     "summarize: stopped calling the model after the first timeout; remaining papers show abstracts only"
 )
-
-
-def _norm(title: str) -> str:
-    return title.strip().casefold()
-
-
-def claims(obj: Summary | Critique) -> list[Claim]:
-    if isinstance(obj, Summary):
-        return [obj.problem, obj.approach, obj.results, obj.limitations]
-    return [*obj.strengths, *obj.weaknesses]
-
-
-def unknown_citations(obj: Summary | Critique, titles: list[str]) -> list[str]:
-    """Cited titles that match no section (ignoring case and surrounding whitespace)."""
-    known = {_norm(t) for t in titles}
-    bad: list[str] = []
-    for claim in claims(obj):
-        for cited in claim.sections:
-            if _norm(cited) not in known and cited not in bad:
-                bad.append(cited)
-    return bad
-
-
-def _generate_checked(  # noqa: UP047 (module-level constrained TypeVar T is shared)
-    llm: LLM, system: str, user: str, schema: type[T], titles: list[str],
-    on_retry: Callable[[], None] | None = None,
-) -> tuple[T, list[str]]:
-    """Generate, check citations, retry once with feedback; return result and unverified texts."""
-    result = llm.generate(system, user, schema)
-    bad = unknown_citations(result, titles)
-    if bad:
-        if on_retry is not None:
-            on_retry()
-        result = llm.generate(system, user + citation_feedback(bad, titles), schema)
-    known = {_norm(t) for t in titles}
-    unverified = [
-        c.text for c in claims(result) if any(_norm(s) not in known for s in c.sections)
-    ]
-    return result, unverified
 
 
 def _gpu_share(llm: LLM) -> float | None:
@@ -106,12 +66,12 @@ def summarize_paper(
 
     if on_phase is not None:
         on_phase("summary")
-    summary, bad_s = _generate_checked(
+    summary, bad_s = generate_checked(
         llm, *build_summary_prompt(title, fitted, basis), Summary, titles, phase("retry")
     )
     if on_phase is not None:
         on_phase("critique")
-    critique, bad_c = _generate_checked(
+    critique, bad_c = generate_checked(
         llm, *build_critique_prompt(title, fitted, basis), Critique, titles, phase("retry")
     )
     return PaperSummary(

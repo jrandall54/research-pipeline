@@ -140,11 +140,11 @@ _FOCUS = {
     "front": "the core claim, what is new compared with earlier work, and the limitations the paper states.",
     "body": (
         "the method, its assumptions, the baselines compared against, the results with their "
-        "numbers, and any ablations that are missing."
+        "numbers, and which ablations it reports."
     ),
     "general": (
         "the core claim, what is new, the limitations the paper states, the method, its "
-        "assumptions, the baselines, the results with their numbers, and any missing ablations."
+        "assumptions, the baselines, the results with their numbers, and which ablations it reports."
     ),
     "condense": "merge these notes into fewer claims, keep every cited section.",
 }
@@ -165,7 +165,9 @@ The task comes after the paper text.
 
 {_NOTES_FIELDS}
 
-{_SHARED_RULES}"""
+{_SHARED_RULES}
+- Note only what this part says. Never write a note about what this part lacks (a missing
+  result, baseline or ablation): the other parts are read separately and may contain it."""
 
 _NOTES_RULES = """\
 Rules:
@@ -234,7 +236,12 @@ def notes_block(notes: list[Claim]) -> str:
 
 
 def build_notes_prompt(title: str, sections: list[Section], focus: Focus, part: int, of: int) -> tuple[str, str]:
-    """(system, user) asking for `Notes` on one part of the paper; the task, with its focus, last."""
+    """(system, user) asking for `Notes` on one part of the paper; the task, with its focus, last.
+
+    ``focus`` is ``front``, ``body`` or ``general``; ``condense`` is only for `build_condense_prompt`.
+    """
+    if focus == "condense":
+        raise ValueError("the condense focus is for build_condense_prompt, not notes on paper text")
     head = f"You are given part {part} of {of} of the paper's full text, split into sections."
     task = (
         f"Task: take notes on this part of the paper (part {part} of {of}).\n"

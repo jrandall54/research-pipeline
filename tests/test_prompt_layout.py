@@ -1,7 +1,9 @@
+import pytest
 from conftest import SECTIONS, FakeLLM, critique, summary
 
 from research_pipeline.models import Section
 from research_pipeline.prompts import (
+    NOTES_SYSTEM,
     PROMPT_VERSION,
     REMINDER,
     REMINDER_NOTES,
@@ -78,6 +80,15 @@ def test_notes_prompt_focus_changes_only_the_task():
     _, body = build_notes_prompt("T", sections, "body", 2, 2)
     assert front[: front.index("Task:")].replace("1 of 2", "2 of 2") == body[: body.index("Task:")]
     assert "core claim" in front and "baselines" in body
+
+
+def test_notes_prompt_refuses_condense_focus():
+    with pytest.raises(ValueError):
+        build_notes_prompt("T", [Section(title="Intro", text="x")], "condense", 1, 1)
+
+
+def test_notes_system_says_note_only_what_the_part_says():
+    assert "Never write a note about what this part lacks" in NOTES_SYSTEM
 
 
 def test_condense_prompt_keeps_cited_sections():

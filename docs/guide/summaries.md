@@ -40,7 +40,7 @@ Step by step:
 
    Everything above the task is byte-for-byte the same in the two calls, so a model server that keeps its reading of a long prompt (Ollama's prompt-prefix cache) reads the paper once and only the short task text again for the second call. The task sits last because models pay most attention to the end of a long prompt, and the reminder repeats the rules that matter most.
 4. **Ask the model** for JSON in the `Summary` schema ([llm.md](llm.md) handles invalid JSON with its own single retry).
-5. **Check citations** (`unknown_citations`). Every title a claim cites is compared with the real section titles, ignoring case and surrounding spaces (`"3 results "` matches `3 Results`).
+5. **Check citations** (`unknown_citations` in `citations.py`). Every title a claim cites is compared with the real section titles, ignoring case and surrounding spaces (`"3 results "` matches `3 Results`).
 6. **Retry once if needed.** If any cited title is unknown, the same prompt is sent again with a note listing the bad titles and the valid ones. The second answer is kept whatever it says.
 7. **Flag what is still wrong.** Any claim that still cites an unknown title has its text added to `unverified`. Nothing is dropped.
 8. **Repeat steps 3 to 7 for the critique** (`build_critique_prompt`, `Critique` schema).
@@ -123,7 +123,7 @@ A paper that fit (nothing cut, or only appendices dropped) stores `needed_ctx: n
 
 ### Reading a paper in parts
 
-**What it does.** Some papers are too long for the model's context window even after non-paper text and appendices are dropped. Instead of cutting the body, the paper can be read in parts: the model takes **notes** on each part, the notes are merged if there are too many, and the usual summary and critique are then written from the notes. This is *task splitting* (front matter and body read separately) or, as a last resort, *map-reduce* (the paper cut into size-based chunks). Both are explained in the glossary. This section describes the prompts (in `prompts.py`); how the pipeline chooses a mode and runs the calls is added by later B.6 tasks.
+**What it does.** Some papers are too long for the model's context window even after non-paper text and appendices are dropped. Instead of cutting the body, the paper can be read in parts: the model takes **notes** on each part, the notes are merged if there are too many, and the usual summary and critique are then written from the notes. This is *task splitting* (front matter and body read separately) or, as a last resort, *map-reduce* (the paper cut into size-based chunks). Both are explained in the glossary. This section describes the prompts (in `prompts.py`) and how the calls run (`read_in_parts` in `parts.py`); how the pipeline chooses whole or split mode, and when it falls back to map-reduce, is added by later B.6 tasks.
 
 **How it works: three kinds of prompt.**
 
@@ -132,9 +132,11 @@ A paper that fit (nothing cut, or only appendices dropped) stores `needed_ctx: n
    | focus | used for | look for |
    | --- | --- | --- |
    | `front` | the front matter (abstract, introduction, conclusion) | the core claim, what is new, the limitations the paper states |
-   | `body` | the rest of the paper | the method, its assumptions, the baselines, the results with their numbers, missing ablations |
+   | `body` | the rest of the paper | the method, its assumptions, the baselines, the results with their numbers, which ablations it reports |
    | `general` | a size-based chunk (map-reduce), which may hold either | both lists |
-   | `condense` | merging notes (next step) | merge into fewer claims, keep every cited section |
+   | `condense` | merging notes (next step); `build_notes_prompt` refuses it with a `ValueError` | merge into fewer claims, keep every cited section |
+
+   `NOTES_SYSTEM` adds one rule to the shared ones: *note only what this part says; never write a note about what this part lacks (a missing result, baseline or ablation), because the other parts are read separately and may contain it.* A body chunk cannot know that the ablation it does not see sits in the next chunk, so "what is missing" is judged later, by the critique written from all the notes. For the same reason the body focus asks which ablations the part reports, not which are missing.
 
 2. **Condensing notes** (`build_condense_prompt(title, notes, part, of)`, system prompt `CONDENSE_SYSTEM`). When the notes from all parts are too long to combine at once, a batch of them is sent back to the model to be merged into fewer claims. Each merged claim must keep every section title the original notes cited.
 
@@ -153,9 +155,43 @@ A paper that fit (nothing cut, or only appendices dropped) stores `needed_ctx: n
 
    As with the whole-paper prompts, everything before `Task:` is the same in both calls, so the notes are read once.
 
+**How the calls run** (`read_in_parts(llm, title, groups, num_ctx, read_mode=..., dropped=...)`):
+
+```
+ sections --split_groups--> front: Abstract, 1 Introduction, 6 Conclusion
+                            body:  2 Method, 3 Experiments, 4 Results, 5 Analysis (+ appendices if they fit)
+                                      |
+                            chunk_to_budget (each group, separately)
+                                      v
+           [front]            [body 1/2]            [body 2/2]          <- one notes call each
+              |                    |                     |                 (cites only its own titles)
+           notes 1/3           notes 2/3             notes 3/3
+              \____________________|_____________________/
+                                   |  all notes, in paper order
+                       too long to combine? --yes--> condense (up to 3 rounds, then trim + body_cut)
+                                   | no
+                   combine: summary call, critique call (cite any title read)
+                                   v
+        PaperSummary(read_mode="split", parts=3, body_cut, dropped, unverified)
+```
+
+1. **Group** (`split_groups(sections, num_ctx)`, used for split mode). Non-paper text is dropped as always (`pruning.partition` gives paper, appendix and non-paper sections, with the same rules as `fit_to_budget`). A paper section whose heading (numbering stripped) starts with one of `FRONT_WORDS` (`abstract`, `introduction`, `conclusion`, `discussion`, `limitation`, `future work`, `summary`) is **front matter**; a subsection such as `1.1 Motivation` goes with its parent `1 Introduction`. Every other paper section is **body**. Appendices join the body only if body plus appendices fit one call; otherwise they are dropped and listed with reason `appendix`. If the headings give no front matter or no body (a paper headed just `1`, `2`, `3`), the whole paper becomes one `general` group, read in size-based chunks.
+2. **Chunk** (`chunk_to_budget(sections, num_ctx)`). Each group is cut into consecutive chunks of at most `(num_ctx - 4000) * 3` characters, the same budget as a whole read, filling each chunk greedily in paper order. A single section longer than that is cut into pieces at paragraph breaks (a blank line), or hard-cut if one paragraph is itself too long; every piece keeps the section's title, so its notes can still cite it. Nothing is lost: the pieces joined back give the original text.
+3. **Notes, one call per chunk**, with the group's focus (`front`, `body` or `general`). The progress note says `notes 2/3`. A notes call sees only its chunk, so its citations are checked against that chunk's titles, with the usual one retry; still-wrong notes are kept and their text added to `unverified`.
+4. **Condense if too long.** All notes, in paper order, must fit one combine call (the budget minus the list of valid titles). If not, they are cut into batches that fit and each batch gets a condense call (progress note `condense`, once per round), and the merged notes replace them. This repeats for at most `MAX_CONDENSE_ROUNDS = 3` rounds. If the notes still do not fit, every note's text is shortened by the same share (ending in ` [...]`) and the result is marked `body_cut`: some of what the model read did not reach the summary.
+5. **Combine**: the summary call and the critique call (progress `summary`, `critique`), whose citations are checked against every section title that was read.
+6. **Result.** `read_mode` is `split` or `map_reduce` (what the caller asked for), `parts` the number of notes calls, `basis` `full_text`, `needed_ctx` none (it means "how big a context would read this whole", which does not apply here), `dropped` the list the caller passed (from `split_groups` or its own pruning), and `unverified` the unverified claim texts of the notes, condense, summary and critique calls together.
+
+**Worked example: a 3-chunk paper.** A paper at an 8,192-token context has a budget of (8192 - 4000) x 3 = 12,576 characters per call. Its sections: `Abstract` (1,200 characters), `1 Introduction` (4,000), `2 Method` (9,000), `3 Experiments` (6,000), `4 Results` (5,000), `5 Conclusion` (1,500), `References` (8,000), `Appendix A Proofs` (7,000).
+
+- `References` is non-paper: dropped. Front = `Abstract`, `1 Introduction`, `5 Conclusion` (6,700 characters). Body = `2 Method`, `3 Experiments`, `4 Results` (20,000). Body plus the appendix (27,000) does not fit one call, so `Appendix A Proofs` is dropped with reason `appendix`.
+- The front fits one chunk. The body does not: chunk one is `2 Method` (9,000; adding `3 Experiments` would make 15,000), chunk two `3 Experiments` + `4 Results` (11,000). Three chunks, so three notes calls: `notes 1/3` (front focus), `notes 2/3` and `notes 3/3` (body focus).
+- Say each call returns 6 notes of about 150 characters: about 3,000 characters of notes, well under the budget, so there is no condensing. Then `summary` and `critique` are written from those 18 notes and may cite any of the six sections read. The result: `read_mode: split`, `parts: 3`, `body_cut: false`, `dropped`: References, Appendix A Proofs.
+- In whole mode the same paper would have needed the body trimmed (26,700 characters of core text in a 12,576 budget), which is what reading in parts avoids. Five model calls instead of two is the cost.
+
 **Notes are untrusted too.** Notes were written by a model that read the paper, so injected text in the paper could have reached them. They sit in one `<notes>` block, one claim per line (`notes_block`); `defuse` now defuses `<notes>`/`</notes>` as well as `<paper>`/`</paper>`, and line breaks in a note are folded to spaces, so a note cannot close the block or pretend to be a second note. The valid titles are shown as a quoted JSON list (defused), and the combine prompt says to cite only from that list, never from headings or text inside the notes. Citations are still checked by code afterwards, exactly as for a whole read.
 
-**Why it's built this way.** The task goes last and each part's prompt repeats the key rules, for the same reasons as the whole-paper layout. Notes are claims with citations (not free text) so that section titles survive from the part that saw them to the final summary; without them the combine step could not cite anything it was not shown. Rejected: asking for a partial `Summary` per part (a part has no single problem or result, so the model would invent them), and combining the parts' raw text in a second long call (that is the problem we started with). The new prompts bumped `PROMPT_VERSION` to `2026-11-p7`; the whole-paper prompt text is unchanged.
+**Why it's built this way.** The task goes last and each part's prompt repeats the key rules, for the same reasons as the whole-paper layout. A notes call is checked against its own chunk's titles because those are the only ones it saw; a note citing a section from another chunk would be a guess. Front and body are split by heading words because papers state their claims in the abstract, introduction and conclusion and back them up in the middle; the two kinds of notes then feed the summary (what is claimed) and the critique (how well it is backed). When headings do not say which is which, chunking by size is the honest fallback. Appendices follow ruling 10 (kept when they fit, dropped first when space is short). Condensing is capped at 3 rounds because each round costs model calls and a model that does not shrink its notes will not start on round 4; trimming then and saying so (`body_cut`) is better than failing the paper. Rejected: chunking each section on its own (many tiny calls, each with the full instructions), cutting oversized sections at a fixed size without looking for paragraph breaks (splits sentences mid-way), and dropping the notes that do not fit instead of condensing (loses whole parts of the paper silently). Notes are claims with citations (not free text) so that section titles survive from the part that saw them to the final summary; without them the combine step could not cite anything it was not shown. Rejected: asking for a partial `Summary` per part (a part has no single problem or result, so the model would invent them), and combining the parts' raw text in a second long call (that is the problem we started with). The new prompts bumped `PROMPT_VERSION` to `2026-11-p7`; the whole-paper prompt text is unchanged.
 
 ### Provenance: which model and prompt wrote this
 
@@ -191,16 +227,20 @@ Rejected alternatives:
 uv run pytest tests/test_summarize.py tests/test_prompt_layout.py tests/test_prompt_limits.py -q
 ```
 
-`tests/test_prompt_layout.py` checks the prompt layouts: the two whole-paper calls share their prefix with the task last; the notes prompt keeps the paper's own `</paper>` defused, names the part and ends with `REMINDER_NOTES`; the condense prompt keeps cited sections; the two combine prompts share everything before `Task:`, list the valid titles there, and a note or title containing `</notes>` cannot close the block. `tests/test_prompt_limits.py` checks the length limits, the prompt version, and that an old summary loads as `read_mode: whole`, `parts: 1`.
+`tests/test_parts.py` checks reading in parts with a fake model: front/body grouping (subsections follow their parent), appendices joining the body only when they fit, the `general` fallback, chunking (greedy, paragraph cuts, hard cuts, nothing lost), the calls and their order (`notes 1/2`, `notes 2/2`, `summary`, `critique`), the shared combine prefix, notes checked against their own chunk's titles, one retry then `unverified`, condensing when notes are too long, and giving up after 3 rounds with `body_cut`. `tests/test_pruning.py` also checks `partition`.
+
+`tests/test_prompt_layout.py` checks the prompt layouts: the two whole-paper calls share their prefix with the task last; the notes prompt keeps the paper's own `</paper>` defused, names the part, ends with `REMINDER_NOTES`, refuses the `condense` focus and carries the note-only-what-this-part-says rule; the condense prompt keeps cited sections; the two combine prompts share everything before `Task:`, list the valid titles there, and a note or title containing `</notes>` cannot close the block. `tests/test_prompt_limits.py` checks the length limits, the prompt version, and that an old summary loads as `read_mode: whole`, `parts: 1`.
 
 The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They check the happy path, the progress events (notes in order, one result per paper, the citation-retry note, backlog counted in the total), that the paper sits inside `<paper>` tags and the system prompt warns about instructions, that injected text (including a fake `</paper>`) stays inside the block, the one-retry rule and its feedback, flagging after a failed retry, abstract-only labelling, the context budget, and that model errors (`LlmError`) are passed on to the caller. `tests/test_db.py` checks that a saved summary loads back unchanged, that `needed_ctx` round-trips (and is `None` for old rows) and that provenance, `gpu_share` included, round-trips (and is `None` for old rows). `tests/test_pruning.py` checks `needed_ctx` against the formula above, and that it is `None` when the paper fits or only appendices overflow; `tests/test_llm.py` checks `gpu_share` against a faked `/api/ps` reply (listed, not listed, HTTP error, unreachable).
 
 ## Where the code is
 
 - `src/research_pipeline/summary_models.py`: `Claim`, `Notes`, `Summary`, `Critique`, `PaperSummary` (with `read_mode`, `parts`)
-- `src/research_pipeline/summarize.py`: `unknown_citations`, `summarize_paper`
-- `src/research_pipeline/pruning.py`: `classify`, `fit_to_budget`, `Fit` (with `needed_ctx`), `NEEDED_STEP`
+- `src/research_pipeline/summarize.py`: `summarize_paper` (also re-exports `claims` and `unknown_citations`)
+- `src/research_pipeline/citations.py`: the citation check, `claims`, `unknown_citations`, `generate_checked` (generate, check, retry once); shared by whole reads and reading in parts
+- `src/research_pipeline/parts.py`: reading in parts, `split_groups`, `chunk_to_budget`, `read_in_parts`, `FRONT_WORDS`, `MAX_CONDENSE_ROUNDS`
+- `src/research_pipeline/pruning.py`: `classify`, `partition`, `fit_to_budget`, `Fit` (with `needed_ctx`), `NEEDED_STEP`
 - `src/research_pipeline/llm.py`: `OllamaClient.gpu_share` (reads `/api/ps`)
 - `src/research_pipeline/prompts.py`: `PROMPT_VERSION`, `build_summary_prompt`, `build_critique_prompt`, `citation_feedback`, `defuse`, `SHARED_SYSTEM`, `SUMMARY_TASK`, `CRITIQUE_TASK`, `REMINDER`; for reading in parts `Focus`, `build_notes_prompt`, `build_condense_prompt`, `build_combine_prompts`, `notes_block`, `NOTES_SYSTEM`, `CONDENSE_SYSTEM`, `COMBINE_SYSTEM`, `REMINDER_NOTES`
 - `src/research_pipeline/db.py`: `save_summary` (replaces an existing summary, which is what makes a re-summary work), `get_summary`, `get_provenance`, `papers_missing_summary`, `papers_by_ids`
-- `tests/test_summarize.py`, `tests/test_db.py`, `tests/test_prompt_layout.py`, `tests/test_prompt_limits.py`
+- `tests/test_summarize.py`, `tests/test_parts.py`, `tests/test_pruning.py`, `tests/test_db.py`, `tests/test_prompt_layout.py`, `tests/test_prompt_limits.py`

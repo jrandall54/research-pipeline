@@ -391,7 +391,7 @@ def set_llm_num_ctx(vault: Path, n: int | str) -> None:
 
 
 def set_night_deadline(vault: Path, value: str) -> None:
-    """Set the morning deadline for reruns: a 24-hour time such as 07:00 (7:00 is fine), or off."""
+    """Set the morning deadline for reruns and the request drain: a 24-hour time such as 07:00 (7:00 is fine), or off."""
     text = normalise_deadline(value)
     if text != "off":
         try:

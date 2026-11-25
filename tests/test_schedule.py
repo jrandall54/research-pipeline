@@ -348,7 +348,7 @@ def test_cli_set_deadline_writes_config_and_show_prints_it(fake):
     _, _, vault = fake
     res = runner.invoke(cli.app, ["schedule", "set-deadline", "06:30", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
-    assert "Reruns of cut papers must finish by 06:30." in res.output
+    assert "Reruns of cut papers must finish by 06:30; no requested summary starts after it." in res.output
     assert load_config(vault / "config.yaml").night_deadline == "06:30"
     res = runner.invoke(cli.app, ["schedule", "show", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
@@ -359,7 +359,7 @@ def test_cli_set_deadline_off(fake):
     _, _, vault = fake
     res = runner.invoke(cli.app, ["schedule", "set-deadline", "OFF", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
-    assert "off" in res.output.lower()
+    assert "Reruns of cut papers are off; requested summaries run with no time limit." in res.output
     res = runner.invoke(cli.app, ["schedule", "show", "--vault", str(vault)])
     assert "deadline off" in res.output
 

@@ -166,7 +166,7 @@ def test_rank_orders_gpu_before_spill_and_bigger_first():
     lean = rank(machine(vram=16.0, ram=64.0, free=40.0, env=FA_Q8), CATALOG, {})
     assert [(c.entry.id, c.placement) for c in lean][2:] == [("moe35", "gpu"), ("d8", "gpu")]
     top = ranked[0]
-    assert any(r.startswith("fits fully in 16.0 GB of GPU memory with about") and "rpipe model fit" in r
+    assert any(r.startswith("fits fully in the 13.5 GB of GPU memory free for models with about") and "rpipe model fit" in r
                for r in top.reasons)
     assert "Strong writer." in top.reasons
 
@@ -392,3 +392,28 @@ def test_recommend_no_limit_warning_for_fast_model(vault, monkeypatch):
     bench_mod.save_bench(vault, make_bench("test:14b"))  # 1000 tokens/s: 22 s to read
     result, _, _ = recommend_run(vault, monkeypatch, machine(ram=16.0, models=["test:14b"]), "1\nn\n")
     assert "600-second limit" not in result.output
+
+
+def test_8gb_card_with_little_free_gets_cpu_models():
+    """An 8 GiB card with only 5 GiB free fits no shipped model on the GPU: fall back to RAM and CPU."""
+    info = machine(gpus=[Gpu("RTX 4060", 8.0, "nvidia", 5.0)], ram=32.0, free=24.0)
+    ranked = rank(info, catalog_mod.shipped_catalog(), {}, top=None)
+    assert ranked
+    assert {c.placement for c in ranked} <= {"cpu", "spill"}
+    assert any(c.placement == "cpu" for c in ranked)
+
+
+def test_mid_band_with_gpu_fits_gets_no_cpu_models():
+    info = machine(gpus=[Gpu("RTX 5070 Ti", 16.0, "nvidia", 15.0)], ram=32.0, free=24.0)
+    ranked = rank(info, catalog_mod.shipped_catalog(), {}, top=None)
+    assert any(c.placement == "gpu" for c in ranked)
+    assert all(c.placement != "cpu" for c in ranked)
+
+
+def test_placement_reason_names_usable_memory():
+    info = machine(gpus=[Gpu("Test GPU", 16.0, "nvidia", 12.0)])  # usable = 12.0 - 2.0 = 10.0 GiB
+    top = rank(info, CATALOG, {})[0]
+    assert top.placement == "gpu"
+    reason = top.reasons[0]
+    assert reason.startswith("fits fully in the 10.0 GB of GPU memory free for models with about")
+    assert "16.0" not in reason

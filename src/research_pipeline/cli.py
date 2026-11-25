@@ -2298,7 +2298,8 @@ def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> No
     if not ranked or ranked[0].placement == "gpu":
         return
     if pulled is not None:
-        where = recommender.place(pulled, info)
+        # Reaching here means nothing fits on the GPU, so rank allowed CPU choices: do the same here.
+        where = recommender.place(pulled, info, allow_cpu=True)
         if where is not None and where[0] != "gpu":
             _pin_off_gpu(vault, pulled.pull)
             return

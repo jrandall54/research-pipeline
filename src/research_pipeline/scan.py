@@ -71,6 +71,9 @@ def system_cmd(argv: list[str], timeout: float) -> tuple[int, str]:
 
 # ---- GPUs ----
 
+_NOT_AVAILABLE = {"[N/A]", "N/A"}  # what nvidia-smi prints for a figure it cannot read
+
+
 def _nvidia_all(run: CmdRunner) -> list[Gpu]:
     code, out = run(["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"],
                     PROBE_TIMEOUT)
@@ -79,18 +82,21 @@ def _nvidia_all(run: CmdRunner) -> list[Gpu]:
     gpus: list[Gpu] = []
     for line in out.splitlines():
         parts = [p.strip() for p in line.split(",")]
-        numbers: list[float] = []
+        numbers: list[float | None] = []
         while len(parts) > 1 and len(numbers) < 2:  # up to two numbers at the end: total, free (MiB)
-            try:
-                numbers.insert(0, float(parts[-1]))
-            except ValueError:
-                break
+            if parts[-1] in _NOT_AVAILABLE:  # some drivers cannot report a figure: unknown, keep going
+                numbers.insert(0, None)
+            else:
+                try:
+                    numbers.insert(0, float(parts[-1]))
+                except ValueError:
+                    break
             parts.pop()
         name = ", ".join(parts)  # a card name may itself contain a comma
-        if not numbers or not name:
-            continue
+        if not numbers or numbers[0] is None or not name:
+            continue  # without the total memory the card is of no use to the recommender
         total = numbers[0] / 1024  # MiB -> GiB
-        free = numbers[1] / 1024 if len(numbers) == 2 else None
+        free = numbers[1] / 1024 if len(numbers) == 2 and numbers[1] is not None else None
         gpus.append(Gpu(name, total, "nvidia", free))
     return gpus
 

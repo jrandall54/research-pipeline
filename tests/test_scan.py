@@ -1,4 +1,5 @@
 """Machine scan: CPU, memory, disk, every GPU, and the Ollama server's own settings. Fully offline."""
+import math
 from pathlib import Path
 
 import httpx
@@ -260,3 +261,12 @@ def test_scan_display_treats_true_as_flash_on(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "detect_machine", lambda config: machine)
     out = CliRunner().invoke(cli.app, ["model", "scan", "--vault", str(vault)]).output
     assert "flash attention: on" in out
+
+
+def test_nvidia_na_free_memory_is_unknown():
+    """Some drivers print [N/A] (or N/A) for free memory: keep the card, free memory unknown."""
+    query = "nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits"
+    for na in ("[N/A]", "N/A"):
+        (gpu,) = all_gpus(fake_run({query: (0, f"NVIDIA GeForce RTX 4060, 8188, {na}\n")}), "Linux", "x86_64")
+        assert gpu.name == "NVIDIA GeForce RTX 4060"
+        assert math.isclose(gpu.vram_gb, 8.0, abs_tol=0.01) and gpu.free_gb is None

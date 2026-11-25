@@ -9,6 +9,7 @@ from research_pipeline.summarize import (
     Claim,
     Critique,
     Summary,
+    phase_note,
     summarize_paper,
     unknown_citations,
 )
@@ -859,3 +860,18 @@ def test_health_line_in_parts():
 
     assert " · in parts 2" in cli.health_line(date(2026, 11, 24), {"in_parts": 2}, [])
     assert "in parts" not in cli.health_line(date(2026, 11, 24), {"in_parts": 0}, [])
+
+
+def test_failed_split_read_is_read_whole_never_map_reduced():
+    llm = InventedNotesLLM()
+    phases = []
+    ps = summarize_paper(llm, "T", "", LONG, 8192, phases.append, mode="split", fallback_above=0)
+    assert ps.read_mode == "whole" and ps.parts == 1 and ps.body_cut and ps.needed_ctx
+    at = phases.index("notes_unusable")
+    assert not any(p.startswith("notes ") for p in phases[at:])  # no map-reduce notes calls
+    assert phases[at:] == ["notes_unusable", "summary", "critique"]
+    assert llm.schemas[-2:] == [Summary, Critique]
+
+
+def test_phase_note_for_unusable_notes():
+    assert phase_note("notes_unusable", "2401.00001") == "notes unusable for 2401.00001; reading it whole"

@@ -55,6 +55,8 @@ def phase_note(name: str, pid: str) -> str:
     if name.startswith("notes "):
         part, of = name.removeprefix("notes ").split("/")
         return f"reading part {part} of {of} of {pid}"
+    if name == "notes_unusable":
+        return f"notes unusable for {pid}; reading it whole"
     label = {"summary": "writing the summary for", "critique": "writing the critique for",
              "condense": "condensing notes for"}
     return f"{label.get(name, 'retrying citations for')} {pid}"
@@ -73,7 +75,8 @@ def summarize_paper(
     ``mode="split"`` reads front matter and body as separate parts, then combines the notes
     (parts.py). An abstract-only paper, a paper with no paper sections left after pruning, or a
     context below `MIN_PARTS_CTX` is always read whole, and so is a paper whose notes all cited
-    sections it does not have (`NoUsableNotes`): it is never combined from empty notes.
+    sections it does not have (`NoUsableNotes`): it is never combined from empty notes, nor
+    map-reduced; ``on_phase`` is told ``notes_unusable`` first.
     In whole mode, a paper whose core text had to be cut is read in size-based parts instead
     (map-reduce, appendices left out) when the context it needs is above ``fallback_above``;
     ``None`` never falls back (reruns pass it: they exist to read papers whole), ``0`` always
@@ -97,7 +100,11 @@ def summarize_paper(
                 return read_in_parts(llm, title, groups, num_ctx, read_mode="split",
                                      dropped=dropped, on_phase=on_phase)
             except NoUsableNotes:
-                pass  # no note cited a real section: read it whole below
+                # No note cited a real section: read it whole below, cut to fit if it must be,
+                # and never map-reduced (that would be a second set of notes calls).
+                fallback_above = None
+                if on_phase is not None:
+                    on_phase("notes_unusable")
 
     fit = fit_to_budget(sections, num_ctx)
     if (in_parts_ok and fit.body_cut and fallback_above is not None

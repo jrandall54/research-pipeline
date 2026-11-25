@@ -144,3 +144,31 @@ def test_requests_by_status_sees_marks(conn):
     assert row["tries"] == 1 and row["error"] == "x"
     mark_request(conn, rid, "pending", undo_try=True)
     assert _row(conn, rid)["tries"] == 0
+
+
+def _cut_short_three_times(conn):
+    rid = insert_request(conn, "summarize", {"paper_id": A})
+    for _ in range(3):  # three runs that each died mid-request
+        mark_request(conn, rid, "running", add_try=True)
+    return rid
+
+
+def test_drain_fails_request_whose_last_try_was_cut_short(conn):
+    from research_pipeline.requests_queue import GAVE_UP_CUT_SHORT
+
+    rid = _cut_short_three_times(conn)
+    llm = FakeLLM([])
+    counts, _ = _drain(conn, llm)
+    row = _row(conn, rid)
+    assert row["status"] == "failed" and row["tries"] == 3 and row["error"] == GAVE_UP_CUT_SHORT
+    assert llm.calls == []
+    assert counts == {"requests_done": 0, "requests_failed": 1, "requests_waiting": 0}
+
+
+def test_runnable_requests_skips_rows_without_tries_left(conn):
+    from research_pipeline.requests_queue import runnable_requests
+
+    _cut_short_three_times(conn)
+    assert runnable_requests(conn) == []
+    rid = insert_request(conn, "summarize", {"paper_id": B})
+    assert [r["id"] for r in runnable_requests(conn)] == [rid]

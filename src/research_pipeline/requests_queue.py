@@ -39,6 +39,24 @@ class _NotesOnly:
             self._handle.note(event.label)
 
 
+# Error stored on a request whose every try was cut short (the run died while working on it).
+GAVE_UP_CUT_SHORT = f"stopped part-way through {MAX_SUMMARY_TRIES} times (the run was interrupted or crashed); gave up"
+
+
+def _can_run(row: sqlite3.Row) -> bool:
+    """A request the drain would still try: a summarize request with tries left."""
+    return row["kind"] == "summarize" and row["tries"] < MAX_SUMMARY_TRIES
+
+
+def runnable_requests(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """`pending` or `running` requests the drain would still try, oldest first.
+
+    Callers ask this (not just "any pending row") before loading a model, so a request that
+    has used all its tries never makes a quiet night load the model for nothing.
+    """
+    return [r for r in requests_by_status(conn, "pending", "running") if _can_run(r)]
+
+
 def _paper_error(pid: str, errors: list[str]) -> str:
     """The line run_summarize wrote about this paper, without its ``summarize <id>:`` prefix."""
     prefix = f"summarize {pid}: "
@@ -60,7 +78,8 @@ def drain_requests(
 ) -> tuple[dict[str, int], list[str]]:
     """Work through the pending requests, oldest first; return (counts, error lines).
 
-    1. Requests left `running` by a run that died are put back to `pending`.
+    1. Requests left `running` by a run that died are put back to `pending`; one whose
+       cut-short try was its last is marked `failed` (`GAVE_UP_CUT_SHORT`).
     2. Each `pending` ``summarize`` request with fewer than MAX_SUMMARY_TRIES tries is marked
        `running` (one try counted) and its paper summarized with ``run_summarize(paper_ids=[id])``
        (``mode`` and ``fallback_above`` as for the summarize stage).
@@ -74,9 +93,13 @@ def drain_requests(
     Progress: one ``requests`` stage, a step per request; nothing at all when none are queued.
     """
     reset_running_requests(conn)
-    todo = [r for r in requests_by_status(conn, "pending")
-            if r["kind"] == "summarize" and r["tries"] < MAX_SUMMARY_TRIES]
     counts = {"requests_done": 0, "requests_failed": 0, "requests_waiting": 0}
+    for row in requests_by_status(conn, "pending"):
+        if row["kind"] == "summarize" and not _can_run(row):
+            # Its last try was cut short (a run died mid-request): give up rather than wait forever.
+            mark_request(conn, row["id"], "failed", error=GAVE_UP_CUT_SHORT)
+            counts["requests_failed"] += 1
+    todo = [r for r in requests_by_status(conn, "pending") if _can_run(r)]
     errors: list[str] = []
     if todo:
         with stage(reporter, "requests", total=len(todo)) as handle:

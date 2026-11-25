@@ -334,7 +334,7 @@
 
 **Draining (the request list)** — working through the waiting requests until none is left to do; the nightly `rpipe run` and `rpipe requests run` do it. See "The request list" in `running.md`.
 
-**Retry rule (requests)** — a request gets 3 tries (`requests.tries` counts them). A failed try puts it back to `pending`; the third failure leaves it `failed` for good (ask again to queue a fresh one). A usage-limit stop gives the try back, because it was not the request's fault. See "The request list" in `running.md`.
+**Retry rule (requests)** — a request gets 3 tries (`requests.tries` counts them). A failed try puts it back to `pending`; the third failure leaves it `failed` for good (ask again to queue a fresh one). A usage-limit stop gives the try back, because it was not the request's fault; a try cut short by a crash or Ctrl-C still counts. See "The request list" in `running.md`.
 
 **Canonical JSON** — JSON written one fixed way (here with keys sorted), so two copies of the same data are always the same text and can be compared directly. See `data-model.md`.
 

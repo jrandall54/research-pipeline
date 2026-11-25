@@ -219,7 +219,7 @@ The health line shows ` · rerun 2` (papers read whole tonight) and ` · rerun w
 
 **How it works.** `requests_queue.drain_requests` does this, step by step:
 
-1. Rows left `running` (a run died while working on them) go back to `pending` (`db.reset_running_requests`). The try they used still counts.
+1. Rows left `running` (a run died while working on them) go back to `pending` (`db.reset_running_requests`). The try they used still counts, so a row whose third try was cut short has no tries left: it is marked `failed` with the error `stopped part-way through 3 times (the run was interrupted or crashed); gave up` and counted in `requests_failed`, instead of sitting `pending` for ever.
 2. It takes the `pending` `summarize` rows that have had fewer than 3 tries (`MAX_SUMMARY_TRIES`), oldest first, and for each one:
    - marks it `running` and counts one try (`db.mark_request(..., add_try=True)`);
    - summarizes that one paper with `run_summarize(paper_ids=[id])`, exactly what `rpipe summarize ID` does: any status, an existing summary is replaced, and a paper's own retry cap is ignored because you asked for it;
@@ -227,7 +227,7 @@ The health line shows ` · rerun 2` (papers read whole tonight) and ` · rerun w
    - **failed** (network error, model error, the paper is not in the vault) → back to `pending` with the error line, or `failed` if this was the third try;
    - **usage limit reached** (Claude Code) → back to `pending` with the try given back (not the request's fault), and the drain stops: the next request would hit the same limit;
    - **model timed out** → counted as a failed try like any failure, then the drain stops: a hung model would make every later request wait out the full timeout too.
-3. It counts `requests_done` and `requests_failed` (gave up after 3 tries) for this drain, and `requests_waiting` (pending rows left), and returns them with the error lines for the health line.
+3. It counts `requests_done` and `requests_failed` (gave up after 3 tries, including tries cut short) for this drain, and `requests_waiting` (pending rows left), and returns them with the error lines for the health line.
 
 The **retry rule** in one line: a request gets 3 tries; a usage-limit stop does not use one up; a request that failed 3 times is left `failed` and never tried again (ask again to queue a fresh one). `requests.tries` is the counter that matters; the paper's own `retry_count` still goes up on a failure (as with `rpipe summarize ID`) but the drain does not look at it.
 
@@ -245,7 +245,7 @@ requests…
 
 Row 7 is `done` (1 try). Row 8 is `pending` with 1 try and the 503 as its error; the health line says `requests waiting 1`. Tuesday night it works: `done`, 2 tries. Had it failed on Tuesday and Wednesday too, it would be `failed` after Wednesday's third try and the health line would say `requests failed 1`.
 
-**In `rpipe run`** the order is summarize → requests → reruns → digest. The drain uses the same reading mode and `fallback_above` as the summarize stage, so a requested paper that had to be cut is read whole by the rerun stage like any other. A quiet night with no new papers still loads the model when requests are waiting (the summarize stage counts them as work). The drain is **skipped** when the summarize stage just stopped on a usage limit or a model timeout: the model has stopped answering, so trying requests would only use up their tries; the rows stay `pending` with their tries untouched and the health line shows `requests waiting N`. A drain that times out is passed on to the rerun stage, which then skips (as after a summarize timeout). With the `none` backend or the model unavailable, no drain runs.
+**In `rpipe run`** the order is summarize → requests → reruns → digest. The drain uses the same reading mode and `fallback_above` as the summarize stage, so a requested paper that had to be cut is read whole by the rerun stage like any other. A quiet night with no new papers still loads the model when requests are waiting (the summarize stage counts them as work). Only requests that can still run count: `requests_queue.runnable_requests` (pending or running, `summarize`, fewer than 3 tries) is the one check used by `rpipe run`, `rpipe requests run` and the drain itself, so a request with no tries left never makes a night load the model for nothing. The drain is **skipped** when the summarize stage just stopped on a usage limit or a model timeout: the model has stopped answering, so trying requests would only use up their tries; the rows stay `pending` with their tries untouched and the health line shows `requests waiting N`. A drain that times out is passed on to the rerun stage, which then skips (as after a summarize timeout). With the `none` backend or the model unavailable, no drain runs. If the drain itself crashes (for example a database error), the run records `requests: <message>` in its errors and carries on with the reruns and the digest; the night still exits 0, like a rerun problem.
 
 **Progress.** The drain is its own `requests` stage with one `[i/N]` step per request (outcome `done`, `failed` or `stopped`) and, above each, the notes from the summary (`fetching …`, `writing the summary for …`). The inner one-paper summarize run would otherwise show its own `summarize` stage with a `[1/1]` line for every request; a small adapter (`_NotesOnly`) passes only its notes into the `requests` stage. With nothing queued the stage is not shown at all.
 
@@ -260,7 +260,7 @@ Requests:
   requests_done=1, requests_failed=0, requests_waiting=0
 ```
 
-`rpipe requests list` (not locked, no model) prints every request newest first: id, status, kind, paper id, tries, when it was asked, and the last error if any; `No requests.` when there are none. `rpipe requests run` takes the pipeline lock (as `rpipe requests run`), needs a model (exit 1 with the `none` backend, or when the model is unavailable), says `No requests waiting.` and stops if there is nothing pending, else picks the reading mode like `rpipe summarize` and drains with progress.
+`rpipe requests list` (not locked, no model) prints every request newest first: id, status, kind, paper id, tries, when it was asked, and the last error if any; `No requests.` when there are none. `rpipe requests run` takes the pipeline lock (as `rpipe requests run`), needs a model (exit 1 with the `none` backend, or when the model is unavailable), says `No requests waiting.` and stops if no request can still run, else picks the reading mode like `rpipe summarize` and drains with progress.
 
 **Why it's built this way.**
 - **`requests.tries` is the counter, not the paper's `retry_count`.** A request is something you asked for; its own row is where you look to see how it went, and `rpipe requests list` shows it. Rejected: reusing the paper's counter (a paper that failed three times in the nightly stage could then never be requested again).
@@ -268,9 +268,9 @@ Requests:
 - **Requests after the summarize stage, before reruns.** Tonight's new papers come first (they are the digest); requests are extra. Running before the reruns lets a cut requested paper be reread whole the same night. Rejected: a separate nightly timer for requests (two jobs fighting over one lock and one GPU).
 - **One step per request, not a stage per request.** Twenty requests would otherwise print twenty `summarize` stages of `[1/1]`.
 
-**How to check it.** `uv run pytest tests/test_requests_queue.py tests/test_cli_requests.py -q` (done, a stale `running` row, three failures then `failed`, a usage limit keeping both rows pending with no try used, a timeout stopping the drain, the progress events, the nightly wiring including a quiet night and the skip after a usage limit, the list output and the lock).
+**How to check it.** `uv run pytest tests/test_requests_queue.py tests/test_cli_requests.py -q` (done, a stale `running` row, three failures then `failed`, a usage limit keeping both rows pending with no try used, a timeout stopping the drain, the progress events, a request whose last try was cut short marked `failed`, the nightly wiring including a quiet night, the skip after a usage limit and after a summarize timeout, a drain timeout passed on to the reruns, a crashing drain recorded while reruns and the digest still run, the list output and the lock).
 
-**Where the code is.** `src/research_pipeline/requests_queue.py` (`drain_requests`, `_NotesOnly`); `db.mark_request`, `db.reset_running_requests`; in `cli.py`, the `requests` stage in `_run_locked`, `requests_run`, `requests_list` and the health-line counts.
+**Where the code is.** `src/research_pipeline/requests_queue.py` (`drain_requests`, `runnable_requests`, `GAVE_UP_CUT_SHORT`, `_NotesOnly`); `db.mark_request`, `db.reset_running_requests`; in `cli.py`, the `requests` stage in `_run_locked`, `requests_run`, `requests_list` and the health-line counts.
 
 ### A real run, step by step
 

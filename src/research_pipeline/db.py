@@ -243,7 +243,7 @@ def reset_running_requests(conn: sqlite3.Connection) -> int:
 
     A request is only `running` while a pipeline command works on it under the run lock, so
     one still `running` when the next drain starts was left by a run that died mid-request.
-    Its try stays counted.
+    Its try stays counted (the drain then fails a row that has no tries left).
     """
     cur = conn.execute(
         "UPDATE requests SET status = 'pending', updated_at = ? WHERE status = 'running'", (_now(),)

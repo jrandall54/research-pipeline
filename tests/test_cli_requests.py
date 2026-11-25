@@ -167,3 +167,103 @@ def test_requests_run_takes_lock(vault, monkeypatch):
         res = runner.invoke(cli.app, ["requests", "run", "--vault", str(vault)])
     assert res.exit_code == 75
     assert "rpipe run is already working" in res.stderr
+
+
+class OllamaLike(FakeLLM):
+    """A scripted model that says it is Ollama, so `rpipe run` goes on to the rerun stage."""
+
+    name = "ollama"
+
+
+def fake_reruns(monkeypatch):
+    """Skip the real mode probe and reruns; record what the rerun stage was told."""
+    calls = []
+    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0))
+
+    def reruns(conn, llm, vault, deadline, *, reporter=None, model_timed_out=False):
+        calls.append(model_timed_out)
+        return {}, []
+
+    monkeypatch.setattr(cli, "run_reruns", reruns)
+    return calls
+
+
+def exhaust(vault, rid):
+    """Three runs each died while working on this request."""
+    conn = open_db(vault / "vault.sqlite")
+    for _ in range(3):
+        mark_request(conn, rid, "running", add_try=True)
+    conn.close()
+
+
+def test_quiet_night_with_only_an_exhausted_request_does_not_load_the_model(vault, monkeypatch):
+    rid = queue(vault)
+    exhaust(vault, rid)
+    picked = []
+    real_plan = cli._summarize_plan
+    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: picked.append(k["has_work"]) or real_plan(*a, **k))
+    install(monkeypatch, FakeLLM([]))
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert picked == [False]  # nothing runnable: no model load for a reading mode
+    assert request_row(vault, rid)["status"] == "failed"
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert "requests waiting" not in first and "requests failed 1" in first
+
+
+def test_requests_run_with_only_an_exhausted_request(vault, monkeypatch):
+    rid = queue(vault)
+    exhaust(vault, rid)
+    install(monkeypatch, FakeLLM([]))
+    res = runner.invoke(cli.app, ["requests", "run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert "No requests waiting" in res.output
+
+
+def test_drain_crash_is_recorded_and_reruns_and_digest_still_run(vault, monkeypatch):
+    queue(vault)
+    calls = fake_reruns(monkeypatch)
+
+    def boom(*a, **k):
+        raise RuntimeError("database disk image is malformed")
+
+    monkeypatch.setattr(cli, "drain_requests", boom)
+    install(monkeypatch, OllamaLike([]))
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert calls == [False]  # the rerun stage still ran
+    first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
+    assert "requests: database disk image is malformed" in first
+    conn = open_db(vault / "vault.sqlite")
+    errors = json.loads(conn.execute("SELECT errors FROM runs").fetchone()[0])
+    conn.close()
+    assert "requests: database disk image is malformed" in errors
+
+
+def test_drain_timeout_tells_reruns_the_model_timed_out(vault, monkeypatch):
+    from research_pipeline.llm import LlmTimeout
+
+    rid = queue(vault)
+    calls = fake_reruns(monkeypatch)
+    install(monkeypatch, OllamaLike([LlmTimeout("slow")]))  # no new papers: the drain's call times out
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert calls == [True]
+    row = request_row(vault, rid)
+    assert row["status"] == "pending" and row["tries"] == 1
+
+
+def test_drain_skipped_after_summarize_timeout(vault, monkeypatch):
+    from research_pipeline.llm import LlmTimeout
+
+    rid = queue(vault)
+    calls = fake_reruns(monkeypatch)
+    llm = OllamaLike([LlmTimeout("slow")])
+    install(monkeypatch, llm, papers=[meta("2611.00010")])
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert len(llm.calls) == 1  # the summarize stage's call; the drain never called
+    row = request_row(vault, rid)
+    assert row["status"] == "pending" and row["tries"] == 0
+    assert calls == [True]
+    assert last_run_counts(vault)["requests_waiting"] == 1

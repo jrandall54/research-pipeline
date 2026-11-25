@@ -97,7 +97,7 @@ from research_pipeline.parts import SPLIT_BELOW_CTX, resolve_mode
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
-from research_pipeline.requests_queue import drain_requests
+from research_pipeline.requests_queue import drain_requests, runnable_requests
 from research_pipeline.run_lock import RunLocked, VaultLock
 from research_pipeline.scan import (
     DEFAULT_OLLAMA_PORT,
@@ -615,7 +615,7 @@ def _run_locked(ctx: _Context) -> None:
                             # still rerun whole on a later night (rerun_candidates looks at every day).
                             # Nothing queued: no reason to load the model just to pick a mode.
                             has_work = bool(papers_to_summarize(ctx.conn, date.today())) or bool(
-                                requests_by_status(ctx.conn, "pending", "running"))
+                                runnable_requests(ctx.conn))
                             mode, fallback_above = _summarize_plan(
                                 llm, ctx.config, ctx.config.night_deadline != "off", reporter,
                                 has_work=has_work)
@@ -629,18 +629,21 @@ def _run_locked(ctx: _Context) -> None:
                         stage = "requests"
                         if LIMIT_STOPPED in sum_errors or timed_out:
                             # The model just stopped: don't spend a call (or a timeout) on requests.
-                            waiting = len(requests_by_status(ctx.conn, "pending", "running"))
+                            waiting = len(runnable_requests(ctx.conn))
                             if waiting:
                                 counts["requests_waiting"] = waiting
                         else:
-                            with _reporter() as reporter:
-                                req_counts, req_errors = drain_requests(
-                                    ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
-                                    reporter=reporter, mode=mode, fallback_above=fallback_above,
-                                )
-                            counts |= req_counts
-                            errors += req_errors
-                            timed_out = TIMEOUT_STOPPED in req_errors
+                            try:
+                                with _reporter() as reporter:
+                                    req_counts, req_errors = drain_requests(
+                                        ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+                                        reporter=reporter, mode=mode, fallback_above=fallback_above,
+                                    )
+                                counts |= req_counts
+                                errors += req_errors
+                                timed_out = TIMEOUT_STOPPED in req_errors
+                            except Exception as exc:  # noqa: BLE001 - a request problem never stops reruns or the digest
+                                errors.append(f"requests: {' '.join(str(exc).split()) or type(exc).__name__}")
                         if getattr(llm, "name", "") == "ollama":
                             stage = "rerun"
                             try:
@@ -882,7 +885,7 @@ def requests_run(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     with _pipeline_lock(ctx, "rpipe requests run"):
         _require_model(ctx.config)
-        pending = requests_by_status(ctx.conn, "pending", "running")
+        pending = runnable_requests(ctx.conn)
         if not pending:
             typer.echo("No requests waiting. `rpipe requests list` shows earlier ones.")
             return

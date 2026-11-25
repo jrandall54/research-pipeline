@@ -372,3 +372,19 @@ def test_cli_set_deadline_bad_value_exits_1(fake):
     assert res.exit_code == 1
     assert "HH:MM" in res.output
     assert load_config(vault / "config.yaml").night_deadline == "07:00"
+
+
+def test_cli_show_prints_deadline_even_when_units_cannot_be_rendered(fake, monkeypatch):
+    _, _, vault = fake
+
+    def broken(*_args):
+        raise schedule.ScheduleError("The rpipe path contains a control character")
+
+    monkeypatch.setattr(schedule, "render_service", broken)
+    res = runner.invoke(cli.app, ["schedule", "show", "--vault", str(vault)])
+    assert res.exit_code == 1
+    assert "deadline 07:00" in res.output
+    assert "control character" in res.output
+    res = runner.invoke(cli.app, ["schedule", "show", "--time", "25:00", "--vault", str(vault)])
+    assert res.exit_code == 1
+    assert "deadline 07:00" in res.output

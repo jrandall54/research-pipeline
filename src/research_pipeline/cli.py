@@ -92,6 +92,7 @@ from research_pipeline.llm import (
     LlmError,
     LlmLimitReached,
     OllamaClient,
+    _with_tag,
     call_timeout,
     pull_model,
 )
@@ -2245,7 +2246,8 @@ def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
             _measure_speed(ctx.vault, ctx.conn, new_cfg)
         except (LlmError, OSError, ValueError) as exc:
             typer.echo(f"Speed not measured: {exc}")
-    _note_call_limit(bench_mod.load_benches(ctx.vault).get(entry.pull))
+    _note_call_limit({_with_tag(k): b for k, b in bench_mod.load_benches(ctx.vault).items()}
+                     .get(_with_tag(entry.pull)))
     _go_back_hint(*previous)
     if not ok:
         raise typer.Exit(code=1)
@@ -2788,8 +2790,14 @@ def schedule_show(
     time: Annotated[str, typer.Option(help="Time of day, 24-hour HH:MM.")] = "03:00",
     vault: VaultOption = None,
 ) -> None:
-    """Print the unit files that `install` would write, without writing anything."""
+    """Print the night deadline and the unit files that `install` would write, without writing anything."""
     path = _schedule_vault(vault)
+    # The deadline comes first, so it is shown even when the unit files cannot be rendered.
+    try:
+        deadline = load_config(path / "config.yaml").night_deadline
+    except ConfigError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"# Reruns of cut papers: deadline {deadline} (change with `rpipe schedule set-deadline`)")
     try:
         timer = schedule.render_timer(time)
     except ValueError as exc:
@@ -2800,11 +2808,6 @@ def schedule_show(
         raise _fail(str(exc)) from exc
     typer.echo(f"# {schedule.SERVICE_NAME}\n{service}")
     typer.echo(f"# {schedule.TIMER_NAME}\n{timer}")
-    try:
-        deadline = load_config(path / "config.yaml").night_deadline
-    except ConfigError as exc:
-        raise _fail(str(exc)) from exc
-    typer.echo(f"# Reruns of cut papers: deadline {deadline} (change with `rpipe schedule set-deadline`)")
 
 
 @schedule_app.command("set-deadline")

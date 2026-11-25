@@ -10,7 +10,7 @@ Commands (`install` and `show` take `--time` and `--vault`; no file editing need
 - `rpipe schedule show [--time HH:MM] [--vault PATH]` prints the units without writing anything, so you can review them first.
 - `rpipe schedule status` shows when the timer last fired and when it fires next; if the timer is not enabled it says so and suggests `rpipe schedule install`. It first checks that `systemctl` exists (the same clean message as `install`, no traceback), then that the systemd user manager can be reached; if not, it says exactly that (and exits 1) instead of claiming the timer is not installed, because then the real state is unknown and reinstalling would not help.
 - `rpipe schedule remove` disables the timer and deletes both files (and reloads systemd only if something was removed). If disabling fails it warns and still removes the files. With nothing installed it just says so.
-- `rpipe schedule set-deadline HH:MM|off [--vault PATH]` sets the morning deadline for reruns of cut papers (default 07:00). See "The morning deadline" below. `show` prints the current value on its last line.
+- `rpipe schedule set-deadline HH:MM|off [--vault PATH]` sets the morning deadline for reruns of cut papers (default 07:00). See "The morning deadline" below. `show` prints the current value on its first line.
 
 ## How it works
 
@@ -58,8 +58,8 @@ Quoting: systemd splits `ExecStart` on spaces and expands `%` and `$`, so paths 
 - Default: `07:00`. Set it with `rpipe schedule set-deadline 06:30`, which answers `Reruns of cut papers must finish by 06:30.`
 - `rpipe schedule set-deadline off` turns reruns off (answer: `Reruns of cut papers are off.`).
 - Accepted: a 24-hour time (`7:00` is stored as `07:00`) or `off`, in any case. Anything else (`7pm`, `25:00`) is refused with an example and the setting is left unchanged (exit 1).
-- It is stored as `night_deadline` in `config.yaml` (quoted, see below) and printed by `rpipe schedule show` as `# Reruns of cut papers: deadline 07:00`. Because of that line, `show` now reads `config.yaml`: if the file is invalid it prints the config error and exits 1.
-- Reruns themselves are the next pipeline stage (being built); this setting is in place first.
+- It is stored as `night_deadline` in `config.yaml` (quoted, see below) and printed by `rpipe schedule show` as `# Reruns of cut papers: deadline 07:00`. Because of that line, `show` now reads `config.yaml`: if the file is invalid it prints the config error and exits 1. The line comes first, before the unit files, so the deadline is shown even when the units cannot be printed (for example no `rpipe` with the embed extra, or a bad `--time`; `show` then exits 1 after it).
+- How the reruns themselves work (which papers, how much RAM, the time estimate) is in `running.md`, "Reading cut papers whole: reruns".
 
 How the clock time becomes a deadline (`schedule.deadline_at`): take the next 07:00 strictly after now, local time. If that is more than 12 hours away (`MAX_NIGHT_HOURS`) there is no deadline tonight and reruns do not start.
 
@@ -113,4 +113,4 @@ Tests: `uv run pytest tests/test_schedule.py -q` (offline, fake runner, temporar
 
 ## Where the code is
 
-`src/research_pipeline/schedule.py` (`render_service`, `render_timer`, `install`, `remove`, `status`, `ScheduleError`, `parse_time`, `deadline_at`, `MAX_NIGHT_HOURS`), `set_night_deadline` in `src/research_pipeline/profile_edit.py` (checks the time with `parse_time`), `Config.night_deadline` and `normalise_deadline` in `src/research_pipeline/models.py`, and the `schedule` commands at the bottom of `src/research_pipeline/cli.py`. Tests: `tests/test_schedule.py`.
+`src/research_pipeline/schedule.py` (`render_service`, `render_timer`, `install`, `remove`, `status`, `ScheduleError`, `parse_time`, `deadline_at`, `MAX_NIGHT_HOURS`), `set_night_deadline` in `src/research_pipeline/profile_edit.py` (checks the time with `parse_time`), `Config.night_deadline` and `normalise_deadline` in `src/research_pipeline/models.py`, and the `schedule` commands at the bottom of `src/research_pipeline/cli.py`. Tests: `tests/test_schedule.py`; the deadline setting is also tested in `tests/test_models.py` (`normalise_deadline`, `Config.night_deadline`) and `tests/test_profile_edit.py` (`set_night_deadline`).

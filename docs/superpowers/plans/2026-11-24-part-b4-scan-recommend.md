@@ -15,7 +15,7 @@
 - Tests run offline: every command, HTTP call and clock goes through an injected runner or `respx`; no test runs `nvidia-smi`, `systemctl`, `sudo` or a real Ollama.
 - Every waiting step reports through `progress.py` (`stage(...)` from the CLI's `_reporter()`).
 - Every change updates `docs/guide/` in the same commit; new terms go in `docs/guide/glossary.md` in plain words. The new page is `docs/guide/hardware.md` (shape: What it does → How it works → Why it's built this way → How to run / check it → Where the code is); link it from `docs/guide/README.md`.
-- No owner model names in the repo (`q3.8-27b-34k`, `q3f-14b-143k` and similar must never appear). Public pull names (`qwen3:14b`, `hf.co/unsloth/...`) are fine.
+- No owner model names in the repo (the owner's own Ollama model tags must never appear). Public pull names (`qwen3:14b`, `hf.co/unsloth/...`) are fine.
 - No documented workflow may require hand-editing a file. Every setting a command changes goes through `profile_edit` setters that already exist (`set_llm_model`, `set_llm_num_ctx` or equivalent; check `profile_edit.py` names before use).
 - Nothing changes the system or downloads without a yes from the user after seeing what will happen (size vs free disk; exact command; how to undo). Interactive commands refuse to run without a terminal (`_is_tty()`), the way `rpipe model setup` does.
 - Use `rpipe` in all messages and docs. Commit per task; `git add` named files only (never `-A`: the owner's `.idea/` is untracked).
@@ -176,7 +176,7 @@ Research rules:
 - Every `pull` must be a name `ollama pull` accepts **today**: an Ollama library tag (check `https://ollama.com/library/<name>/tags`) or `hf.co/<org>/<repo>:<quant>` for a GGUF repo (check the file exists via `https://huggingface.co/api/models/<org>/<repo>/tree/main`). `download_gb` from that page/API (bytes / 1e9, one decimal).
 - `trained_ctx`, and the numbers for `kv_mib_per_1k`, from the model's `config.json` on Hugging Face: `kv_mib_per_1k = L_full × 2 × n_kv_heads × head_dim × 2 bytes × 1000 / 2^20`, where `L_full` counts only layers with full attention (skip sliding-window and linear-attention layers; Gemma 4: 25 of 30 sliding-window; Qwen3.6-35B-A3B: 30 of 40 linear). Put the inputs in a YAML comment above each entry, with the source URLs.
 - Must include: the two models from the owner's bake-off, `hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S` (notes: "about 2x faster than a 27B dense model in a 10-paper test, but covered fewer key facts and produced unverified citations; partly in RAM on 16 GB") and `hf.co/unsloth/gemma-4-26B-A4B-it-GGUF:UD-IQ4_XS`; the current Qwen3 library tags `qwen3:8b`, `qwen3:14b`, `qwen3:32b`; a public ~27B dense model of the current Qwen generation in a quant that fits 16 GB (IQ3_S-class, ~12 GB). Prefer instruction-tuned, text-capable models with ≥ 32K trained context.
-- No owner model names (`q3.8-...`, `q3f-...`, `q2.5c-...`, `ds2-...`, `q3-14b-...`).
+- No owner model names (the owner's own Ollama model tags).
 - Validate before finishing: `uv run python -c "from research_pipeline.catalog import parse_catalog; import pathlib; print(len(parse_catalog(pathlib.Path('src/research_pipeline/defaults/model_catalog.yaml').read_text()).entries))"` (if `catalog.py` does not exist yet, validate the YAML with `yaml.safe_load` and the field list above).
 - Report: the entry list, anything you could not verify (and left out), and the sources.
 

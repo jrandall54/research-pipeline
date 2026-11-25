@@ -16,7 +16,7 @@
 - Every waiting step reports through `progress.py` (`stage(reporter, ...)`, `handle.note`, `handle.step`).
 - Every change updates `docs/guide/` in the same commit; new terms go in `docs/guide/glossary.md` in plain words. When behaviour changes, fix pages describing the old behaviour.
 - Every user setting has an `rpipe` command with validation (`profile_edit` setter + CLI); no workflow requires hand-editing a file.
-- No owner model names in the repo (`q3.8-27b-34k`, `q3f-14b-143k`). No owner machine details beyond what `hardware.md` already says.
+- No owner model names in the repo (the owner's own Ollama model tags). No owner machine details beyond what `hardware.md` already says.
 - Never suggest `rpipe model set-url` to the service's own port when a proxy is in front of it (owner keeps the proxy).
 - Normal papers always run as today; the deadline governs reruns only (spec, Settled 5). Never plan to use the last `RAM_SAFETY_GB` (4.0) of free RAM (never swap).
 - Reruns only for the local Ollama backend (`llm.name == "ollama"`); a cloud backend gets no reruns (spec: "no spill").

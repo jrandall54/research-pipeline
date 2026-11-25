@@ -14,6 +14,7 @@ import json
 import math
 import platform
 import sqlite3
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,7 +24,14 @@ import httpx
 
 from research_pipeline.bench import load_benches
 from research_pipeline.db import get_fulltext, get_paper, save_summary
-from research_pipeline.llm import CALL_TIMEOUT, CHECK_TIMEOUT, LlmError, LlmTimeout, OllamaClient
+from research_pipeline.llm import (
+    CALL_TIMEOUT,
+    CHECK_TIMEOUT,
+    LlmError,
+    LlmTimeout,
+    OllamaClient,
+    _with_tag,
+)
 from research_pipeline.ollama_fit import CONTEXT_CEILING, unload
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import PROMPT_VERSION
@@ -37,6 +45,8 @@ SPILL_GUESS = 3.0  # a spilled model is guessed this many times slower than the 
 FIRST_RERUN_MARGIN = 3600.0  # seconds: with nothing measured, the first rerun needs an hour left
 MIN_CALL_TIMEOUT = 60.0  # seconds: no model call gets less than this, even near the deadline
 MEASURE_CTX = 8192  # the second, small load that shows how memory grows with the context
+UNLOAD_WAIT = 10.0  # seconds: how long to wait for Ollama to let go of the model between buckets
+UNLOAD_POLL = 0.5  # seconds between checks of /api/ps while waiting
 
 
 @dataclass(frozen=True)
@@ -116,11 +126,6 @@ def _model_cap(url: str, model: str) -> int:
     return min(trained, CONTEXT_CEILING) if trained else CONTEXT_CEILING
 
 
-def _tagged(name: str) -> str:
-    last = name.rsplit("/", 1)[-1]
-    return name if ":" in last else f"{name}:latest"
-
-
 def _ps(url: str) -> list[dict]:
     """Ollama's list of loaded models (`/api/ps`); LlmError if it cannot be read."""
     try:
@@ -134,7 +139,7 @@ def _ps(url: str) -> list[dict]:
 
 
 def _is(entry: dict, model: str) -> bool:
-    return any(_tagged(str(entry.get(k))) == _tagged(model) for k in ("name", "model") if entry.get(k))
+    return any(_with_tag(str(entry.get(k))) == _with_tag(model) for k in ("name", "model") if entry.get(k))
 
 
 def _sizes(url: str, model: str) -> tuple[int, int]:
@@ -165,6 +170,20 @@ def _load(url: str, model: str, ctx: int, timeout: float) -> None:
         raise LlmError(f"could not load {model} at {ctx} tokens: {error or f'HTTP {resp.status_code}'}")
 
 
+def _unload_and_wait(url: str, model: str, log: Callable[[str], None],
+                     sleep: Callable[[float], None]) -> None:
+    """Unload `model` and wait (at most UNLOAD_WAIT seconds) until /api/ps no longer lists it,
+    so a fresh free-RAM reading does not count the RAM it was holding."""
+    unload(url, model, log)
+    waited = 0.0
+    while any(_is(m, model) for m in _ps(url)):
+        if waited >= UNLOAD_WAIT:
+            log(f"{model} is still loaded after {UNLOAD_WAIT:g}s; reading free RAM anyway")
+            return
+        sleep(UNLOAD_POLL)
+        waited += UNLOAD_POLL
+
+
 def _paper_tokens(r: Rerun) -> int:
     return max(1, r.needed_ctx - RESERVED_TOKENS)
 
@@ -183,6 +202,7 @@ def run_reruns(
     now: Callable[[], datetime] = datetime.now,
     ram_free: Callable[[], float | None] = lambda: ram_free_gb(platform.system()),
     model_timed_out: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> tuple[dict[str, int], list[str]]:
     """Rerun cut papers at a bigger context, within free RAM and before `deadline`.
 
@@ -191,7 +211,7 @@ def run_reruns(
     rerun keeps the old summary and changes no retry count; a timeout stops the stage.
     `model_timed_out=True` (the normal pass stopped on a timeout) means a hung model: nothing
     is loaded and all candidates wait. With no deadline Ollama is not asked anything.
-    `now` and `ram_free` are injectable for tests. See docs/guide/running.md.
+    `now`, `ram_free` and `sleep` are injectable for tests. See docs/guide/running.md.
     """
     url, model, fit_ctx = llm.url, llm.model_name, llm.num_ctx
     # With no deadline nothing runs, so Ollama is not even asked for the model's limit.
@@ -225,7 +245,8 @@ def run_reruns(
         handled: set[str] = set()
         loaded = False
         s_per_token: float | None = None
-        bench = load_benches(vault).get(model)
+        benches = {_with_tag(name): b for name, b in load_benches(vault).items()}
+        bench = benches.get(_with_tag(model))
         if bench is not None and bench.paper_tokens > 0:
             s_per_token = bench.seconds_per_paper / bench.paper_tokens * SPILL_GUESS
 
@@ -257,11 +278,15 @@ def run_reruns(
 
             index = 0
             stop = False
-            for ctx, group in buckets(candidates, cap):
+            for n, (ctx, group) in enumerate(buckets(candidates, cap)):
                 first = group[0]
                 if not time_ok(first):
                     handle.note(f"not enough time before {deadline:%H:%M} for the next rerun")
                     break
+                if n > 0:
+                    # The last bucket's load still holds RAM; free it first so the reading is fair.
+                    _unload_and_wait(url, model, handle.note, sleep)
+                    loaded = False
                 free = ram_free()
                 if free is None:
                     handle.note("free RAM could not be read; stopping reruns")
@@ -274,6 +299,7 @@ def run_reruns(
                                 f"only {_gib(max(0, allowed))} can be spared; stopping reruns")
                     break
                 handle.note(f"loading {model} at {ctx} tokens ({_gib(max(0, need))} in RAM)")
+                loaded = True
                 _load(url, model, ctx, load_timeout())
                 size, vram = _sizes(url, model)
                 in_ram = size - vram

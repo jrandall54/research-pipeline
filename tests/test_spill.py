@@ -300,8 +300,8 @@ def test_ram_allowance_is_free_ram_minus_margin_only(conn, tmp_path, ollama, mon
     save_test_bench(tmp_path)
     fake = fake_summarize(Clock())
     monkeypatch.setattr(spill, "summarize_paper", fake)
-    # 2.9 GiB = 3.11 GB may be used: enough for the first bucket, not the second, even though
-    # the model already holds 0.55 GB of RAM when the second is checked (no add-back).
+    # 2.9 GiB = 3.11 GB may be used: enough for the first bucket, not the second (the model is
+    # unloaded before the second reading, and the reading is still 6.9 GiB).
     counts, _ = run(conn, tmp_path, START + timedelta(hours=3), ram=6.9)
     assert counts == {"rerun": 1, "rerun_waiting": 1}
     assert ollama.loads_at(90112) == []
@@ -530,3 +530,46 @@ def test_health_line_shows_reruns():
     assert " · rerun 2 · rerun waiting 1" in line
     plain = cli.health_line(START.date(), {"rerun": 0, "rerun_waiting": 0}, [])
     assert "rerun" not in plain
+
+
+def test_later_bucket_reads_ram_after_unloading_the_last_load(conn, tmp_path, ollama, monkeypatch):
+    add_cut(conn, "2501.00001", 61440)  # bucket 65536: 0.82 GB estimated, 0.55 GB really in RAM
+    add_cut(conn, "2501.00002", 69632)  # bucket 73728: 1.64 GB estimated, 1.37 GB really in RAM
+    save_test_bench(tmp_path)
+    fake = fake_summarize(Clock())
+    monkeypatch.setattr(spill, "summarize_paper", fake)
+
+    def ram():  # 5.6 GiB free, less whatever our model holds in RAM right now
+        held = sum(max(0, ollama.base + ollama.kv * c - ollama.vram) for c in ollama.loaded.values())
+        return 5.6 - held / GIB
+
+    # With bucket 1 still loaded only 1.09 GiB could be spared (< 1.64 GB); after unloading, 1.6 GiB.
+    counts, errors = spill.run_reruns(conn, llm(), tmp_path, START + timedelta(hours=3),
+                                      now=Clock(), ram_free=ram, sleep=lambda s: None)
+    assert errors == []
+    assert counts == {"rerun": 2, "rerun_waiting": 0}
+    assert len(ollama.loads_at(73728)) == 1
+    assert len(ollama.unloads()) == 2 and not ollama.loaded  # between buckets, and at the end
+
+
+def test_unload_wait_is_bounded(monkeypatch):
+    monkeypatch.setattr(spill, "unload", lambda *a: None)
+    monkeypatch.setattr(spill, "_ps", lambda url: [{"name": MODEL}])  # never lets go
+    slept, notes = [], []
+    spill._unload_and_wait(URL, MODEL, notes.append, slept.append)
+    assert sum(slept) == spill.UNLOAD_WAIT
+    assert notes and "still loaded" in notes[0]
+
+
+def test_bench_saved_without_tag_is_used(conn, tmp_path, ollama, monkeypatch):
+    save_bench(tmp_path, Bench(model="foo", num_ctx=FIT, read_tps=1000, write_tps=20,
+                               seconds_per_paper=600.0, paper_tokens=20000,
+                               measured_at=datetime(2026, 11, 1, tzinfo=UTC)))
+    add_cut(conn, "2501.00001", 61440)  # bench says ~5,170 s; only 2 h left but over the margin
+    fake = fake_summarize(Clock())
+    monkeypatch.setattr(spill, "summarize_paper", fake)
+    client = OllamaClient(URL, "foo:latest", FIT)
+    counts, _ = spill.run_reruns(conn, client, tmp_path, START + timedelta(minutes=80),
+                                 now=Clock(), ram_free=lambda: 32.0)
+    assert counts == {"rerun": 0, "rerun_waiting": 1}  # refused by the bench estimate
+    assert fake.calls == []

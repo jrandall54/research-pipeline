@@ -54,11 +54,11 @@ Results are in the owner's vault (`model-comparison-2026-11-23/README.md`), not 
 
 | Model | Facts covered | Unverified citations | Time, 10 papers |
 |---|---|---|---|
-| q3.8-27b-34k, 57K ctx, fully on GPU | 19 of 50 | 0 | 8m55s |
+| a 27B dense model (IQ3_S), 57K ctx, fully on GPU | 19 of 50 | 0 | 8m55s |
 | Qwen3.6-35B-A3B UD-IQ3_S, 49K ctx, ~95% on GPU | 16 of 50 | 5 (one paper) | 4m43s |
 | Gemma4-26B-A4B UD-IQ4_XS (3 papers only) | 6 of 15 (27B: 5) | 2 | 2m16s |
 
-- **Decision: the 27B stays the default** (Qwen 3.6 fails the pass rule: covered -3, unverified +5). Owner's `rpipe model` is **pinned to `q3.8-27b-34k:latest`** (not `auto`): with the two new models installed, `auto` could have switched the nightly run untested. `rpipe model set auto` undoes it.
+- **Decision: the 27B stays the default** (Qwen 3.6 fails the pass rule: covered -3, unverified +5). Owner's `rpipe model` is **pinned to the owner's 27B dense model** (not `auto`): with the two new models installed, `auto` could have switched the nightly run untested. `rpipe model set auto` undoes it.
 - **The fit gate only accepts models 100% on the GPU**, so `rpipe model fit` refuses Gemma and Qwen 3.6 (both ~93-96% on GPU at these sizes). To test them, pin model and context in a throwaway vault: copy `config.yaml`, `profile.yaml` and `gold/gold.json` to a temp folder, set `llm_model` and `llm_num_ctx` there, run `rpipe eval run --judge --vault TEMPDIR`. The real config is never touched. This is the case B.5 (RAM-spill reruns) is meant to serve; it also argues for letting B.4 recommend spill-tolerant mixture-of-experts models. Unload the previous model first (`ollama stop NAME`), or the next fit probe sees a busy GPU.
 - **Untried:** Qwen3.6 `UD-IQ4_XS` (17.7 GB, more spill); Qwen 3.5 35B-A3B; smaller quants of Gemma that fit fully (`UD-Q3_K_M` 12.7 GB, `UD-IQ3_S` 11.3 GB). Exact Hub file sizes come from the Hugging Face API (`/api/models/REPO/tree/main`). The Google guide's Q3_K_M size for the 35B models (~14.2 GB) was wrong (really 16.4-16.6 GB); its claims on layer counts were checked against the models' config files (Qwen3.6: 30 of 40 layers linear attention; Gemma 4: 25 of 30 sliding-window, `num_kv_shared_layers = 0`).
 - **arXiv API returned HTTP 429** during `gold auto`. Fixed: `gold auto` takes titles from the vault (no metadata API call), and the API and HTML fetches now retry 429/503 (15 s, 45 s, 120 s or `Retry-After`, three retries, announced in progress). `gold draft` and `gold add` still need the metadata API.

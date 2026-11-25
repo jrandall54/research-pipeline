@@ -103,7 +103,7 @@ from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, St
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
-from research_pipeline.run_lock import RunLocked, run_lock
+from research_pipeline.run_lock import RunLocked, VaultLock
 from research_pipeline.scan import (
     DEFAULT_OLLAMA_PORT,
     detect_ollama_server,
@@ -487,20 +487,66 @@ def _report(counts: dict[str, int], errors: list[str]) -> None:
 RUN_LOCKED_EXIT = 75  # EX_TEMPFAIL: "try again later"; the next night proceeds normally
 
 
+_held: VaultLock | None = None  # the lock the running command holds, so a prompt can let go of it
+
+
+def _take(lock: VaultLock, again: bool = False) -> None:
+    """Take `lock`, or say who is working and exit 75."""
+    try:
+        lock.acquire()
+    except RunLocked as exc:
+        started = "nothing further was started" if again else "nothing was started"
+        typer.echo(f"{exc}; {started}. Wait for it to finish (see `rpipe runs`).", err=True)
+        raise typer.Exit(code=RUN_LOCKED_EXIT) from exc
+
+
 @contextmanager
 def _pipeline_lock(ctx: _Context, holder: str) -> Iterator[None]:
     """Hold the vault's run lock as `holder` (e.g. "rpipe summarize") for the block.
 
     If another pipeline command holds it, say which one and exit 75 before anything starts.
     Every locked command enters this right after `_open`, before any network, model or
-    Ollama call. The list of locked commands is in docs/guide/running.md.
+    Ollama call. While the command waits for an answer (`_prompt`, `_confirm`) the lock is
+    let go of, so a nightly run is never refused because a question sits unanswered.
+    The list of locked commands is in docs/guide/running.md.
     """
+    global _held
+    lock = VaultLock(ctx.vault, holder)
+    _take(lock)
+    outer, _held = _held, lock
     try:
-        with run_lock(ctx.vault, holder):
-            yield
-    except RunLocked as exc:  # only taking the lock raises this: no locked command takes it twice
-        typer.echo(f"{exc}; nothing was started. Wait for it to finish (see `rpipe runs`).", err=True)
-        raise typer.Exit(code=RUN_LOCKED_EXIT) from exc
+        yield
+    finally:
+        _held = outer
+        lock.release()
+
+
+@contextmanager
+def _waiting_for_you() -> Iterator[None]:
+    """Let go of the command's lock while it waits for the user; take it back after the answer.
+
+    If another job took the lock meanwhile, the command stops with exit 75 instead of
+    working beside it. Outside a locked command this does nothing.
+    """
+    lock = _held
+    if lock is None or not lock.held:
+        yield
+        return
+    lock.release()
+    yield  # Ctrl-C or end of input leaves the lock free; the command is ending anyway
+    _take(lock, again=True)
+
+
+def _prompt(*args, **kwargs):
+    """`typer.prompt` that lets go of the pipeline lock while waiting (see `_waiting_for_you`)."""
+    with _waiting_for_you():
+        return typer.prompt(*args, **kwargs)
+
+
+def _confirm(*args, **kwargs) -> bool:
+    """`typer.confirm` that lets go of the pipeline lock while waiting (see `_waiting_for_you`)."""
+    with _waiting_for_you():
+        return typer.confirm(*args, **kwargs)
 
 
 @app.command()
@@ -917,7 +963,7 @@ def _pick_index(labels: list[str]) -> int | None:
     for i, label in enumerate(labels, 1):
         typer.echo(f"  {i}. {label}")
     n = len(labels)
-    pick = typer.prompt(f"Pick 1-{n} or 0 to cancel", type=int)
+    pick = _prompt(f"Pick 1-{n} or 0 to cancel", type=int)
     if not 0 <= pick <= n:
         raise _SeedProblem(f"{pick} is not between 0 and {n}. Nothing was changed.")
     return pick - 1 if pick else None
@@ -928,7 +974,7 @@ def _choose(candidates: list[PaperMeta], yes: bool) -> PaperMeta | None:
         return candidates[0]
     if len(candidates) == 1:
         typer.echo(_describe(candidates[0]))
-        return candidates[0] if typer.confirm("Add this paper?", default=True) else None
+        return candidates[0] if _confirm("Add this paper?", default=True) else None
     index = _pick_index([_describe(m) for m in candidates])
     return None if index is None else candidates[index]
 
@@ -1043,7 +1089,7 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
         typer.echo("All proposed topics are already in your profile.")
     added: set[str] = set()
     for t in topics:
-        if yes or typer.confirm(f"Add topic '{t}'?", default=True):
+        if yes or _confirm(f"Add topic '{t}'?", default=True):
             try:
                 changed = profile_edit.add_topic(vault, t)
                 added.add(t.casefold())
@@ -1070,7 +1116,7 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
         found = [m for _, m in resolved if m is not None]
         typer.echo(f"Found {len(found)} of {len(resolved)} proposed papers on arXiv (the rest were dropped).")
         for meta in found:
-            if yes or typer.confirm(f"Add seed {_describe(meta)}?", default=True):
+            if yes or _confirm(f"Add seed {_describe(meta)}?", default=True):
                 try:
                     typer.echo(_add_seed(vault, arxiv, meta.id, yes=True))
                 except _SeedProblem as exc:
@@ -1093,7 +1139,7 @@ def profile_suggest(
     with _pipeline_lock(ctx, "rpipe profile suggest"):
         _require_model(ctx.config)
         if description is None:
-            description = typer.prompt("Describe your research in a few sentences")
+            description = _prompt("Describe your research in a few sentences")
         try:
             _suggest_flow(ctx.vault, ctx.config, description, yes)
         except (ValueError, ConfigError) as exc:
@@ -1256,7 +1302,7 @@ def _ask_facts() -> list[str]:
     typer.echo("Type one per line; press Enter on an empty line to finish. Aim for 3 or more.")
     facts: list[str] = []
     while True:
-        line = profile_edit.normalise_text(typer.prompt(f"Fact {len(facts) + 1}", default="", show_default=False))
+        line = profile_edit.normalise_text(_prompt(f"Fact {len(facts) + 1}", default="", show_default=False))
         if not line:
             return facts
         facts.append(line)
@@ -1272,7 +1318,7 @@ def gold_add(
     ctx = _open(vault)
     with _pipeline_lock(ctx, "rpipe gold add"):
         if text is None:
-            text = typer.prompt("arXiv link, id or title")
+            text = _prompt("arXiv link, id or title")
         if not text.strip():
             raise _fail("Input is empty: give an arXiv link, id or title.")
         with _clean_errors():
@@ -1471,11 +1517,11 @@ def _review_drafted(drafted: list[str], title: str) -> list[str]:
         typer.echo(f"  {n}. {fact}")
         choice = ""
         while choice not in ("k", "e", "d"):
-            choice = typer.prompt("Keep, edit or drop? [k/e/d]", default="k", show_default=False).strip().lower()
+            choice = _prompt("Keep, edit or drop? [k/e/d]", default="k", show_default=False).strip().lower()
         if choice == "k":
             kept.append(fact)
         elif choice == "e":
-            new = profile_edit.normalise_text(typer.prompt("New text (empty keeps the draft)", default="", show_default=False))
+            new = profile_edit.normalise_text(_prompt("New text (empty keeps the draft)", default="", show_default=False))
             kept.append(new or fact)
     return kept + _ask_facts()
 
@@ -1514,7 +1560,7 @@ def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str)
     """Resolve (paper id, fact number, fact text), prompting for whatever was omitted. Validates before any write."""
     papers = load_gold(vault)
     if paper_id is None:
-        paper_id = typer.prompt("Paper id")
+        paper_id = _prompt("Paper id")
     matches = [p for p in papers if has_gold([p], paper_id)]
     if not matches:
         raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
@@ -1523,7 +1569,7 @@ def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str)
         typer.echo(f"{paper.paper_id}  {paper.title}")
         for n, fact in enumerate(paper.key_facts, 1):
             typer.echo(f"  {n}. {fact}")
-        number = typer.prompt(f"Number of the fact to {verb}", type=int)
+        number = _prompt(f"Number of the fact to {verb}", type=int)
     if not 1 <= number <= len(paper.key_facts):
         raise _fail(f"{paper.paper_id} has {len(paper.key_facts)} fact(s); there is no fact {number}. See: rpipe gold list")
     return paper.paper_id, number, paper.key_facts[number - 1]
@@ -1541,7 +1587,7 @@ def gold_edit_fact(
     with _clean_errors():
         paper_id, number, _old = _pick_fact(ctx.vault, paper_id, number, "edit")
         if text is None:
-            text = typer.prompt("New text for the fact")
+            text = _prompt("New text for the fact")
         text = profile_edit.normalise_text(text)
         if not text:
             raise _fail("The fact is empty.")
@@ -1565,7 +1611,7 @@ def gold_remove_fact(
     ctx = _open(vault)
     with _clean_errors():
         paper_id, number, fact = _pick_fact(ctx.vault, paper_id, number, "remove")
-        if not yes and not typer.confirm(f'Remove fact {number} of {paper_id} ("{fact}")?', default=False):
+        if not yes and not _confirm(f'Remove fact {number} of {paper_id} ("{fact}")?', default=False):
             typer.echo("Cancelled. Nothing was changed.")
             return
         try:
@@ -1671,11 +1717,11 @@ def eval_grade(vault: VaultOption = None) -> None:
             for label, c in (("Problem", s.problem), ("Approach", s.approach), ("Results", s.results), ("Limitations", s.limitations)):
                 typer.echo(f"  {label}: {c.text} [{', '.join(c.sections)}]")
             while True:
-                answer = typer.prompt("Is this summary accurate? [y/n]").strip().lower()
+                answer = _prompt("Is this summary accurate? [y/n]").strip().lower()
                 if answer in ("y", "n"):
                     break
                 typer.echo("Please answer y or n.")
-            note = typer.prompt("Note (optional)", default="", show_default=False).strip()
+            note = _prompt("Note (optional)", default="", show_default=False).strip()
             with _clean_errors():
                 save_grade(ctx.vault, day, Grade(paper_id=e.paper_id, accurate=answer == "y", note=note))
     except (typer.Abort, KeyboardInterrupt, EOFError):
@@ -1965,7 +2011,7 @@ def _tune_undo(url: str) -> None:
     typer.echo("This removes only rpipe's own settings file; other files are untouched. Commands:")
     for argv in commands:
         typer.echo("  " + " ".join(argv))
-    if not typer.confirm("Undo now?", default=False):
+    if not _confirm("Undo now?", default=False):
         typer.echo("Nothing was changed.")
         return
     if not _run_plan(commands):
@@ -2008,7 +2054,7 @@ def model_tune(
             return
         if server.host_matches is False:
             typer.echo("Warning: changing the service would not change the server rpipe uses.")
-            if not typer.confirm("Continue anyway?", default=False):
+            if not _confirm("Continue anyway?", default=False):
                 typer.echo("Nothing was changed.")
                 return
         for s in settings:
@@ -2025,7 +2071,7 @@ def model_tune(
             for argv in commands:
                 typer.echo("  " + " ".join(argv))
             typer.echo(f"To undo later: {ollama_tune.UNDO_COMMAND}")
-            if not typer.confirm("Apply?", default=False):
+            if not _confirm("Apply?", default=False):
                 typer.echo("Nothing was changed.")
                 return
             before = None
@@ -2083,7 +2129,7 @@ def model_check(vault: VaultOption = None) -> None:
 
 def _ask(prompt: str) -> str:
     """One line of input; blank returns "". Ctrl-C or end of input raises typer.Abort."""
-    return typer.prompt(prompt, default="", show_default=False).strip()
+    return _prompt(prompt, default="", show_default=False).strip()
 
 
 def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
@@ -2096,7 +2142,7 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
     if not fresh_profile:
         label = "Your topics (these are the template examples, not topics of your own)" if is_template else "Your topics"
         typer.echo(f"{label}:\n{_numbered(profile.topics)}")
-        if not typer.confirm("Add more topics?", default=False):
+        if not _confirm("Add more topics?", default=False):
             return
     else:
         typer.echo("Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.")
@@ -2128,7 +2174,7 @@ def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
     current = ", ".join(config.arxiv_categories)
     if not fresh_config:
         typer.echo(f"arXiv categories: {_categories_text(config.arxiv_categories)}")
-        if not typer.confirm("Change categories?", default=False):
+        if not _confirm("Change categories?", default=False):
             return
     typer.echo(CATEGORY_HELP)
     typer.echo(
@@ -2136,7 +2182,7 @@ def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
         "every computer-science category (cs.*); more to fetch and rank). Change it any time with "
         "rpipe profile set-categories."
     )
-    entered = typer.prompt("arXiv categories (comma-separated)", default=current)
+    entered = _prompt("arXiv categories (comma-separated)", default=current)
     cats = ["all" if c.lower() == "all" else c for c in _split(entered)]
     if cats and cats != config.arxiv_categories:
         try:
@@ -2273,7 +2319,7 @@ def _pin_off_gpu(vault: Path, name: str) -> None:
 
 def _pick_candidate(count: int) -> int | None:
     while True:
-        text = typer.prompt("Use one? number, or Enter to keep your current model",
+        text = _prompt("Use one? number, or Enter to keep your current model",
                             default="", show_default=False).strip()
         if not text:
             return None
@@ -2308,7 +2354,7 @@ def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
         typer.echo("Ollama is not running, so nothing can be downloaded. Start it (or install it: "
                    f"{OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}) and try again.")
         return False
-    if not typer.confirm(f"Download {entry.pull} now ({entry.download_gb:g} GB)?", default=False):
+    if not _confirm(f"Download {entry.pull} now ({entry.download_gb:g} GB)?", default=False):
         return False
     try:
         with _reporter() as reporter, stage(reporter, "model pull", total=100, label=entry.pull) as handle:
@@ -2364,7 +2410,7 @@ def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
         except (LlmError, OSError, ValueError) as exc:
             typer.echo(f"The fit failed: {exc}")
             ok = False
-    if ok and typer.confirm("Measure its speed now (about 1-5 minutes)?", default=False):
+    if ok and _confirm("Measure its speed now (about 1-5 minutes)?", default=False):
         new_cfg = load_config(ctx.vault / "config.yaml").model_copy(update={"vault_path": ctx.vault})
         try:
             _measure_speed(ctx.vault, ctx.conn, new_cfg)
@@ -2435,7 +2481,7 @@ def _recheck(config: Config, info, problem: str, ok: Callable, question: str):
     """Show `problem` and re-detect the machine each time the user says they fixed it."""
     while not ok(info):
         typer.echo(problem)
-        if not typer.confirm(question, default=False):
+        if not _confirm(question, default=False):
             break
         info = detect_machine(config)
     return info
@@ -2479,7 +2525,7 @@ def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:
         "`haiku` uses less quota than `sonnet`; `opus` uses the most."
     )
     while True:
-        model = typer.prompt("Model (sonnet, haiku or opus)", default="sonnet").strip()
+        model = _prompt("Model (sonnet, haiku or opus)", default="sonnet").strip()
         try:
             resolve_model(model)
             break
@@ -2496,7 +2542,7 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
     the current backend; yes skips straight to the check, so a pinned model survives a re-run.
     Returns True when the final check passed (`none` counts as ready)."""
     config = load_config(vault / "config.yaml")
-    if offer_keep and typer.confirm(f"Keep current backend ({config.llm_backend})?", default=True):
+    if offer_keep and _confirm(f"Keep current backend ({config.llm_backend})?", default=True):
         return _check_backend(vault)
     info = detect_machine(config)
     _describe_machine(info)
@@ -2511,7 +2557,7 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
     for i, name in enumerate(options, 1):
         typer.echo(f"  {i}. {labels.get(name, name)}" + ("  [recommended]" if i == 1 else ""))
     while True:
-        pick = typer.prompt("Choice", default=1, type=int)
+        pick = _prompt("Choice", default=1, type=int)
         if 1 <= pick <= len(options):
             break
         typer.echo(f"Enter a number from 1 to {len(options)}.")
@@ -2587,7 +2633,7 @@ def catalog_update(vault: VaultOption = None) -> None:
         typer.echo(f"  {line}")
     if not _is_tty():
         raise _fail("Nothing saved: run in a terminal to confirm.")
-    if not typer.confirm("Save this catalog?", default=False):
+    if not _confirm("Save this catalog?", default=False):
         typer.echo("Not saved.")
         return
     catalog_mod.save_fetched(ctx.vault, text)
@@ -2791,7 +2837,7 @@ def review(
                     header = f"Digest {row['digest_date']} · paper {handled + 1} of {total}"
                 _show_paper(ctx.conn, row, f"{header} · {voted} voted, {skipped} skipped")
                 while True:
-                    answer = typer.prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
+                    answer = _prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
                     if answer in _REVIEW_KEYS:
                         break
                     typer.echo("Please answer u, d, s or q.")

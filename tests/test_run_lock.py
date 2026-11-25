@@ -1,10 +1,11 @@
 import sqlite3
 
 import pytest
+from fakes import StubArxiv, paper
 from typer.testing import CliRunner
 
 from research_pipeline import cli
-from research_pipeline.run_lock import LOCK_NAME, RunLocked, run_lock
+from research_pipeline.run_lock import LOCK_NAME, RunLocked, VaultLock, run_lock
 from research_pipeline.vault import init_vault
 
 runner = CliRunner()
@@ -107,3 +108,64 @@ def test_failing_finish_run_alone_still_surfaces(tmp_path, monkeypatch):
     # a crash in a stage is recorded, finish_run then fails with nothing else in flight... but the stage
     # crash was swallowed into `errors`, so finish_run's failure is the only error left and must surface
     assert isinstance(res.exception, sqlite3.OperationalError)
+
+
+# ---- interactive commands let go of the lock while they wait for you
+
+
+def _gold_add_setup(tmp_path, monkeypatch):
+    vault = tmp_path / "v"
+    init_vault(vault, topics=["x"])
+    monkeypatch.setattr(cli, "make_arxiv", lambda config: StubArxiv(by_id=[paper()]))
+    return vault
+
+
+def test_lock_is_free_while_a_prompt_waits(tmp_path, monkeypatch):
+    vault = _gold_add_setup(tmp_path, monkeypatch)
+    seen: list[str] = []
+
+    def nightly_run_tries(*args, **kwargs):
+        with run_lock(vault, "rpipe run"):  # raises RunLocked if gold add still held it
+            seen.append("free")
+        return kwargs.get("default", True)
+
+    answers = iter(["fact one", ""])
+    monkeypatch.setattr(cli.typer, "confirm", nightly_run_tries)
+    monkeypatch.setattr(cli.typer, "prompt", lambda *a, **k: nightly_run_tries() and next(answers))
+    res = runner.invoke(cli.app, ["gold", "add", "2307.15043", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen == ["free"] * 3  # "Add this paper?", then two facts
+    assert (vault / LOCK_NAME).read_text() == ""
+
+
+def test_lock_is_held_again_after_the_answer(tmp_path, monkeypatch):
+    vault = _gold_add_setup(tmp_path, monkeypatch)
+    holders: list[str] = []
+    real_add = cli.add_gold
+
+    def add_and_look(*args, **kwargs):
+        holders.append((vault / LOCK_NAME).read_text())
+        return real_add(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "add_gold", add_and_look)
+    res = runner.invoke(cli.app, ["gold", "add", "2307.15043", "--vault", str(vault)], input="y\nfact one\n\n")
+    assert res.exit_code == 0, res.output
+    assert holders == ["rpipe gold add"]
+
+
+def test_a_job_that_starts_during_a_prompt_stops_the_command(tmp_path, monkeypatch):
+    vault = _gold_add_setup(tmp_path, monkeypatch)
+    nightly = VaultLock(vault, "rpipe run")
+
+    def run_starts_meanwhile(*args, **kwargs):
+        nightly.acquire()  # the nightly run takes the lock while you read the question
+        return True
+
+    monkeypatch.setattr(cli.typer, "confirm", run_starts_meanwhile)
+    try:
+        res = runner.invoke(cli.app, ["gold", "add", "2307.15043", "--vault", str(vault)])
+    finally:
+        nightly.release()
+    assert res.exit_code == cli.RUN_LOCKED_EXIT
+    assert "rpipe run is already working" in res.stderr
+    assert "nothing further was started" in res.stderr

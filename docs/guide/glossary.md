@@ -170,7 +170,7 @@
 
 **flock (file lock)** — an operating-system lock on an open file. Every pipeline command (`rpipe run`, `summarize`, `model tune` and the others listed in `running.md`) takes one on `.run.lock` in the vault so two pipeline jobs cannot overlap; the system releases it automatically when the process ends, however it ends.
 
-**Lock holder** — the command currently holding the vault lock, written as text into `.run.lock` (for example `rpipe run`) while it works and erased when it ends. A command refused by the lock reads it to say who is working: `rpipe run is already working on <vault>`. See `running.md`.
+**Lock holder** — the command currently holding the vault lock, written as text into `.run.lock` (for example `rpipe run`) while it works and erased when it ends. A command refused by the lock reads it to say who is working: `rpipe run is already working on <vault>`. An interactive command lets go of the lock (and empties the file) while it waits for your answer. See `running.md`.
 
 **Busy timeout** — how long a SQLite connection keeps retrying when another connection is writing, before giving up with "database is locked". `rpipe` sets 5 seconds, so a vote cast during a nightly run waits briefly instead of failing. See `running.md`.
 

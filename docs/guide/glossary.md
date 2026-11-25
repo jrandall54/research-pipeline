@@ -305,3 +305,5 @@
 **Bucket (of reruns)** — a group of cut papers reread at the same context window. Each paper's needed context is rounded up to a multiple of 8,192 tokens; papers that land on the same number share one bucket, so the model is loaded once for all of them instead of once per paper (each load takes tens of seconds). Papers needing 61,440 and 63,488 tokens both go in the 65,536 bucket. See "Reading cut papers whole: reruns" in `running.md`.
 
 **Morning deadline (`night_deadline`)** — the clock time (default 07:00) by which reruns of cut papers must finish, or `off`. It never stops normal papers. If the next such time is more than 12 hours away there is no deadline and reruns are skipped. Set with `rpipe schedule set-deadline`. See `scheduling.md`.
+
+**Call time limit** — how long one request to the local model may take before rpipe gives up on it (a timeout). Normally 600 seconds; on a machine `rpipe model bench` measured as slow it is raised to 1.5 times the time needed to read a full context and write the longest allowed answer at the measured speeds. See "The time limit for one call" in `llm.md`.

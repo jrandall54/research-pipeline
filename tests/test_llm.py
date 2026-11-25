@@ -330,3 +330,34 @@ def test_gpu_share_from_ps():
     assert llm.gpu_share() is None
     route.mock(side_effect=httpx.ConnectError("down"))
     assert llm.gpu_share() is None
+
+
+def _bench(read_tps: float, write_tps: float, model: str = "m:latest"):
+    from datetime import datetime
+
+    from research_pipeline.bench import Bench
+    return Bench(model=model, num_ctx=32768, read_tps=read_tps, write_tps=write_tps,
+                 seconds_per_paper=1.0, paper_tokens=22000, measured_at=datetime(2026, 11, 24))
+
+
+def test_call_timeout_cpu_bench():
+    from research_pipeline.llm import call_timeout
+    assert call_timeout(32768, _bench(80, 18)) == pytest.approx(1.5 * (409.6 + 227.6), rel=1e-3)
+
+
+def test_call_timeout_fast_gpu_keeps_600():
+    from research_pipeline.llm import call_timeout
+    assert call_timeout(32768, _bench(3000, 40)) == 600.0
+
+
+def test_call_timeout_no_bench():
+    from research_pipeline.llm import call_timeout
+    assert call_timeout(32768, None) == 600.0
+
+
+def test_call_timeout_other_model_or_unusable_speeds_keep_600():
+    from research_pipeline.llm import call_timeout
+    assert call_timeout(32768, _bench(80, 18, "other:7b"), model="m") == 600.0
+    assert call_timeout(32768, _bench(80, 18, "m"), model="m:latest") > 600.0  # same model, tag spelled out
+    assert call_timeout(32768, _bench(0, 18)) == 600.0
+    assert call_timeout(32768, _bench(80, 0)) == 600.0

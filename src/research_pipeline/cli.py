@@ -85,7 +85,16 @@ from research_pipeline.gold import (
     remove_gold,
     suggest_papers,
 )
-from research_pipeline.llm import CALL_TIMEOUT, LLM, NO_MODEL, LlmError, LlmLimitReached, OllamaClient, pull_model
+from research_pipeline.llm import (
+    CALL_TIMEOUT,
+    LLM,
+    NO_MODEL,
+    LlmError,
+    LlmLimitReached,
+    OllamaClient,
+    call_timeout,
+    pull_model,
+)
 from research_pipeline.machine import OLLAMA_INSTALL, _generation_models, detect_machine, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
@@ -2185,17 +2194,19 @@ def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
     return True
 
 
-def _warn_call_limit(bench: bench_mod.Bench | None) -> None:
-    """Warn when reading a typical paper alone would take longer than one model call may last."""
+def _note_call_limit(bench: bench_mod.Bench | None) -> None:
+    """When reading a typical paper takes longer than CALL_TIMEOUT, say the measured speed lifts the limit."""
     if bench is None or bench.read_tps <= 0:
         return
     seconds = bench.paper_tokens / bench.read_tps
     if seconds > CALL_TIMEOUT:
+        limit = call_timeout(bench.num_ctx, bench)
         typer.echo(
-            f"Warning: at the measured {bench.read_tps:.0f} tokens/s, reading a {bench.paper_tokens:,}-token "
-            f"paper takes about {seconds:,.0f} s, more than the {CALL_TIMEOUT:.0f}-second limit each model "
-            "call has today. Long papers will time out and fall back to their abstracts. A later update "
-            "(B.5/B.6) lifts this limit; a smaller or faster model avoids it now.")
+            f"Note: at the measured {bench.read_tps:.0f} tokens/s, reading a {bench.paper_tokens:,}-token "
+            f"paper takes about {seconds:,.0f} s, longer than the usual {CALL_TIMEOUT:.0f}-second limit for "
+            f"one model call. Because this speed was measured, calls to this model may take up to about "
+            f"{limit:,.0f} s, so long papers still finish; a night of them just takes longer. A smaller or "
+            "faster model makes the night shorter.")
 
 
 def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
@@ -2234,7 +2245,7 @@ def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
             _measure_speed(ctx.vault, ctx.conn, new_cfg)
         except (LlmError, OSError, ValueError) as exc:
             typer.echo(f"Speed not measured: {exc}")
-    _warn_call_limit(bench_mod.load_benches(ctx.vault).get(entry.pull))
+    _note_call_limit(bench_mod.load_benches(ctx.vault).get(entry.pull))
     _go_back_hint(*previous)
     if not ok:
         raise typer.Exit(code=1)

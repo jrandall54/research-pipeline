@@ -20,7 +20,7 @@ Every client is a **backend** with two class attributes: `name` and `local`. Thi
 
 A **usage limit** (a subscription plan saying "you have used your allowance until later") is reported by a backend as `LlmLimitReached`, a subclass of `LlmError`. The summarize stage treats it differently from a timeout: it stops calling the model, records no failure and burns no retry, so the remaining papers wait for the next run (see `summaries.md`). The Ollama client never raises it.
 
-Failures become `LlmError`: server not running (hint: `ollama serve`), model not installed (HTTP 404, hint: `ollama pull <model>`), timeout (the subclass `LlmTimeout`; after the first one a `rpipe run` stops calling the model for the rest of that run, see `running.md`), other HTTP errors, and invalid output after the retry.
+Failures become `LlmError`: server not running (hint: `ollama serve`), model not installed (HTTP 404, hint: `ollama pull <model>`), timeout (the subclass `LlmTimeout`, when a call takes longer than its time limit, below; after the first one a `rpipe run` stops calling the model for the rest of that run, see `running.md`), other HTTP errors, and invalid output after the retry.
 
 ## Why it's built this way
 
@@ -30,6 +30,28 @@ Failures become `LlmError`: server not running (hint: `ollama serve`), model not
 - **Thinking off and temperature 0.** Qwen3 models can write a long hidden "thinking" section first; it costs time and can leak into the answer. Temperature 0 makes the model pick its most likely word each time, so the same paper gives the same summary, which matters when we measure accuracy.
 - **Local, not a cloud API.** Papers and your profile stay on your machine, there is no per-call cost and no key to manage. The price is needing a decent computer. Rejected: a cloud API.
 - **One retry, then fail.** A second try fixes most formatting slips; a third rarely does and wastes minutes.
+
+## The time limit for one call
+
+**What it does.** Each call to Ollama may take a limited time; after that the client gives up and raises `LlmTimeout`. The limit is 600 seconds (`CALL_TIMEOUT`), or longer when `rpipe model bench` has measured this machine as slow for this model. Without the longer limit, a slow computer (for example one with no graphics card) could need more than 600 s for one long paper, and that first timeout stops the model for the rest of the night.
+
+**How it works.**
+1. When the nightly run (or any command that summarizes) sets up the Ollama client, it resolves the model and context as usual, then looks in `VAULT/cache/bench.json` for a speed measurement of that same model. Names are compared with the tag spelled out, so a measurement saved as `llama3.2` counts for `llama3.2:latest`.
+2. No measurement for that model: the limit is 600 s, as before.
+3. With one, `call_timeout(num_ctx, bench)` works out the worst case for one call: reading a prompt that fills the whole context window at the measured reading speed, plus writing the most the model is allowed to write (`num_predict`, 4,096 tokens) at the measured writing speed. It adds half again as a safety margin (times 1.5). The limit is that number or 600 s, whichever is larger, so a fast machine never gets less time than before.
+
+Worked example: a CPU-only machine measured at 80 tokens/s reading and 18 tokens/s writing, with a 32,768-token context. Reading a full context takes 32,768 / 80 ≈ 410 s and writing the maximum takes 4,096 / 18 ≈ 228 s, so the limit is 1.5 × (410 + 228) ≈ 957 s. A fast GPU reading 3,000 tokens/s and writing 40 tokens/s gets 1.5 × (11 + 102) ≈ 170 s, less than 600, so it keeps 600 s.
+
+**Why it's built this way.**
+- **Measured, not guessed.** The bench already records reading and writing speed per model; using it means the limit grows only on a machine that really is slow, and by how slow it is. Rejected: a bigger fixed limit for everyone, which would make a hung Ollama on a fast machine waste far more time before the run gives up.
+- **The worst case, not the typical paper.** A full context and the full output limit bound what one call can legitimately need, so a slow but working call is never cut off. The 1.5 margin covers a busier machine than at bench time.
+- **Never below 600 s.** The bench is one short measurement; it should only ever add time, never take away the margin a fast machine had.
+- **A measurement of another model is ignored.** Speeds differ a lot between models, so the limit uses only the bench of the model actually in use.
+- **Not a setting.** It follows from the measurement; run `rpipe model bench` again after changing hardware or model. The rerun stage for cut papers sets its own per-call limits from the time left before the morning deadline (see `running.md`).
+
+**How to run / check it.** `rpipe model bench` measures the speeds; `rpipe model recommend` prints the longer limit when a typical paper takes more than 600 s to read. `uv run pytest tests/test_llm.py tests/test_registry.py -q`.
+
+**Where the code is.** `call_timeout` and `CALL_TIMEOUT` in `src/research_pipeline/llm.py`; `make_ollama` in `src/research_pipeline/registry.py` looks up the measurement.
 
 ## Choosing the model and context automatically
 
@@ -143,7 +165,8 @@ Working caching shows the second time far smaller than the first (only the task 
 
 ## Where the code is
 
-- `src/research_pipeline/llm.py`: `LLM` protocol (with `name` and `local`), `OllamaClient`, `LlmError`, `LlmTimeout`, `LlmLimitReached`, `PrivacyError`, `require_local`, `NO_MODEL`.
+- `src/research_pipeline/llm.py`: `LLM` protocol (with `name` and `local`), `OllamaClient`, `LlmError`, `LlmTimeout`, `LlmLimitReached`, `PrivacyError`, `require_local`, `NO_MODEL`, `CALL_TIMEOUT`, `call_timeout` (the per-call time limit).
+- `src/research_pipeline/registry.py`: `make_ollama` (builds the client with the measured time limit).
 - `src/research_pipeline/models.py`: `Config.llm_model`, `llm_url`, `llm_num_ctx`.
 - `src/research_pipeline/profile_edit.py`: `set_llm_model`, `set_llm_num_ctx`.
 - `src/research_pipeline/cli.py`: the `model` commands, `build_llm`.

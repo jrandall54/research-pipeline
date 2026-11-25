@@ -2,10 +2,13 @@
 
 import json
 from collections.abc import Callable
-from typing import Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
+
+if TYPE_CHECKING:  # bench.py imports this module, so only for type hints
+    from research_pipeline.bench import Bench
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -24,6 +27,19 @@ def _with_tag(name: str) -> str:
     """Ollama lists `llama3.2` as `llama3.2:latest`; compare names with the tag spelled out."""
     last = name.rsplit("/", 1)[-1]
     return name if ":" in last else f"{name}:latest"
+
+
+def call_timeout(num_ctx: int, bench: "Bench | None", model: str | None = None) -> float:
+    """Seconds one Ollama call may take: CALL_TIMEOUT, or more on a machine measured as slow.
+
+    With a speed measurement (`rpipe model bench`) for this model, allow 1.5 times the time to
+    read a full context and write the NUM_PREDICT output limit, but never less than CALL_TIMEOUT.
+    No measurement, one for another model (when `model` is given) or unusable speeds: CALL_TIMEOUT."""
+    if bench is None or bench.read_tps <= 0 or bench.write_tps <= 0:
+        return CALL_TIMEOUT
+    if model is not None and _with_tag(bench.model) != _with_tag(model):
+        return CALL_TIMEOUT
+    return max(CALL_TIMEOUT, 1.5 * (num_ctx / bench.read_tps + NUM_PREDICT / bench.write_tps))
 
 
 class LlmError(Exception):

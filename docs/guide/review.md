@@ -78,14 +78,15 @@ rpipe show --recent 1            # everything in the latest digest
 rpipe show --recent 3            # the latest three digest days, newest day first
 ```
 
-Ids and titles are resolved exactly like `rpipe vote`: an id first, in any common spelling (`2611.25005`, `2611.25005v2`, `arXiv:2611.25005` or an arxiv.org link; see "Paper-id spellings" in [data-model.md](data-model.md)), then the exact text as an id, then a title fragment; if several titles match you pick from a numbered list, and if none match it exits 1 with `No paper in your vault matches ...`. `--recent N` takes N of 1 or more and lists the papers of the latest N distinct digest dates, newest date first, and within a date in digest order (triage score best first, then id), the same order `review` uses. With neither an id nor `--recent` it exits 1 with a hint. Code: `show` in `cli.py` (reuses `_resolve_paper` and `_show_paper`) and `recent_digest_papers` in `review.py`; tests in `tests/test_cli_show.py`.
+Ids and titles are resolved exactly like `rpipe vote`: an id first, in any common spelling (`2611.25005`, `2611.25005v2`, `arXiv:2611.25005` or an arxiv.org link; see "Paper-id spellings" in [data-model.md](data-model.md)), then the exact text as an id, then a title fragment; if several titles match you pick from a numbered list, and if none match it exits 1 with `No paper in your vault matches ...`. `--recent N` takes N of 1 or more and lists the papers of the latest N distinct digest dates, newest date first, and within a date in digest order (triage score best first, then id), the same order `review` uses. With neither an id nor `--recent` it exits 1 with a hint. Code: `show` in `cli.py` (reuses `_resolve_paper` and `_show_paper`), which gets each paper from `library_api.get_paper` or `library_api.recent_papers` (a wrapper around `recent_digest_papers` in `review.py`); tests in `tests/test_cli_show.py`.
 
 ## Why it's built this way
 
 - **Skips in their own table, not as a vote value.** `votes` feeds the ranking; "not now" says nothing about taste. Storing it as a vote (say 0) would blur "cleared" with "undecided" and risk leaking into scoring. A separate `skips` table keeps the profile clean and makes "review later" a simple list. Rejected: a `status` column on papers (mixes a user decision with the pipeline's own states).
 - **Thin loop over pure queue functions.** `review.py` only reads the database and is tested without a terminal; the CLI loop only prints, prompts and writes. Rejected: putting the queries in `cli.py` (hard to test, hard to explain).
 - **Line input, not single keypress.** Needs no raw-terminal code and can be tested with plain input. The cost is pressing Enter.
-- **Reuse `record_vote` and `render_summary`.** One way to vote and one way to render a summary, so the digest file, `rpipe vote` and `rpipe review` cannot drift apart.
+- **Reuse one vote function and `render_summary`.** `rpipe review` and `rpipe vote` both vote through `library_api.vote` (which calls `library.record_vote`), and the digest file and the terminal both render summaries with `render_summary`, so they cannot drift apart.
+- **Through the app's door.** The loop gets each paper as a `PaperView` from `library_api` (title, reasons, summary already attached) and writes through `library_api.vote`, `skip` and `unskip`; it never queries the database itself. A future web or phone view can then show the same queue with the same rules. See "The app's door" in [architecture.md](architecture.md).
 - **Refuse when not a terminal.** A script feeding input would silently vote on papers it never showed you.
 - **Oldest first.** Yesterday's papers are the ones that will otherwise never get read.
 
@@ -104,9 +105,10 @@ Both commands accept `--vault PATH`.
 
 ## Where the code is
 
-- `src/research_pipeline/cli.py`: the `review` command and `_show_paper`; `feedback` prints the review-later count.
-- `src/research_pipeline/review.py`: `review_queue`, `later_queue`, `queue_progress`.
+- `src/research_pipeline/cli.py`: the `review` and `show` commands and `_show_paper` (prints a `PaperView`); `feedback` prints the review-later count.
+- `src/research_pipeline/library_api.py`: `review_queue`, `later_queue`, `queue_progress`, `recent_papers`, `get_paper` (return `PaperView`s / `QueueProgress`), `vote`, `skip`, `unskip`; the commands use only these.
+- `src/research_pipeline/review.py`: the queue queries `review_queue`, `later_queue`, `queue_progress`, `recent_digest_papers`, which `library_api` wraps.
 - `src/research_pipeline/library.py`: `record_vote`, `record_skip`, `clear_skip`; the `skips` table ([data-model.md](data-model.md)).
-- `src/research_pipeline/db.py`: `get_summary`.
+- `src/research_pipeline/db.py`: `get_summary` (attached to each `PaperView` as `summary`).
 - `src/research_pipeline/digest.py`: `render_summary`, shared with the digest file.
 - Tests: `tests/test_cli_review.py`, `tests/test_review.py`.

@@ -65,6 +65,7 @@ A one-line note with no heading gives one chunk, `idea\nTry retrieval for malwar
 - **Edits replace, not append.** Re-indexing an item deletes its old chunks and vectors first, so stale text cannot keep influencing results (an anti-goal in the design).
 - **Remove moves, never deletes.** `.removed/` makes a mistake recoverable.
 - **Heading prefix on each chunk.** Without it a paragraph reading "It fails on long inputs." has no subject once separated from its note.
+- **Commands go through the app's door.** `rpipe shelf add|list|remove|sync` call `library_api.shelf_add`, `shelf_items`, `shelf_remove` and `shelf_sync`, which wrap `shelf.py` and return data (`ShelfItemView`: name, added date, chunk count; `SyncResult`) for `cli.py` to print. A future app can manage the shelf with the same calls. Loading the embedding model and showing progress stay in `cli.py`. See "The app's door" in [architecture.md](architecture.md). The nightly triage still syncs the shelf by calling `shelf.py` directly.
 - **Plain size constants.** 200 and 1500 characters are rules of thumb; there is no setting for them, so there is nothing for a user to hand-edit.
 
 ## What never leaves your machine
@@ -132,4 +133,4 @@ Use the commands above. Tests: `uv run pytest tests/test_shelf.py tests/test_cli
 
 ## Where the code is
 
-The commands are `shelf_app` in `src/research_pipeline/cli.py`. Logic is in `src/research_pipeline/shelf.py`: `chunk_text`, `sync_shelf`, `add_to_shelf`, `remove_from_shelf`, `SyncResult`. Storage helpers are in `library.py` (`upsert_shelf_item`, `delete_shelf_item`, `list_shelf_items`, `shelf_chunk_rows`), next to the other functions you write by hand; the tables are described in [data-model.md](data-model.md).
+The commands are `shelf_app` in `src/research_pipeline/cli.py`; they reach the shelf only through `src/research_pipeline/library_api.py` (`shelf_add`, `shelf_items`, `shelf_remove`, `shelf_sync`, `ShelfItemView`). Logic is in `src/research_pipeline/shelf.py`: `chunk_text`, `sync_shelf`, `add_to_shelf`, `remove_from_shelf`, `SyncResult`. Storage helpers are in `library.py` (`upsert_shelf_item`, `delete_shelf_item`, `list_shelf_items`, `shelf_chunk_rows`), next to the other functions you write by hand; the tables are described in [data-model.md](data-model.md).

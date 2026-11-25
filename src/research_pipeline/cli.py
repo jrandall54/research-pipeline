@@ -26,6 +26,7 @@ from research_pipeline import catalog as catalog_mod
 from research_pipeline import (
     categories,
     judge,
+    library_api,
     ollama_fit,
     ollama_tune,
     onboarding,
@@ -43,7 +44,6 @@ from research_pipeline.db import (
     count_missing_summary,
     finish_run,
     get_paper,
-    get_summary,
     list_runs,
     open_db,
     papers_by_ids,
@@ -79,15 +79,6 @@ from research_pipeline.gold import (
     suggest_papers,
 )
 from research_pipeline.ids import normalise_paper_id
-from research_pipeline.library import (
-    clear_skip,
-    current_votes,
-    list_saved,
-    list_shelf_items,
-    record_skip,
-    record_vote,
-    set_saved,
-)
 from research_pipeline.llm import (
     CALL_TIMEOUT,
     LLM,
@@ -105,7 +96,6 @@ from research_pipeline.parts import SPLIT_BELOW_CTX, resolve_mode
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
-from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
 from research_pipeline.run_lock import RunLocked, VaultLock
 from research_pipeline.scan import (
     DEFAULT_OLLAMA_PORT,
@@ -116,7 +106,6 @@ from research_pipeline.scan import (
 )
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
-from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.spill import model_cap, run_reruns
@@ -1237,21 +1226,21 @@ def shelf_add(
         with _reporter() as reporter:
             embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
         with _clean_errors():
-            name = add_to_shelf(ctx.conn, ctx.vault / "my_work", embedder, source)
-        typer.echo(f"Added '{name}' to your shelf. Papers close to it will now rank higher.")
+            item = library_api.shelf_add(ctx.conn, ctx.vault / "my_work", embedder, source)
+        typer.echo(f"Added '{item.name}' to your shelf. Papers close to it will now rank higher.")
 
 
 @shelf_app.command("list")
 def shelf_list(vault: VaultOption = None) -> None:
     """Show what is on the shelf."""
     ctx = _open(vault)
-    rows = list_shelf_items(ctx.conn)
-    if not rows:
+    items = library_api.shelf_items(ctx.conn)
+    if not items:
         typer.echo('Your shelf is empty. Add a note or file with: rpipe shelf add "your idea" (or a .md/.txt path).')
         return
-    typer.echo(f"Shelf: {_item_count(len(rows), 'item')}")
-    for r in rows:
-        typer.echo(f"  {r['name']}  {_item_count(r['n_chunks'], 'chunk')}  added {str(r['added_at'])[:10]}")
+    typer.echo(f"Shelf: {_item_count(len(items), 'item')}")
+    for item in items:
+        typer.echo(f"  {item.name}  {_item_count(item.chunks, 'chunk')}  added {item.added_at[:10]}")
 
 
 @shelf_app.command("remove")
@@ -1262,7 +1251,7 @@ def shelf_remove(
     """Take an item off the shelf (its file is moved to my_work/.removed/, not deleted)."""
     ctx = _open(vault)
     try:
-        moved = remove_from_shelf(ctx.conn, ctx.vault / "my_work", name)
+        moved = library_api.shelf_remove(ctx.conn, ctx.vault / "my_work", name)
     except KeyError as exc:
         raise _fail(str(exc.args[0])) from exc
     except ValueError as exc:
@@ -1280,7 +1269,7 @@ def shelf_sync(vault: VaultOption = None) -> None:
     with _pipeline_lock(ctx, "rpipe shelf sync"):
         with _reporter() as reporter:
             embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
-            res = sync_shelf(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
+            res = library_api.shelf_sync(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
         typer.echo(f"Shelf synced: {len(res.added)} added, {len(res.updated)} updated, {len(res.removed)} removed.")
         for label, names in (("Added", res.added), ("Updated", res.updated), ("Removed", res.removed)):
             if names:
@@ -2723,7 +2712,7 @@ def _resolve_paper(conn: sqlite3.Connection, text: str) -> str:
     return rows[index]["id"]
 
 
-_VOTES = {"up": 1, "down": -1, "clear": 0}
+_VOTES = ("up", "down", "clear")
 
 
 @app.command("vote")
@@ -2738,7 +2727,7 @@ def vote(
     ctx = _open(vault)
     try:
         pid = _resolve_paper(ctx.conn, paper)
-        record_vote(ctx.conn, pid, _VOTES[direction])
+        library_api.vote(ctx.conn, pid, direction)
     except UnknownPaperError as exc:
         raise _fail(str(exc)) from exc
     finally:
@@ -2756,7 +2745,7 @@ def _save_command(saved: bool) -> None:
         ctx = _open(vault)
         try:
             pid = _resolve_paper(ctx.conn, paper)
-            set_saved(ctx.conn, pid, saved)
+            library_api.save(ctx.conn, pid, saved)
         except UnknownPaperError as exc:
             raise _fail(str(exc)) from exc
         finally:
@@ -2776,22 +2765,21 @@ def feedback(vault: VaultOption = None) -> None:
     """List your current votes and saved papers."""
     ctx = _open(vault)
     try:
-        titles = {r["id"]: r["title"] for r in ctx.conn.execute("SELECT id, title FROM papers")}
-        votes = current_votes(ctx.conn)
-        saves = list_saved(ctx.conn)
-        waiting = len(later_queue(ctx.conn))
+        votes = library_api.list_votes(ctx.conn)
+        saves = library_api.saved_papers(ctx.conn)
+        waiting = len(library_api.later_queue(ctx.conn))
     finally:
         ctx.conn.close()
     typer.echo("Votes")
     if not votes:
         typer.echo("  No votes yet. Try `rpipe vote ID up`.")
-    for r in votes:
-        typer.echo(f"  {'up  ' if r['vote'] > 0 else 'down'}  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")
+    for v in votes:
+        typer.echo(f"  {'up  ' if v.vote > 0 else 'down'}  {v.paper_id}  {v.title or '(unknown paper)'}")
     typer.echo("Saved")
     if not saves:
         typer.echo("  No saved papers yet. Try `rpipe save ID`.")
-    for r in saves:
-        typer.echo(f"  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")
+    for p in saves:
+        typer.echo(f"  {p.id}  {p.title or '(unknown paper)'}")
     typer.echo("Review later")
     if waiting:
         typer.echo(f"  {waiting} {'paper' if waiting == 1 else 'papers'} waiting. Run `rpipe review --later`.")
@@ -2802,23 +2790,22 @@ def feedback(vault: VaultOption = None) -> None:
 _REVIEW_KEYS = {"u": "up", "d": "down", "s": "skip", "q": "quit"}
 
 
-def _show_paper(conn: sqlite3.Connection, row: sqlite3.Row, header: str) -> None:
+def _show_paper(paper: library_api.PaperView, header: str) -> None:
     typer.echo(f"\n{header}\n")
-    typer.echo(row["title"])
-    typer.echo(f"id: {row['id']}")
-    reasons = json.loads(row["triage_reasons"]) if row["triage_reasons"] else []
-    if reasons:
-        typer.echo("why: " + "; ".join(reasons))
+    typer.echo(paper.title)
+    typer.echo(f"id: {paper.id}")
+    if paper.triage_reasons:
+        typer.echo("why: " + "; ".join(paper.triage_reasons))
     typer.echo("")
-    ps = get_summary(conn, row["id"])
+    ps = paper.summary
     if ps is not None:
         typer.echo("\n".join(render_summary(ps)).rstrip())
         if ps.read_mode != "whole":
             how = "map-reduce" if ps.read_mode == "map_reduce" else ps.read_mode
             typer.echo(f"\nread in parts: {how}, {ps.parts} notes call{'s' if ps.parts != 1 else ''}")
     else:
-        typer.echo((row["abstract"] or "").strip() or "No abstract available.")
-    typer.echo(f"\n{row['url']}")
+        typer.echo(paper.abstract.strip() or "No abstract available.")
+    typer.echo(f"\n{paper.url}")
 
 
 @app.command("review")
@@ -2831,20 +2818,20 @@ def review(
         raise _fail("rpipe review needs a terminal. Use `rpipe vote ID up|down` instead.")
     ctx = _open(vault)
     try:
-        queue = later_queue(ctx.conn) if later else review_queue(ctx.conn)
+        queue = library_api.later_queue(ctx.conn) if later else library_api.review_queue(ctx.conn)
         if not queue:
             typer.echo("Nothing waiting in review later." if later else "Nothing to review.")
             return
         voted = skipped = 0
         aborted = False
         try:
-            for i, row in enumerate(queue, start=1):
+            for i, paper in enumerate(queue, start=1):
                 if later:
                     header = f"Review later · {i} of {len(queue)}"
                 else:
-                    handled, total = queue_progress(ctx.conn, row["digest_date"])
-                    header = f"Digest {row['digest_date']} · paper {handled + 1} of {total}"
-                _show_paper(ctx.conn, row, f"{header} · {voted} voted, {skipped} skipped")
+                    progress = library_api.queue_progress(ctx.conn, paper.digest_date or "")
+                    header = f"Digest {paper.digest_date} · paper {progress.handled + 1} of {progress.total}"
+                _show_paper(paper, f"{header} · {voted} voted, {skipped} skipped")
                 while True:
                     answer = _prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
                     if answer in _REVIEW_KEYS:
@@ -2853,15 +2840,15 @@ def review(
                 if answer == "q":
                     break
                 if answer == "s":
-                    record_skip(ctx.conn, row["id"])
+                    library_api.skip(ctx.conn, paper.id)
                     skipped += 1
                 else:
-                    record_vote(ctx.conn, row["id"], 1 if answer == "u" else -1)
-                    clear_skip(ctx.conn, row["id"])
+                    library_api.vote(ctx.conn, paper.id, "up" if answer == "u" else "down")
+                    library_api.unskip(ctx.conn, paper.id)
                     voted += 1
         except (typer.Abort, KeyboardInterrupt, EOFError):
             aborted = True
-        left = len(later_queue(ctx.conn) if later else review_queue(ctx.conn))
+        left = len(library_api.later_queue(ctx.conn) if later else library_api.review_queue(ctx.conn))
         typer.echo(f"Voted {voted}, skipped {skipped} this session. {left} left in the queue.")
         if aborted:
             raise typer.Abort()
@@ -2883,11 +2870,11 @@ def show(
     ctx = _open(vault)
     try:
         pids = [_resolve_paper(ctx.conn, p) for p in papers or []]
-        rows = [get_paper(ctx.conn, pid) for pid in pids]
+        shown = [library_api.get_paper(ctx.conn, pid) for pid in pids]
         if recent is not None:
-            rows += recent_digest_papers(ctx.conn, recent)
-        for row in rows:
-            _show_paper(ctx.conn, row, f"Paper {row['id']}")
+            shown += library_api.recent_papers(ctx.conn, recent)
+        for paper in shown:
+            _show_paper(paper, f"Paper {paper.id}")
     finally:
         ctx.conn.close()
 

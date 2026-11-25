@@ -335,3 +335,5 @@
 **Canonical JSON** — JSON written one fixed way (here with keys sorted), so two copies of the same data are always the same text and can be compared directly. See `data-model.md`.
 
 **Paper-id normalisation** — turning the ways people write an arXiv id (`2611.25005v2`, `arXiv:2611.25005`, an arxiv.org link) into the bare id the database stores (`2611.25005`). Done by `ids.normalise_paper_id`. See "Paper-id spellings" in `data-model.md`.
+
+**Data object (view)** — what `library_api.py` hands back instead of printed text: a Pydantic object with named, typed fields (`PaperView` has `title`, `vote`, `saved`, `summary`, ...) that turns into JSON with one call. The terminal commands print it; a future web or desktop app can lay out the same object its own way. See "The app's door" in `architecture.md`.

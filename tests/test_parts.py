@@ -4,11 +4,13 @@ import pytest
 from conftest import FakeLLM
 
 from research_pipeline.citations import claims, generate_checked
+from research_pipeline.llm import LlmError
 from research_pipeline.models import Section
 from research_pipeline.parts import (
     FRONT_WORDS,
     MAX_CONDENSE_ROUNDS,
     SPLIT_BELOW_CTX,
+    NoUsableNotes,
     chunk_to_budget,
     read_in_parts,
     resolve_mode,
@@ -188,11 +190,19 @@ def test_notes_see_only_their_chunk_titles_combine_sees_all():
 
 
 def test_notes_bad_citation_retries_once():
-    llm = FakeLLM([notes("Nope"), notes("Nope"), summary_citing("Intro"), critique_citing("Intro")])
+    llm = FakeLLM([notes("Nope", "Intro"), notes("Nope", "Intro"), summary_citing("Intro"), critique_citing("Intro")])
     ps = read_in_parts(llm, "T", [("general", [S("Intro")])], 32768, read_mode="map_reduce", dropped=[])
     assert len(llm.calls) == 4
     assert "Nope" in llm.calls[1][1].split("</paper>", 1)[1]  # citation feedback on the retry
     assert ps.notes_unverified == ["A note. (Nope)"] and ps.unverified == []
+
+
+def test_no_usable_notes_never_combines():
+    llm = FakeLLM([notes("Nope"), notes("Nope")])
+    with pytest.raises(NoUsableNotes) as err:
+        read_in_parts(llm, "T", [("general", [S("Intro")])], 32768, read_mode="map_reduce", dropped=[])
+    assert isinstance(err.value, LlmError)
+    assert len(llm.calls) == 2  # the notes call and its retry; no combine call
 
 
 def test_combine_unverified_is_reported():

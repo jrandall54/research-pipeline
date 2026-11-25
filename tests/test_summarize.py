@@ -745,6 +745,30 @@ def test_split_mode_with_no_paper_sections_reads_whole():
     assert ps.read_mode == "whole" and Notes not in llm.schemas  # (citation retries aside)
 
 
+class InventedNotesLLM(PartsLLM):
+    """Every note cites a section the paper does not have, even after the retry."""
+
+    def generate(self, system, user, schema):
+        if schema is Notes:
+            self.calls.append((system, user))
+            self.schemas.append(schema)
+            return Notes(claims=[Claim(text="Made up.", sections=["9 Nowhere"])])
+        return super().generate(system, user, schema)
+
+
+@pytest.mark.parametrize("mode, fallback_above", [("split", None), ("whole", 0)])
+def test_no_usable_notes_reads_the_paper_whole(mode, fallback_above):
+    llm = InventedNotesLLM()
+    sections = SECTIONS if mode == "split" else LONG  # LONG is cut at 8,192: map-reduce first
+    ps = summarize_paper(llm, "T", "", sections, 8192, mode=mode, fallback_above=fallback_above)
+    assert ps.read_mode == "whole" and ps.parts == 1 and ps.notes_unverified == []
+    assert llm.schemas[-2:] == [Summary, Critique]
+    whole = build_summary_prompt("T", [s for s in sections if s.title != "References"], "full_text")[1]
+    assert llm.calls[-2][1].split("<paper>")[0] == whole.split("<paper>")[0]  # a whole-paper prompt
+    if mode == "whole":
+        assert ps.body_cut and ps.needed_ctx  # the normal fit's values
+
+
 def test_split_mode_below_the_context_floor_reads_whole():
     llm = PartsLLM()
     ps = summarize_paper(llm, "T", "", SECTIONS, 4096, mode="split")

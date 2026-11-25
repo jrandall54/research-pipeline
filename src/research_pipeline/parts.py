@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from research_pipeline.citations import generate_checked, norm_title
-from research_pipeline.llm import LLM
+from research_pipeline.llm import LLM, LlmError
 from research_pipeline.models import Section
 from research_pipeline.prompts import (
     Focus,
@@ -46,6 +46,11 @@ MIN_PARTS_CTX = 8192
 SPLIT_BELOW_CTX = 26_624
 
 Group = tuple[Focus, list[Section]]
+
+
+class NoUsableNotes(LlmError):
+    """Every note cited only sections the paper does not have, so nothing is left to combine.
+    `summarize_paper` then reads the paper the whole-paper way instead."""
 
 
 def _budget(num_ctx: int) -> int:
@@ -217,8 +222,9 @@ def read_in_parts(
     `MAX_CONDENSE_ROUNDS`, then trimmed and marked ``body_cut``), then combined
     (``summary``, ``critique``). ``retry`` is told before a citation retry.
     ``dropped`` (what the caller left out) is recorded as given.
-    Raises LlmError if the model fails, ValueError if there is nothing to read or ``num_ctx``
-    is below `MIN_PARTS_CTX`.
+    Raises LlmError if the model fails, NoUsableNotes (an LlmError) if no note cites a real
+    section (never combines from empty notes), ValueError if there is nothing to read or
+    ``num_ctx`` is below `MIN_PARTS_CTX`.
     """
     if num_ctx < MIN_PARTS_CTX:
         raise ValueError(f"reading in parts needs a context of at least {MIN_PARTS_CTX} tokens, got {num_ctx}")
@@ -246,6 +252,8 @@ def read_in_parts(
         notes_unverified.extend(bad)
     # A title still invented after the retry is never passed on to condense or combine.
     notes = _known_only(notes, titles)
+    if not notes:
+        raise NoUsableNotes("every note cited a section the paper does not have")
 
     # The combine prompt also lists the valid titles; the notes get the rest of the budget.
     limit = max(0, _budget(num_ctx) - len(json.dumps(titles, ensure_ascii=False)))
@@ -266,6 +274,8 @@ def read_in_parts(
             condensed.extend(got.claims)
             notes_unverified.extend(bad)
         notes = _known_only(condensed, titles)
+        if not notes:
+            raise NoUsableNotes("every condensed note cited a section the paper does not have")
 
     (s_sys, s_user), (c_sys, c_user) = build_combine_prompts(title, notes, titles)
     phase("summary")

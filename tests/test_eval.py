@@ -560,15 +560,17 @@ class GoodNotes(AlwaysSummary):
 
 
 class BadNotes(AlwaysSummary):
-    """Split reading: every notes call cites a section that does not exist; the final summary
-    and critique cite real sections."""
+    """Split reading: every notes call has one note citing a section that does not exist (and
+    one real note); the final summary and critique cite real sections."""
 
     def generate(self, system, user, schema):
         from research_pipeline.summary_models import Claim, Notes
 
         if schema is Notes:
             self.calls.append((system, user))
-            return Notes(claims=[Claim(text="A note on nothing.", sections=["9 Nowhere"])])
+            first = user.split("\n## ", 1)[1].split("\n", 1)[0]
+            return Notes(claims=[Claim(text="A note on nothing.", sections=["9 Nowhere"]),
+                                 Claim(text=f"About {first}.", sections=[first])])
         return super().generate(system, user, schema)
 
 

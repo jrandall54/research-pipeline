@@ -15,7 +15,7 @@ from research_pipeline.citations import claims, generate_checked, unknown_citati
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.llm import LLM, LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section, Status
-from research_pipeline.parts import MIN_PARTS_CTX, read_in_parts, split_groups
+from research_pipeline.parts import MIN_PARTS_CTX, NoUsableNotes, read_in_parts, split_groups
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import (
     PROMPT_VERSION,
@@ -72,7 +72,8 @@ def summarize_paper(
     ``mode="whole"`` reads the paper in one call per output (cut to fit the context if needed).
     ``mode="split"`` reads front matter and body as separate parts, then combines the notes
     (parts.py). An abstract-only paper, a paper with no paper sections left after pruning, or a
-    context below `MIN_PARTS_CTX` is always read whole.
+    context below `MIN_PARTS_CTX` is always read whole, and so is a paper whose notes all cited
+    sections it does not have (`NoUsableNotes`): it is never combined from empty notes.
     In whole mode, a paper whose core text had to be cut is read in size-based parts instead
     (map-reduce, appendices left out) when the context it needs is above ``fallback_above``;
     ``None`` never falls back (reruns pass it: they exist to read papers whole), ``0`` always
@@ -92,8 +93,11 @@ def summarize_paper(
     if mode == "split" and in_parts_ok:
         groups, dropped = split_groups(sections, num_ctx)
         if any(secs for _, secs in groups):  # else nothing but non-paper text: read it whole
-            return read_in_parts(llm, title, groups, num_ctx, read_mode="split",
-                                 dropped=dropped, on_phase=on_phase)
+            try:
+                return read_in_parts(llm, title, groups, num_ctx, read_mode="split",
+                                     dropped=dropped, on_phase=on_phase)
+            except NoUsableNotes:
+                pass  # no note cited a real section: read it whole below
 
     fit = fit_to_budget(sections, num_ctx)
     if (in_parts_ok and fit.body_cut and fallback_above is not None
@@ -108,8 +112,11 @@ def summarize_paper(
                         reason="appendix" if id(s) in is_appendix else "non_paper")
                 for s in sections if id(s) not in read
             ]
-            return read_in_parts(llm, title, [("general", paper)], num_ctx, read_mode="map_reduce",
-                                 dropped=dropped, on_phase=on_phase)
+            try:
+                return read_in_parts(llm, title, [("general", paper)], num_ctx, read_mode="map_reduce",
+                                     dropped=dropped, on_phase=on_phase)
+            except NoUsableNotes:
+                pass  # no note cited a real section: keep the cut whole read below
 
     fitted = fit.sections
     titles = [s.title for s in fitted]

@@ -32,7 +32,29 @@ Worked example. On a machine whose service has `Environment=PATH=/usr/bin OLLAMA
 
 Flash attention counts as on when the value is `1` or `true` (any case), the rule Ollama itself uses; the scan, the recommender and `rpipe model tune` share that one check (`scan.flash_on`).
 
-The last line is the **host mismatch** check: if the service's port differs from the port in `llm_url`, the service rpipe could tune is not the server rpipe talks to, so changes would have no effect on your summaries.
+The last line is the **host mismatch** check: if the service's port differs from the port in `llm_url`, the service rpipe could tune may not be the server rpipe talks to, so changes might have no effect on your summaries. Before printing that note, the scan checks whether the two addresses are really one server behind a proxy (next section); only when they are not does the note appear.
+
+### When rpipe talks to Ollama through a proxy
+
+**What it does.** Some people put a small program between `rpipe` and Ollama, for example one that counts how many tokens each request uses. `rpipe` talks to that program (say on port 11434), and the program passes every request on unchanged to the real Ollama service (say on port 11436). This is a **pass-through proxy**. The ports differ, but there is only one Ollama: the proxy just relays. The scan recognises this case, so you do not get a false "different server" note, and the service's settings (flash attention, KV cache type) count as the settings of the server `rpipe` uses.
+
+**How it works.**
+1. The scan reads the service's `OLLAMA_HOST` as usual. If its port equals the port in `llm_url`, it is the same server and nothing more is asked.
+2. If the ports differ, the scan asks both addresses for their list of installed models (`GET /api/tags`): rpipe's `llm_url` and the service's own address (from `OLLAMA_HOST`; `0.0.0.0` means "every address", so the scan uses `127.0.0.1`).
+3. Each model in the list has a name and a **digest**: a fingerprint of the model's files, so two copies of the same name with different files have different digests. The scan sorts both lists of (name, digest) pairs and compares them.
+4. Same non-empty list: it is one server behind a proxy. `host_matches` becomes true and a new flag `proxied` is set. Different lists, an address that does not answer, or two empty lists (nothing to compare): today's mismatch note stays.
+
+Worked example. The service has `OLLAMA_HOST=127.0.0.1:11436` and `llm_url` is `http://localhost:11434`. Both addresses answer with `m:latest` (digest `abc`). The report then says, instead of the note:
+
+```
+  rpipe reaches this Ollama through a pass-through proxy on port 11434 (same models): its settings apply.
+```
+
+With a proxy recognised, `rpipe model recommend` uses the service's settings in its context estimates, and `rpipe model tune` neither warns nor asks "Continue anyway?". After a restart it waits at `llm_url` (the proxy passes the answer through), and it re-measures the context as usual.
+
+**Why it's built this way.** Comparing model lists is a cheap, read-only question both addresses can answer, and two different Ollama servers almost never hold exactly the same models with the same fingerprints. Two empty lists prove nothing, so they do not count as a match. Rejected alternatives: asking the user to point `rpipe` straight at the service's port (that would skip the proxy, which the owner wants to keep), and comparing only the version number (two separate servers often run the same version).
+
+**How to check it.** `rpipe model scan` prints the proxy line above. Tests: `uv run pytest tests/test_scan.py -q -k proxy`. Code: `ollama_tags`, `_own_url` and the check at the end of `detect_ollama_server` in `src/research_pipeline/scan.py`.
 
 ## How it works: the catalog
 
@@ -157,12 +179,12 @@ uv run pytest tests/test_bench.py -q
    - `OLLAMA_FLASH_ATTENTION=1`: a leaner way of reading long text.
    - `OLLAMA_KV_CACHE_TYPE=q8_0`: stores the model's working memory (KV cache) in 8-bit numbers, half the space. Measured on a 24 GB card: the 27B model's context grew from 32,768 to 57,344 tokens, and the 14B model's from 141,312 to 223,232.
    - `OLLAMA_NUM_PARALLEL=1`: offered only when the current value is above 1, because each parallel slot reserves its own context memory and `rpipe` sends one paper at a time.
-2. If the service listens on a different port from the one `rpipe` uses (`llm_url`), it first prints a one-line note: the settings shown belong to the service, and `rpipe` could not read the settings of the server it actually talks to. This note comes before everything else, including the "already has the recommended settings" message, so you are never told "all fine" about a server `rpipe` does not use. `rpipe model tune --undo` and `rpipe model recommend` print the same note.
+2. If the service listens on a different port from the one `rpipe` uses (`llm_url`), and it is not the same server behind a pass-through proxy (see the scan), it first prints a one-line note: the settings shown belong to the service, and `rpipe` could not read the settings of the server it actually talks to. This note comes before everything else, including the "already has the recommended settings" message, so you are never told "all fine" about a server `rpipe` does not use. `rpipe model tune --undo` and `rpipe model recommend` print the same note.
 3. Settings that already have the right value are skipped. If all three are fine it says "already has the recommended settings", names the file each one comes from (for example `kv-cache.conf`) and exits without touching anything.
 4. If Ollama is not the system service (a user service, started by hand, Docker, the desktop app) it prints the exact instructions for that setup and stops: `rpipe` only edits the system service itself.
 5. On that port mismatch it also warns that the change would not affect the server `rpipe` talks to, and asks `Continue anyway? [y/N]` (default no).
 6. It shows each setting that changes (what it does, why, old value -> new), the file it would write, the commands and the undo, then asks `Apply? [y/N]`. The file always lists all three of `rpipe`'s settings, not just the ones that change. Why: the new file replaces the old `rpipe.conf` whole, so if it held only today's change, a value an earlier `rpipe model tune` put there would silently disappear. Worked example: an earlier tune wrote flash attention and `q8_0`; later another file sets `OLLAMA_NUM_PARALLEL=4`; the re-tune offers only the parallel change, but the file it writes still holds all three. The file goes to a temporary directory first; the commands are `sudo install -m 644 TEMP /etc/systemd/system/ollama.service.d/rpipe.conf`, `sudo systemctl daemon-reload`, `sudo systemctl restart ollama`. They run in your own terminal so `sudo` asks you for the password; `rpipe` never sees it. The first failing command stops the run and is named; later ones do not run. If the failure comes after the first command (the file is already in place), it also prints `To undo: rpipe model tune --undo`.
-7. It waits up to 30 seconds for the restarted service to answer (at `rpipe`'s `llm_url`, or at the service's own `OLLAMA_HOST` address if you chose "Continue anyway" on a port mismatch; `0.0.0.0` means `127.0.0.1`) (shown as an "ollama restart" stage), re-scans, and confirms each value written to the file is live (all three). If the server does not answer, or a value is not live, the error ends with `To undo: rpipe model tune --undo`. With the `ollama` backend it then re-runs the fit and prints `context: before -> after`. On a port mismatch it skips that re-measure and says why: the fit measures the server `rpipe` uses, which is not the service that changed.
+7. It waits up to 30 seconds for the restarted service to answer (at `rpipe`'s `llm_url`, which includes the proxy case since the proxy passes the answer through, or at the service's own `OLLAMA_HOST` address if you chose "Continue anyway" on a port mismatch; `0.0.0.0` means `127.0.0.1`) (shown as an "ollama restart" stage), re-scans, and confirms each value written to the file is live (all three). If the server does not answer, or a value is not live, the error ends with `To undo: rpipe model tune --undo`. With the `ollama` backend it then re-runs the fit and prints `context: before -> after`. On a port mismatch it skips that re-measure and says why: the fit measures the server `rpipe` uses, which is not the service that changed.
 
 **Undo.** `rpipe model tune --undo` removes only `rpipe.conf` (other drop-in files are never touched), reloads and restarts, then waits for the service (same address rule). On a port mismatch it prints the same note as above first. If `rpipe.conf` does not exist it says "Nothing to undo".
 
@@ -201,7 +223,7 @@ The setup walkthrough (`rpipe model setup`) also shows the new facts (free memor
 
 ## Where the code is
 
-- `src/research_pipeline/scan.py`: the probes (`flash_on`, `detect_cpu`, `ram_free_gb`, `disk_free_gb`, `all_gpus`, `detect_ollama_server`, `parse_systemd_env`, `ollama_models_dir`, `setting_source`).
+- `src/research_pipeline/scan.py`: the probes (`flash_on`, `detect_cpu`, `ram_free_gb`, `disk_free_gb`, `all_gpus`, `detect_ollama_server`, `ollama_tags`, `service_url`, `parse_systemd_env`, `ollama_models_dir`, `setting_source`). `service_url` (where to wait after a restart) moved here from `ollama_tune.py`, which still offers it under the old name.
 - `src/research_pipeline/machine.py`: `MachineInfo` and `detect_machine`, which call the scan.
 - `src/research_pipeline/cli.py`: `model scan` and the report text.
 - `tests/test_scan.py`: the tests.

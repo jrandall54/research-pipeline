@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
 import typer
 
@@ -92,7 +93,13 @@ from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_r
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
 from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
 from research_pipeline.run_lock import RunLocked, run_lock
-from research_pipeline.scan import detect_ollama_server, flash_on, setting_source, system_cmd
+from research_pipeline.scan import (
+    DEFAULT_OLLAMA_PORT,
+    detect_ollama_server,
+    flash_on,
+    setting_source,
+    system_cmd,
+)
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
 from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
@@ -2046,6 +2053,13 @@ def _describe_ollama_server(server, llm_url: str) -> None:
     typer.echo(f"  context memory type (KV cache): {server.env.get('OLLAMA_KV_CACHE_TYPE', 'f16 (default)')}"
                + (source("OLLAMA_KV_CACHE_TYPE") if "OLLAMA_KV_CACHE_TYPE" in server.env else ""))
     typer.echo(f"  parallel slots: {server.env.get('OLLAMA_NUM_PARALLEL', 'automatic (default)')}")
+    if server.proxied:
+        try:
+            proxy_port = urlparse(llm_url).port or DEFAULT_OLLAMA_PORT
+        except ValueError:
+            proxy_port = DEFAULT_OLLAMA_PORT
+        typer.echo(f"  rpipe reaches this Ollama through a pass-through proxy on port {proxy_port} "
+                   "(same models): its settings apply.")
     if server.host_matches is False:
         port = server.env.get("OLLAMA_HOST", "").rpartition(":")[2]
         typer.echo(f"  note: the Ollama service listens on port {port} but rpipe talks to "

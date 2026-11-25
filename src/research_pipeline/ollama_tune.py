@@ -11,9 +11,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 from research_pipeline.scan import OllamaServer, flash_on, ollama_version
+from research_pipeline.scan import service_url as service_url  # lives in scan.py; kept here for callers
 
 DROPIN = Path("/etc/systemd/system/ollama.service.d/rpipe.conf")  # read at call time (tests patch it)
 UNDO_COMMAND = "rpipe model tune --undo"
@@ -120,23 +120,6 @@ def manual_instructions(server: OllamaServer, settings: list[Setting]) -> str:
     }.get(server.how, f"rpipe could not tell how Ollama was started. Set these where it starts: {pairs}")
     return (f"rpipe only changes the system service itself; for your setup, do this yourself.\n{where}\n"
             "To undo, remove those settings and restart Ollama.")
-
-
-def service_url(server: OllamaServer, rpipe_url: str) -> str:
-    """Where to wait for the service just restarted: rpipe's own URL when it is the same server,
-    else the service's OLLAMA_HOST (default host 127.0.0.1; 0.0.0.0 or empty means 127.0.0.1)."""
-    if server.host_matches is not False:
-        return rpipe_url
-    host_value = server.env.get("OLLAMA_HOST", "")
-    parsed = urlparse(host_value if "//" in host_value else f"//{host_value}")
-    host = parsed.hostname or "127.0.0.1"
-    if host in ("0.0.0.0", "::"):
-        host = "127.0.0.1"
-    try:
-        port = parsed.port or 11434
-    except ValueError:
-        port = 11434
-    return f"http://{host}:{port}"
 
 
 def run_tty(argv: list[str]) -> int:

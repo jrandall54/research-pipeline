@@ -291,3 +291,7 @@
 **Spill / offload to RAM** — running a model that does not fit in GPU memory with part of it in the computer's ordinary memory (RAM). The CPU then does that part, which is slower. For a mixture-of-experts model only a few experts work per token, so the slowdown is modest; for a dense model it is severe, so rpipe only suggests spilling mixture-of-experts models. See "Recommendations" in `hardware.md`.
 
 **GB vs GiB** — two units for memory. A GB is 1,000,000,000 bytes; a GiB is 2^30 = 1,073,741,824 bytes, about 7% more. Download sizes are usually in GB, while `nvidia-smi` and Ollama report GPU memory in GiB (often labelled "GB" anyway). The recommender converts download sizes to GiB before comparing them with GPU memory. See "Recommendations" in `hardware.md`.
+
+**Pass-through proxy** — a small program that sits between `rpipe` and Ollama and passes every request on unchanged, for example to count tokens. `rpipe` talks to the proxy's port, Ollama listens on another, but there is only one server. `rpipe model scan` recognises it when both addresses list the same models (same names and digests). See "When rpipe talks to Ollama through a proxy" in `hardware.md`.
+
+**Digest (of a model)** — a fingerprint of a model's files, a long code computed from their contents. Two models with the same name but different files have different digests, so comparing digests tells whether two servers hold exactly the same model. See `hardware.md`.

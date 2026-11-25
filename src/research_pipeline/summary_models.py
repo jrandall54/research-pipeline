@@ -16,6 +16,12 @@ class Claim(BaseModel):
     sections: list[str] = Field(min_length=1)
 
 
+class Notes(BaseModel):
+    """Notes on one part of a paper (or condensed notes): claims with the sections they cite."""
+
+    claims: list[Claim] = Field(min_length=1)
+
+
 class Dropped(BaseModel):
     """A section left out of what the model read, and why (see pruning.py)."""
 
@@ -46,6 +52,8 @@ class PaperSummary(BaseModel):
     needed_ctx: int | None = None  # context (tokens) the core text needs uncut; only when body_cut
     dropped: list[Dropped] = []  # sections left out, with sizes (see pruning.py)
     unverified: list[str]  # claim texts whose citations could not be verified
+    read_mode: Literal["whole", "split", "map_reduce"] = "whole"  # how the paper was read (old rows: whole)
+    parts: int = 1  # how many parts it was read in (1 when read whole)
 
     @model_validator(mode="before")
     @classmethod

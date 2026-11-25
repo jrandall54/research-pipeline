@@ -140,7 +140,7 @@
 
 **Provenance** — the record of where a summary came from: which model, prompt version, paper version and context size produced it, and when. Shown as a footer in the digest. See `summaries.md`.
 
-**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts. Bumped whenever those prompts change, so summaries made with different wording can be told apart. See `summaries.md`.
+**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts (and the notes, condense and combine prompts used when a paper is read in parts). Bumped whenever those prompts change, so summaries made with different wording can be told apart. Currently `2026-11-p7`. See `summaries.md`.
 
 **Unfinished run** — a `runs` row whose `finished_at` is empty: the process was killed before it could record its end. The next digest's health line says `previous run did not finish`. See `running.md`.
 
@@ -307,3 +307,9 @@
 **Morning deadline (`night_deadline`)** — the clock time (default 07:00) by which reruns of cut papers must finish, or `off`. It never stops normal papers. If the next such time is more than 12 hours away there is no deadline and reruns are skipped. Set with `rpipe schedule set-deadline`. See `scheduling.md`.
 
 **Call time limit** — how long one request to the local model may take before rpipe gives up on it (a timeout). Normally 600 seconds; on a machine `rpipe model bench` measured as slow it is raised to 1.5 times the time needed to read a full context and write the longest allowed answer at the measured speeds. See "The time limit for one call" in `llm.md`.
+
+**Notes (reading in parts)** — what the model writes about one part of a long paper: a short list of claims, each with the section titles it comes from (the `Notes` schema). The summary and critique are then written from the notes instead of the paper. See "Reading a paper in parts" in `summaries.md`.
+
+**Task splitting** — reading a long paper as two jobs instead of one: notes on the front matter (abstract, introduction, conclusion: what is claimed) and notes on the body (method and results: how well it is backed), then one step that combines the notes. Stored as `read_mode: split`. See `summaries.md`.
+
+**Map-reduce** — a general way to handle input too big for one pass: cut it into pieces, do the same job on each piece separately ("map"), then merge the pieces' results into one ("reduce"). Here the pieces are size-based chunks of a paper, the job is taking notes, and the merge is condensing the notes and writing the summary from them. The last resort for a paper that does not fit any other way. Stored as `read_mode: map_reduce`. See `summaries.md`.

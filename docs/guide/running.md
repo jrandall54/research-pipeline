@@ -170,7 +170,7 @@ Illustrative commands; see `evaluation.md` for a sample report.
 
 Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
-**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `75` when another `rpipe run` already holds the run lock (the lock file is `.run.lock` in the vault; the nightly unit is unchanged). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, `--date` is not a date, or `vault.sqlite` was written by a newer rpipe (it stops and says to upgrade rather than touch it).
+**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `75` when another pipeline command already holds the vault lock (the lock file is `.run.lock` in the vault; see "One pipeline job at a time" below for which commands take it). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, `--date` is not a date, or `vault.sqlite` was written by a newer rpipe (it stops and says to upgrade rather than touch it).
 
 ### Reading cut papers whole: reruns
 
@@ -270,7 +270,37 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 
 **What is guaranteed.** Both a crash and Ctrl-C finish the run row (`finish_run` sits in a `finally`, so it executes exactly once whichever way the command ends). After Ctrl-C the error is `<stage>: interrupted`, no digest is attempted (you wanted out), and the interrupt then propagates, so the exit code is the usual one for an interrupt. Counts are kept for stages that completed before the failure; the partial counts of the stage that crashed mid-way are lost (stage functions only return counts when they finish). `SIGTERM` (what `systemctl stop` and a plain `kill` send) is treated like Ctrl-C while `run` executes, so it is recorded the same way. An interrupt that lands while the digest is being written is recorded as `digest: interrupted`. Failing to load the embedding model is recorded as `embed: ...` (the run row is created before the model is loaded, so this and every later failure leaves a record). Only a hard kill (power cut, `kill -9`) leaves `finished_at` empty. If `finish_run` itself fails (for example a full disk) while another error is already propagating, the failure is printed as `warning: could not record the run: ...` and the original error still wins; if nothing else went wrong, the `finish_run` failure is raised.
 
-**One run at a time.** `run` first takes a non-blocking lock (`flock` on `<vault>/.run.lock`). If another `rpipe run` holds it (for example a `Persistent=true` catch-up that woke up while you were running by hand), the second command prints `` another `rpipe run` is already using <vault> `` (then "nothing was started. Wait for it to finish (see `rpipe runs`).") and exits at once with code `75` (the standard "try again later" code), without creating a `runs` row. The operating system drops the lock when the process ends for any reason (crash, `kill -9`, SIGTERM), so a stale lock file never blocks a later run; the file itself is harmless and stays in the vault.
+**One pipeline job at a time.** Every command that does pipeline work takes the same vault lock before it starts: `flock` (an operating-system file lock, see the glossary) on `<vault>/.run.lock`, non-blocking, so a second job never waits, it stops. While a command holds the lock, the lock file contains that command's name (the **lock holder**, for example `rpipe run`); the file is emptied when the command ends. A refused command reads the name and prints it, then exits at once with code `75` (the standard "try again later" code), without creating a `runs` row or touching the database:
+
+```
+$ rpipe summarize
+rpipe run is already working on /home/you/research-vault; nothing was started. Wait for it to finish (see `rpipe runs`).
+```
+
+Worked example: the nightly run starts at 03:00 and is still summarizing at 07:30 when you type `rpipe model tune`. Without the lock, tune would restart Ollama under the run and every remaining paper would fail. With it, tune prints the line above (naming `rpipe run`) and changes nothing; you run it again once `rpipe runs` shows the night finished. The same happens the other way round: a `Persistent=true` catch-up run that wakes up while your hand-started `rpipe summarize --backlog` is going exits 75 naming `rpipe summarize`, and the next night runs normally. The operating system drops the lock when the process ends for any reason (crash, `kill -9`, SIGTERM), so a stale lock file never blocks a later run; the file itself is harmless and stays in the vault. If the file is empty while locked (an older rpipe holds it, or the holder has not written its name yet) the message says `unknown is already working on ...`.
+
+Which commands take the lock:
+
+| Command | Locked? | Why |
+| --- | --- | --- |
+| `run`, `collect`, `triage`, `digest` | yes | pipeline stages: fetch into the vault, load the embedder, rewrite `papers` and the digest |
+| `summarize` (all forms, including `--backlog` and `--refetch`) | yes | uses the model (GPU memory) and fetches full text |
+| `eval run` | yes | summarizes the gold set with the model |
+| `model fit`, `model check`, `model bench` | yes | load and unload models in Ollama; a probe during a run would push the run's model out of GPU memory |
+| `model tune` (and `--undo`) | yes | restarts the Ollama service, which would break a running job |
+| `model recommend` | yes | can download a model and re-measure its context |
+| `model setup` | yes | can download, measure and test a model |
+| `profile suggest` | yes | uses the model |
+| `gold add`, `gold suggest`, `gold auto`, `gold draft` | yes | fetch from arXiv or call the judge; grouped with the other gold-set builders so one job builds the set at a time |
+| `shelf add`, `shelf sync` | yes | load the embedder and rewrite shelf rows; `rpipe run` also syncs the shelf, so two syncs could collide |
+| `vote`, `save`, `unsave`, `feedback`, `review`, `show`, `runs`, `serve`, `shelf list`, `shelf remove` | no | app commands: quick reads and single-row writes that are safe beside a running job |
+| `profile show`, `profile add-seed`, `profile set-*`, `model show`, `model set*`, `model scan`, `model catalog show`, `model catalog update`, `gold list`, `gold remove`, `gold add-fact`, `gold edit-fact`, `gold remove-fact`, `eval grade`, `eval report`, `schedule *`, `sources *`, `init`, `plugins` | no | settings and read-only commands. `profile add-seed` does look the paper up on arXiv, but it writes only `profile.yaml`, never the database, so it cannot collide with a run |
+
+A locked command takes the lock right after it opens the vault (`_open`) and before anything that leaves the process: no network request, no model or embedder load, no Ollama probe or restart happens while another job holds the lock. Interactive locked commands (`gold add`, `gold draft`, `model tune`, `model setup`, `model recommend`, `profile suggest`) keep the lock while they wait for your answers, so a nightly run that starts while one sits at a prompt is refused for that night.
+
+Unlocked commands can still write to `vault.sqlite` while a job runs. SQLite allows one writer at a time; the database is in WAL mode (readers never wait) and every connection has a **busy timeout** of 5 seconds (`open_db` passes `timeout=5.0`): a write that finds the database busy retries for up to 5 s before failing with "database is locked". The pipeline's writes are short, so in practice a vote or save during a run just waits a moment.
+
+`tests/test_run_lock.py` checks the lock itself (the holder is recorded, read back by a refused caller, cleared on release and after a crash, `unknown` when empty); `test_locked_commands_stop` in `tests/test_runs.py` holds the lock as `rpipe run` and invokes every locked command in the table: each must exit 75 naming `rpipe run`, with no new `papers` or `runs` rows and no digest, and every network, model, embedder and Ollama entry point is replaced by one that fails the test, so a command that reached one before the lock would fail loudly.
 
 **A hung model stops after one timeout.** The first time the model does not answer within its time limit (`LlmTimeout`; 600 s, or more on a machine `rpipe model bench` measured as slow, see "The time limit for one call" in `llm.md`), `run_summarize` records the paper's failure, adds `summarize: stopped calling the model after the first timeout; remaining papers show abstracts only` to the errors, and stops calling the model for the rest of that run (the rerun stage is skipped too: its cut papers wait for another night). Collecting, triage and the digest carry on; the unsummarized papers keep their status and are retried on the next run. Rejected: continuing, which would make every remaining paper wait out the full timeout (hours for a night's batch).
 
@@ -285,8 +315,11 @@ To run it every night automatically, use `rpipe schedule install` (a systemd use
 ## Why it's built this way
 
 - **One command that records itself**: `run` owns the `runs` row, so counts from every stage and every error end up in one place. The individual stage functions return counts and errors rather than finishing the run.
-- **A failed source does not fail the run**: a nightly job that exits non-zero because one website was down would train you to ignore failures. The error is written to the digest's first line and to `runs.errors` instead; exit code 1 is kept for "nothing could run". Exit `75` means only "another run was in progress".
+- **A failed source does not fail the run**: a nightly job that exits non-zero because one website was down would train you to ignore failures. The error is written to the digest's first line and to `runs.errors` instead; exit code 1 is kept for "nothing could run". Exit `75` means only "another pipeline job was in progress".
 - **`flock`, not a PID file**: the OS releases a `flock` when its owner dies, so there is no stale-lock cleanup to get wrong. Rejected: a PID file (needs liveness checks and can go stale after a crash) and a blocking lock (the catch-up run would sit waiting for hours).
+- **One lock for every pipeline command, not just `run`**: before Phase 7 only `run` took the lock, so a hand-started `rpipe summarize` or `rpipe model tune` could run beside the nightly job, two processes fought over GPU memory, and a tune restarted Ollama mid-run. One lock, one rule: anything that does pipeline work, uses the model or GPU, restarts Ollama or fetches into the vault takes it. Rejected: a separate lock per resource (GPU, Ollama, database), which is harder to explain and still lets two jobs interleave their writes to `papers`; and making the app commands (`vote`, `save`, `review`) wait for the lock, which would block a quick vote for hours during a run.
+- **The lock file names its holder**: "another job is running" leaves you guessing whether it is the nightly run (wait) or a command you forgot in another terminal (go and stop it). Writing the command's name into the lock file costs nothing and the refused command can read it. It is emptied on release so a leftover name never misleads. Rejected: also writing the process id (a reader would be tempted to `kill` it; `rpipe runs` is the safer place to look).
+- **A 5-second busy timeout, written out**: it is Python's default, but now that the app commands write while a pipeline job runs, the value matters and is stated where the database is opened rather than left implicit.
 - **`build_pipeline` as the single seam**: `cli.py` builds the real sources, a lazy embedder factory, seed lookup, a lazy model-client factory (`make_llm`) and the full-text fetcher in one function. The end-to-end tests replace that one function with fixture-backed stubs, so the *real* CLI, database, ranking and digest code run offline.
 - **Optional `embed` extra**: keeps installs and tests light. Rejected: making PyTorch a hard dependency.
 - **No `feedparser` dependency**: the arXiv response is parsed with the standard library (see `sources.md`); RSS is a later phase and can add the library then.
@@ -351,6 +384,6 @@ Lint is `ruff` (a fast Python linter, installed with the dev group by `uv sync`)
 - `src/research_pipeline/spill.py`: `run_reruns` (reading cut papers whole at night)
 - `src/research_pipeline/llm.py`, `fulltext.py`, `prompts.py`: model client, full-text fetching, prompts (see `llm.md`, `fulltext.md`, `summaries.md`)
 - `src/research_pipeline/gold.py`, `evaluate.py`: `rpipe gold` and `rpipe eval` (see `evaluation.md`)
-- `src/research_pipeline/run_lock.py`: `run_lock`, `RunLocked`
+- `src/research_pipeline/run_lock.py`: `run_lock`, `RunLocked` (with `.holder`); `_pipeline_lock` in `cli.py` turns a refusal into the message and exit 75
 - `src/research_pipeline/db.py`: `start_run`, `finish_run`, `list_runs`, `previous_run_unfinished`
 - `tests/test_runs.py`, `tests/test_run_lock.py`, `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`

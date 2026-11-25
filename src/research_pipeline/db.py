@@ -137,7 +137,9 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
 
 def open_db(path: Path) -> sqlite3.Connection:
     """Open (creating if needed) the database with all tables, WAL and Row access."""
-    conn = sqlite3.connect(path)
+    # Wait up to 5 s for another connection to finish writing before failing with "database is
+    # locked" (Python's default, written out: app commands write while a locked pipeline job runs).
+    conn = sqlite3.connect(path, timeout=5.0)
     conn.row_factory = sqlite3.Row
     # Check the version before anything that could write to the file (WAL, tables, migration).
     version = conn.execute("PRAGMA user_version").fetchone()[0]

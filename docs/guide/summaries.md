@@ -254,6 +254,7 @@ The decision is made before any model call, so a paper that falls back costs onl
    - share below 1.0 (part of the model in ordinary RAM; CPU-only is 0.0): `split`. Reading a long prompt is far slower when the model is partly or wholly on the CPU, and split mode keeps each prompt short.
    - context below `SPLIT_BELOW_CTX = 26,624` tokens: `split`. That is the median paper (about 22,000 tokens, measured 2026-11-22) plus the 4,000-token reserve, rounded up to a multiple of 1,024: below it a typical paper would be cut in whole mode.
    - otherwise: `whole`.
+   The share is read after ranking has finished, and the embedding model that ranks papers runs on the CPU, so it takes no GPU memory from the summarizer and cannot make the share look lower than it is. (When it ran on the GPU, its leftover memory made a model that fits fully read 0.92 instead of 1.0, so `auto` wrongly chose split; see "Why it's built this way" in `triage.md`.)
 4. The stage prints one note with the choice and the reason, for example `split: part of the model runs from RAM (GPU share 0.62)`.
 5. `fallback_above` is worked out as in the table above (the model's cap when reruns can happen, else `0`), and both go to `run_summarize`.
 

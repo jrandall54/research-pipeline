@@ -178,7 +178,12 @@ class _Tee:
 
 
 def _release_gpu_memory() -> None:
-    """Hand back GPU memory the embedding model held (never imports torch just for this)."""
+    """Free memory the embedding model held before the summarizer loads.
+
+    Embeddings run on the CPU (embed.py), so normally there is no GPU memory to hand back; this is
+    a harmless safety net (gc + torch.cuda.empty_cache if torch is already loaded and sees a GPU).
+    It never imports torch just for this.
+    """
     gc.collect()
     torch = sys.modules.get("torch")
     if torch is not None and torch.cuda.is_available():

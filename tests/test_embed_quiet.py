@@ -1,6 +1,10 @@
-"""The model load must not draw library progress bars or print the HF_TOKEN nag (no network, no model)."""
+"""Loading the embedding model: no library progress bars or HF_TOKEN nag, and always on the CPU
+(no network, no model)."""
 
-from research_pipeline.embed import quiet_model_load
+import sys
+import types
+
+from research_pipeline.embed import SentenceTransformerEmbedder, quiet_model_load
 
 KEYS = ("HF_HUB_DISABLE_PROGRESS_BARS", "TRANSFORMERS_VERBOSITY", "HF_HUB_VERBOSITY")
 
@@ -24,3 +28,16 @@ def test_user_setting_wins(monkeypatch):
     monkeypatch.setenv("HF_HUB_VERBOSITY", "info")
     quiet_model_load()
     assert os.environ["HF_HUB_VERBOSITY"] == "info"
+
+
+def test_embedder_runs_on_cpu(monkeypatch):
+    """The embedding model must never take GPU memory from the summarizing model (triage.md)."""
+    calls = []
+
+    class FakeST:
+        def __init__(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", types.SimpleNamespace(SentenceTransformer=FakeST))
+    SentenceTransformerEmbedder("some/model")
+    assert calls == [(("some/model",), {"device": "cpu"})]

@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from research_pipeline.db import current_votes, get_paper, open_db, record_vote, upsert_paper
+from research_pipeline.db import get_paper, open_db, upsert_paper
 from research_pipeline.embed import SentenceTransformerEmbedder
+from research_pipeline.library import current_votes, record_vote
 from research_pipeline.models import PaperMeta, Profile
 from research_pipeline.rank import (
     FEEDBACK_BOOST,

@@ -114,7 +114,7 @@ Vectors are stored in the `embeddings` table as raw float32 bytes, keyed by (pap
 
 Your explicit profile (seeds, topics) is what you *said* you like. Your votes and saves are what you *did* like. Each night triage turns them into a second, **implicit profile** and nudges scores toward papers resembling your up-votes and saves, and away from papers resembling your down-votes.
 
-1. `run_triage` reads the latest non-neutral vote per paper (`db.current_votes`) and every save (`db.list_saved`), and loads those papers' stored embeddings. Papers with no embedding are skipped (no crash). An up vote that was later cleared contributes nothing.
+1. `run_triage` reads the latest non-neutral vote per paper (`library.current_votes`) and every save (`library.list_saved`), and loads those papers' stored embeddings. Papers with no embedding are skipped (no crash). An up vote that was later cleared contributes nothing.
 2. `rank.build_feedback_vectors` gives each one a weight `0.5 ** (age_days / half-life)`. The **half-life** is the number of days after which a vote counts half as much; the default is 60 days (`feedback_halflife_days` in your profile). An up vote and a save both start at weight 1.0; a paper that is both counts once with the larger (fresher) weight. A down vote beats a save of the same paper. Timestamps may be ISO with `T`/`Z` or plain `YYYY-MM-DD HH:MM:SS`.
 3. For each candidate paper, `score_papers` finds the liked paper with the largest weight × cosine; the score gains `0.20 ×` that. The same over disliked papers subtracts `0.15 ×`.
 
@@ -122,7 +122,9 @@ Worked example: you up-voted paper L 60 days ago (weight 0.5^(60/60) = 0.5) and 
 
 ### Your shelf
 
-`run_triage` is given the vault's `my_work/` folder and calls `sync_shelf` (`shelf.py`) as its very first step, before it even checks for new papers (so the index follows your files on quiet nights too). Sync embeds any new or edited notes (unchanged notes are not re-embedded). `rank.build_shelf_vectors` then loads every chunk's stored vector, and `score_papers` adds `0.20 ×` the cosine to the nearest chunk. With an empty shelf, or no folder, scores are exactly what they were before. `rpipe run` and `rpipe triage` both pass the folder.
+Just before triage, `rpipe run` and `rpipe triage` sync the shelf: they call `library_api.shelf_sync` on the vault's `my_work/` folder, which embeds any new or edited notes (unchanged notes are not re-embedded) and drops deleted ones. This happens every time, even when there are no new papers, so the index follows your files on quiet nights too. Then they call `run_triage(..., use_shelf=True)`. Triage itself only *reads* the shelf: `rank.build_shelf_vectors` loads every chunk's stored vector, and `score_papers` adds `0.20 ×` the cosine to the nearest chunk. With an empty shelf, or `use_shelf=False` (the default), scores are exactly what they would be without a shelf.
+
+Why the sync sits in the command, not in `run_triage`: syncing writes shelf rows from your own files, which is the app's business (the shelf commands do the same through `library_api`), while triage is a pipeline stage. Keeping the write out of `triage.py` means pipeline code never imports the shelf code; `cli.py` is the one place that joins the two halves (see [architecture.md](architecture.md)). Rejected: leaving the sync inside `run_triage` (simpler call, but it tied the pipeline to the app's module).
 
 Worked example: a note `cooking_pasta.md` holds "tomato basil". A paper whose title and abstract are "Cooking pasta / tomato basil" has cosine 1.0 to that chunk (idealised: the text is nearly identical; a real model scores even close matches lower, typically 0.7 to 0.9), gains 0.20 and gets the reason `near your shelf: cooking_pasta`. A paper at cosine 0.55 gains 0.11 and no reason (below the 0.70 floor).
 

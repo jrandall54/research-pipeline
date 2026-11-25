@@ -150,7 +150,8 @@ def status(runner: Runner) -> bool:
 def deadline_at(now: datetime, value: str) -> datetime | None:
     """The next `value` (HH:MM, local) strictly after `now`; None if "off" or over 12 h away.
 
-    `now` is a naive local time. Only reruns of cut papers obey this deadline.
+    `now` is a naive local time. Only reruns of cut papers and the nightly drain of the
+    request list obey this deadline; normal papers never do.
     """
     if value == "off":
         return None

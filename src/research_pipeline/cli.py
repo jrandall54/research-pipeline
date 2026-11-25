@@ -26,6 +26,7 @@ from research_pipeline import catalog as catalog_mod
 from research_pipeline import (
     categories,
     judge,
+    library_api,
     ollama_fit,
     ollama_tune,
     onboarding,
@@ -40,23 +41,16 @@ from research_pipeline.collect import run_collect
 from research_pipeline.db import (
     SchemaTooNewError,
     UnknownPaperError,
-    clear_skip,
     count_missing_summary,
-    current_votes,
     finish_run,
     get_paper,
-    get_summary,
     list_runs,
-    list_saved,
-    list_shelf_items,
     open_db,
     papers_by_ids,
     papers_given_up_on,
     papers_to_summarize,
     previous_run_unfinished,
-    record_skip,
-    record_vote,
-    set_saved,
+    requests_by_status,
     start_run,
 )
 from research_pipeline.digest import render_summary, write_digest
@@ -85,6 +79,7 @@ from research_pipeline.gold import (
     remove_gold,
     suggest_papers,
 )
+from research_pipeline.ids import normalise_paper_id
 from research_pipeline.llm import (
     CALL_TIMEOUT,
     LLM,
@@ -102,8 +97,8 @@ from research_pipeline.parts import SPLIT_BELOW_CTX, resolve_mode
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
-from research_pipeline.review import later_queue, queue_progress, recent_digest_papers, review_queue
-from research_pipeline.run_lock import RunLocked, run_lock
+from research_pipeline.requests_queue import drain_requests, runnable_requests
+from research_pipeline.run_lock import RunLocked, VaultLock
 from research_pipeline.scan import (
     DEFAULT_OLLAMA_PORT,
     detect_ollama_server,
@@ -113,11 +108,10 @@ from research_pipeline.scan import (
 )
 from research_pipeline.seed_input import find_seed_candidates, parse_seed_input
 from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_texts
-from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.spill import model_cap, run_reruns
-from research_pipeline.summarize import TIMEOUT_STOPPED, run_summarize
+from research_pipeline.summarize import LIMIT_STOPPED, TIMEOUT_STOPPED, run_summarize
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
     DEFAULT_TOPICS,
@@ -399,6 +393,10 @@ def health_line(
         extras += f" · rerun {counts['rerun']}"
     if counts.get("rerun_waiting"):
         extras += f" · rerun waiting {counts['rerun_waiting']}"
+    for key, label in (("requests_done", "requests done"), ("requests_failed", "requests failed"),
+                       ("requests_waiting", "requests waiting")):
+        if counts.get(key):
+            extras += f" · {label} {counts[key]}"
     if counts.get("summaries_off"):
         extras += " · summaries off (abstracts-only mode)"
     if unknown_categories:
@@ -410,6 +408,13 @@ def health_line(
         f"{extras} · errors: {detail}"
         f"{' · previous run did not finish' if previous_unfinished else ''}"
     )
+
+
+def _count_waiting_requests(conn: sqlite3.Connection, counts: dict[str, int]) -> None:
+    """On a night with no model to use, still show the requests that wait (`requests waiting N`)."""
+    waiting = len(runnable_requests(conn))
+    if waiting:
+        counts["requests_waiting"] = waiting
 
 
 def _ready_llm(pipeline: Pipeline) -> LLM | None:
@@ -487,16 +492,74 @@ def _report(counts: dict[str, int], errors: list[str]) -> None:
 RUN_LOCKED_EXIT = 75  # EX_TEMPFAIL: "try again later"; the next night proceeds normally
 
 
+_held: VaultLock | None = None  # the lock the running command holds, so a prompt can let go of it
+
+
+def _take(lock: VaultLock, again: bool = False) -> None:
+    """Take `lock`, or say who is working and exit 75."""
+    try:
+        lock.acquire()
+    except RunLocked as exc:
+        started = "nothing further was started" if again else "nothing was started"
+        typer.echo(f"{exc}; {started}. Wait for it to finish (see `rpipe runs`).", err=True)
+        raise typer.Exit(code=RUN_LOCKED_EXIT) from exc
+
+
+@contextmanager
+def _pipeline_lock(ctx: _Context, holder: str) -> Iterator[None]:
+    """Hold the vault's run lock as `holder` (e.g. "rpipe summarize") for the block.
+
+    If another pipeline command holds it, say which one and exit 75 before anything starts.
+    Every locked command enters this right after `_open`, before any network, model or
+    Ollama call. While the command waits for an answer (`_prompt`, `_confirm`) the lock is
+    let go of, so a nightly run is never refused because a question sits unanswered.
+    The list of locked commands is in docs/guide/running.md.
+    """
+    global _held
+    lock = VaultLock(ctx.vault, holder)
+    _take(lock)
+    outer, _held = _held, lock
+    try:
+        yield
+    finally:
+        _held = outer
+        lock.release()
+
+
+@contextmanager
+def _waiting_for_you() -> Iterator[None]:
+    """Let go of the command's lock while it waits for the user; take it back after the answer.
+
+    If another job took the lock meanwhile, the command stops with exit 75 instead of
+    working beside it. Outside a locked command this does nothing.
+    """
+    lock = _held
+    if lock is None or not lock.held:
+        yield
+        return
+    lock.release()
+    yield  # Ctrl-C or end of input leaves the lock free; the command is ending anyway
+    _take(lock, again=True)
+
+
+def _prompt(*args, **kwargs):
+    """`typer.prompt` that lets go of the pipeline lock while waiting (see `_waiting_for_you`)."""
+    with _waiting_for_you():
+        return typer.prompt(*args, **kwargs)
+
+
+def _confirm(*args, **kwargs) -> bool:
+    """`typer.confirm` that lets go of the pipeline lock while waiting (see `_waiting_for_you`)."""
+    with _waiting_for_you():
+        return typer.confirm(*args, **kwargs)
+
+
 @app.command()
 def run(vault: VaultOption = None) -> None:
     """Collect, triage, summarize and write today's digest (the nightly command)."""
     ctx = _open(vault)
-    try:
-        with run_lock(ctx.vault):
-            _run_locked(ctx)
-    except RunLocked as exc:
-        typer.echo(f"{exc}; nothing was started. Wait for it to finish (see `rpipe runs`).", err=True)
-        raise typer.Exit(code=RUN_LOCKED_EXIT) from exc
+    with _pipeline_lock(ctx, "rpipe run"):
+        _run_locked(ctx)
 
 
 def _run_locked(ctx: _Context) -> None:
@@ -532,8 +595,10 @@ def _run_locked(ctx: _Context) -> None:
                 stage = "triage"
                 with _reporter() as reporter:
                     seeds = _seed_texts(ctx, profile, pipeline, errors, reporter=reporter)
+                    # Your my_work/ files -> shelf rows, every night (even with no new papers).
+                    library_api.shelf_sync(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
                     counts |= run_triage(
-                        ctx.conn, embedder, profile, seeds, ctx.vault / "my_work", reporter=reporter
+                        ctx.conn, embedder, profile, seeds, use_shelf=True, reporter=reporter
                     )
                 # Triage is done with the embedder; free its GPU memory before the model probe
                 # measures what is free (the nightly summaries run without it).
@@ -543,21 +608,25 @@ def _run_locked(ctx: _Context) -> None:
                 try:
                     llm = _ready_llm(pipeline)
                 except LlmLimitReached:
-                    errors.append("summarize: summaries stopped: usage limit reached;"
-                                  " remaining papers wait for the next run")
+                    errors.append(LIMIT_STOPPED)
+                    _count_waiting_requests(ctx.conn, counts)
                 except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
                     errors.append(f"summaries skipped, model unavailable: {exc}")
+                    _count_waiting_requests(ctx.conn, counts)
                 else:
                     if llm is None:
                         counts["summaries_off"] = 1  # chosen, not a failure: abstracts-only digest
+                        _count_waiting_requests(ctx.conn, counts)
                     else:
-                        # None when reruns are off or the deadline is over 12 hours away.
+                        # The morning deadline for the drain and the reruns.
+                        # None when it is "off" or over 12 hours away.
                         deadline = schedule.deadline_at(datetime.now(), ctx.config.night_deadline)
                         with _reporter() as reporter:
                             # The setting, not tonight's clock: a paper cut in a daytime run is
                             # still rerun whole on a later night (rerun_candidates looks at every day).
                             # Nothing queued: no reason to load the model just to pick a mode.
-                            has_work = bool(papers_to_summarize(ctx.conn, date.today()))
+                            has_work = bool(papers_to_summarize(ctx.conn, date.today())) or bool(
+                                runnable_requests(ctx.conn))
                             mode, fallback_above = _summarize_plan(
                                 llm, ctx.config, ctx.config.night_deadline != "off", reporter,
                                 has_work=has_work)
@@ -567,6 +636,24 @@ def _run_locked(ctx: _Context) -> None:
                             )
                         counts |= sum_counts
                         errors += sum_errors
+                        timed_out = TIMEOUT_STOPPED in sum_errors
+                        stage = "requests"
+                        if LIMIT_STOPPED in sum_errors or timed_out:
+                            # The model just stopped: don't spend a call (or a timeout) on requests.
+                            _count_waiting_requests(ctx.conn, counts)
+                        else:
+                            try:
+                                with _reporter() as reporter:
+                                    req_counts, req_errors = drain_requests(
+                                        ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+                                        reporter=reporter, mode=mode, fallback_above=fallback_above,
+                                        deadline=deadline,
+                                    )
+                                counts |= req_counts
+                                errors += req_errors
+                                timed_out = TIMEOUT_STOPPED in req_errors
+                            except Exception as exc:  # noqa: BLE001 - a request problem never stops reruns or the digest
+                                errors.append(f"requests: {' '.join(str(exc).split()) or type(exc).__name__}")
                         if getattr(llm, "name", "") == "ollama":
                             stage = "rerun"
                             try:
@@ -574,7 +661,7 @@ def _run_locked(ctx: _Context) -> None:
                                     rerun_counts, rerun_errors = run_reruns(
                                         ctx.conn, llm, ctx.vault, deadline,
                                         reporter=reporter,
-                                        model_timed_out=TIMEOUT_STOPPED in sum_errors,
+                                        model_timed_out=timed_out,
                                     )
                                 counts |= rerun_counts
                                 errors += rerun_errors
@@ -655,28 +742,31 @@ def format_run(row: sqlite3.Row) -> str:
 def collect(vault: VaultOption = None) -> None:
     """Fetch new papers from every source into the database."""
     ctx = _open(vault)
-    pipeline = build_pipeline(ctx.config)
-    with _reporter() as reporter:
-        counts, errors = run_collect(ctx.conn, pipeline.sources, reporter=reporter)
-    typer.echo("Collected:")
-    _report(counts, [*pipeline.startup_errors, *errors])
+    with _pipeline_lock(ctx, "rpipe collect"):
+        pipeline = build_pipeline(ctx.config)
+        with _reporter() as reporter:
+            counts, errors = run_collect(ctx.conn, pipeline.sources, reporter=reporter)
+        typer.echo("Collected:")
+        _report(counts, [*pipeline.startup_errors, *errors])
 
 
 @app.command()
 def triage(vault: VaultOption = None) -> None:
     """Rank `new` papers against your profile; keep the top N."""
     ctx = _open(vault)
-    profile = _load_profile(ctx)
-    pipeline = build_pipeline(ctx.config)
-    errors: list[str] = []
-    with _reporter() as reporter:
-        embedder = _embedder(pipeline, ctx.config.embedding_model, reporter=reporter)
-        seeds = _seed_texts(ctx, profile, pipeline, errors, reporter=reporter)
-        counts = run_triage(
-            ctx.conn, embedder, profile, seeds, ctx.vault / "my_work", reporter=reporter
-        )
-    typer.echo("Triaged:")
-    _report(counts, errors)
+    with _pipeline_lock(ctx, "rpipe triage"):
+        profile = _load_profile(ctx)
+        pipeline = build_pipeline(ctx.config)
+        errors: list[str] = []
+        with _reporter() as reporter:
+            embedder = _embedder(pipeline, ctx.config.embedding_model, reporter=reporter)
+            seeds = _seed_texts(ctx, profile, pipeline, errors, reporter=reporter)
+            library_api.shelf_sync(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
+            counts = run_triage(
+                ctx.conn, embedder, profile, seeds, use_shelf=True, reporter=reporter
+            )
+        typer.echo("Triaged:")
+        _report(counts, errors)
 
 
 @app.command()
@@ -706,51 +796,52 @@ def summarize(
     if limit is not None and limit < 1:
         raise _fail(f"--limit must be a positive whole number, got {limit}.")
     ctx = _open(vault)
-    _require_model(ctx.config)
-    pipeline = build_pipeline(ctx.config)
-    today = date.today()
-    if paper_ids:
-        try:
-            papers_by_ids(ctx.conn, paper_ids)
-        except UnknownPaperError as exc:
-            raise _fail(str(exc)) from exc
-    else:
-        normal = papers_to_summarize(ctx.conn, today) or papers_given_up_on(ctx.conn, today)
-        total = count_missing_summary(ctx.conn, today) if backlog else 0
-        if not normal and not total:
-            if backlog:
-                typer.echo("Nothing to summarize: no papers in past digests are missing a summary, and no triaged papers or today's digest papers are waiting either.")
-            else:
-                typer.echo("Nothing to summarize: no triaged papers, and today's digest has none missing a summary. Run `rpipe run` or `rpipe triage` first.")
-            return
-    try:
-        llm = _ready_llm(pipeline)
-    except Exception as exc:  # noqa: BLE001
-        raise _fail(f"model unavailable: {exc}") from exc
-    if llm is None:
-        raise _fail(NO_MODEL)
-    cap = (limit or 10) if backlog else None
-    if backlog:
-        if total:
-            typer.echo(f"Backlog: {min(cap, total)} of {total} papers missing a summary (newest first; raise --limit for more)")
+    with _pipeline_lock(ctx, "rpipe summarize"):
+        _require_model(ctx.config)
+        pipeline = build_pipeline(ctx.config)
+        today = date.today()
+        if paper_ids:
+            try:
+                papers_by_ids(ctx.conn, paper_ids)
+            except UnknownPaperError as exc:
+                raise _fail(str(exc)) from exc
         else:
-            typer.echo("No older digest papers are missing a summary.")
-    done = ListReporter()
-    with _reporter() as live:
-        # Reruns follow tonight unless the deadline is off, so the same fallback rule as `run`.
-        mode, fallback_above = _summarize_plan(
-            llm, ctx.config, ctx.config.night_deadline != "off", live)
-        counts, errors = run_summarize(
-            ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
-            today=today, backlog_limit=cap, paper_ids=paper_ids or None,
-            reporter=_Tee(live, done), refetch=refetch,
-            mode=mode, fallback_above=fallback_above,
+            normal = papers_to_summarize(ctx.conn, today) or papers_given_up_on(ctx.conn, today)
+            total = count_missing_summary(ctx.conn, today) if backlog else 0
+            if not normal and not total:
+                if backlog:
+                    typer.echo("Nothing to summarize: no papers in past digests are missing a summary, and no triaged papers or today's digest papers are waiting either.")
+                else:
+                    typer.echo("Nothing to summarize: no triaged papers, and today's digest has none missing a summary. Run `rpipe run` or `rpipe triage` first.")
+                return
+        try:
+            llm = _ready_llm(pipeline)
+        except Exception as exc:  # noqa: BLE001
+            raise _fail(f"model unavailable: {exc}") from exc
+        if llm is None:
+            raise _fail(NO_MODEL)
+        cap = (limit or 10) if backlog else None
+        if backlog:
+            if total:
+                typer.echo(f"Backlog: {min(cap, total)} of {total} papers missing a summary (newest first; raise --limit for more)")
+            else:
+                typer.echo("No older digest papers are missing a summary.")
+        done = ListReporter()
+        with _reporter() as live:
+            # Reruns follow tonight unless the deadline is off, so the same fallback rule as `run`.
+            mode, fallback_above = _summarize_plan(
+                llm, ctx.config, ctx.config.night_deadline != "off", live)
+            counts, errors = run_summarize(
+                ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+                today=today, backlog_limit=cap, paper_ids=paper_ids or None,
+                reporter=_Tee(live, done), refetch=refetch,
+                mode=mode, fallback_above=fallback_above,
+            )
+        typer.echo("Summarized:")
+        _report(counts, errors)
+        _refresh_hint(
+            ctx.conn, [e.label for e in done.events if e.kind == "step" and e.outcome == "done"], today
         )
-    typer.echo("Summarized:")
-    _report(counts, errors)
-    _refresh_hint(
-        ctx.conn, [e.label for e in done.events if e.kind == "step" and e.outcome == "done"], today
-    )
 
 
 def _refresh_hint(conn: sqlite3.Connection, paper_ids: list[str], today: date) -> None:
@@ -780,12 +871,89 @@ def digest(
 ) -> None:
     """Write the markdown digest from papers already triaged."""
     ctx = _open(vault)
+    with _pipeline_lock(ctx, "rpipe digest"):
+        try:
+            day = date.fromisoformat(date_) if date_ else date.today()
+        except ValueError as exc:
+            raise _fail(f"--date must be YYYY-MM-DD, got {date_!r}") from exc
+        out = write_digest(ctx.conn, ctx.vault, day, f"Digest {day.isoformat()}: written from stored papers (no collection run)")
+        typer.echo(f"Digest written to {out}")
+
+
+# ---------------------------------------------------------------- request list
+
+requests_app = typer.Typer(
+    help="Work the app asked the pipeline to do (e.g. summarize one paper): see it, or do it now.",
+    no_args_is_help=True,
+)
+app.add_typer(requests_app, name="requests")
+
+
+@requests_app.command("add")
+def requests_add(
+    paper: Annotated[str, typer.Argument(help="Paper id (any spelling, e.g. 2611.25005v2 or an arXiv URL), or part of its title.")],
+    vault: VaultOption = None,
+) -> None:
+    """Ask for a paper to be summarized: tonight in `rpipe run`, or now with `rpipe requests run`."""
+    ctx = _open(vault)
     try:
-        day = date.fromisoformat(date_) if date_ else date.today()
-    except ValueError as exc:
-        raise _fail(f"--date must be YYYY-MM-DD, got {date_!r}") from exc
-    out = write_digest(ctx.conn, ctx.vault, day, f"Digest {day.isoformat()}: written from stored papers (no collection run)")
-    typer.echo(f"Digest written to {out}")
+        pid = _resolve_paper(ctx.conn, paper)
+        before = library_api.open_request_ids(ctx.conn)
+        rid = library_api.request(ctx.conn, "summarize", {"paper_id": pid})
+    except UnknownPaperError as exc:
+        raise _fail(str(exc)) from exc
+    finally:
+        ctx.conn.close()
+    if rid in before:
+        typer.echo(f"Request {rid} to summarize {pid} is already waiting; nothing new was added.")
+    else:
+        typer.echo(f"Request {rid}: summarize {pid}.")
+    typer.echo("It runs during tonight's `rpipe run`, or now with `rpipe requests run`. "
+               "`rpipe requests list` shows how it went.")
+
+
+@requests_app.command("run")
+def requests_run(vault: VaultOption = None) -> None:
+    """Do the waiting requests now instead of at the nightly run."""
+    ctx = _open(vault)
+    with _pipeline_lock(ctx, "rpipe requests run"):
+        _require_model(ctx.config)
+        pending = runnable_requests(ctx.conn)
+        if not pending:
+            typer.echo("No requests waiting. `rpipe requests list` shows earlier ones.")
+            return
+        pipeline = build_pipeline(ctx.config)
+        try:
+            llm = _ready_llm(pipeline)
+        except Exception as exc:  # noqa: BLE001
+            raise _fail(f"model unavailable: {exc}") from exc
+        if llm is None:
+            raise _fail(NO_MODEL)
+        with _reporter() as reporter:
+            mode, fallback_above = _summarize_plan(
+                llm, ctx.config, ctx.config.night_deadline != "off", reporter, has_work=bool(pending))
+            counts, errors = drain_requests(
+                ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+                reporter=reporter, mode=mode, fallback_above=fallback_above,
+            )
+        typer.echo("Requests:")
+        _report(counts, errors)
+
+
+@requests_app.command("list")
+def requests_list(vault: VaultOption = None) -> None:
+    """List every request, newest first: id, status, kind, paper, tries, when asked, last error."""
+    ctx = _open(vault)
+    rows = requests_by_status(ctx.conn, "pending", "running", "done", "failed")
+    if not rows:
+        typer.echo("No requests.")
+        return
+    for row in reversed(rows):
+        paper = json.loads(row["payload"]).get("paper_id", "-")
+        line = f"{row['id']}  {row['status']}  {row['kind']}  {paper}  {row['tries']}  {row['created_at']}"
+        if row["error"]:
+            line += f"  {' '.join(row['error'].split())}"
+        typer.echo(line)
 
 
 # ---------------------------------------------------------------- profile commands
@@ -901,7 +1069,7 @@ def _pick_index(labels: list[str]) -> int | None:
     for i, label in enumerate(labels, 1):
         typer.echo(f"  {i}. {label}")
     n = len(labels)
-    pick = typer.prompt(f"Pick 1-{n} or 0 to cancel", type=int)
+    pick = _prompt(f"Pick 1-{n} or 0 to cancel", type=int)
     if not 0 <= pick <= n:
         raise _SeedProblem(f"{pick} is not between 0 and {n}. Nothing was changed.")
     return pick - 1 if pick else None
@@ -912,7 +1080,7 @@ def _choose(candidates: list[PaperMeta], yes: bool) -> PaperMeta | None:
         return candidates[0]
     if len(candidates) == 1:
         typer.echo(_describe(candidates[0]))
-        return candidates[0] if typer.confirm("Add this paper?", default=True) else None
+        return candidates[0] if _confirm("Add this paper?", default=True) else None
     index = _pick_index([_describe(m) for m in candidates])
     return None if index is None else candidates[index]
 
@@ -1027,7 +1195,7 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
         typer.echo("All proposed topics are already in your profile.")
     added: set[str] = set()
     for t in topics:
-        if yes or typer.confirm(f"Add topic '{t}'?", default=True):
+        if yes or _confirm(f"Add topic '{t}'?", default=True):
             try:
                 changed = profile_edit.add_topic(vault, t)
                 added.add(t.casefold())
@@ -1054,7 +1222,7 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
         found = [m for _, m in resolved if m is not None]
         typer.echo(f"Found {len(found)} of {len(resolved)} proposed papers on arXiv (the rest were dropped).")
         for meta in found:
-            if yes or typer.confirm(f"Add seed {_describe(meta)}?", default=True):
+            if yes or _confirm(f"Add seed {_describe(meta)}?", default=True):
                 try:
                     typer.echo(_add_seed(vault, arxiv, meta.id, yes=True))
                 except _SeedProblem as exc:
@@ -1074,13 +1242,14 @@ def profile_suggest(
 ) -> None:
     """Let the configured model propose topics and seed papers from a description; you approve each."""
     ctx = _open(vault)
-    _require_model(ctx.config)
-    if description is None:
-        description = typer.prompt("Describe your research in a few sentences")
-    try:
-        _suggest_flow(ctx.vault, ctx.config, description, yes)
-    except (ValueError, ConfigError) as exc:
-        raise _fail(str(exc)) from exc
+    with _pipeline_lock(ctx, "rpipe profile suggest"):
+        _require_model(ctx.config)
+        if description is None:
+            description = _prompt("Describe your research in a few sentences")
+        try:
+            _suggest_flow(ctx.vault, ctx.config, description, yes)
+        except (ValueError, ConfigError) as exc:
+            raise _fail(str(exc)) from exc
 
 
 @profile_app.command("set-top-n")
@@ -1161,30 +1330,31 @@ def shelf_add(
 ) -> None:
     """Add a file or a short note to the shelf and index it."""
     ctx = _open(vault)
-    path = Path(source.strip()).expanduser() if _looks_like_path(source) else None
-    if path is not None and not path.is_file():
-        raise _fail(
-            f"File not found: {source.strip()}. Check the path, or put the note in quotes "
-            'with spaces, e.g. rpipe shelf add "my idea about fuzzing".'
-        )
-    with _reporter() as reporter:
-        embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
-    with _clean_errors():
-        name = add_to_shelf(ctx.conn, ctx.vault / "my_work", embedder, source)
-    typer.echo(f"Added '{name}' to your shelf. Papers close to it will now rank higher.")
+    with _pipeline_lock(ctx, "rpipe shelf add"):
+        path = Path(source.strip()).expanduser() if _looks_like_path(source) else None
+        if path is not None and not path.is_file():
+            raise _fail(
+                f"File not found: {source.strip()}. Check the path, or put the note in quotes "
+                'with spaces, e.g. rpipe shelf add "my idea about fuzzing".'
+            )
+        with _reporter() as reporter:
+            embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
+        with _clean_errors():
+            item = library_api.shelf_add(ctx.conn, ctx.vault / "my_work", embedder, source)
+        typer.echo(f"Added '{item.name}' to your shelf. Papers close to it will now rank higher.")
 
 
 @shelf_app.command("list")
 def shelf_list(vault: VaultOption = None) -> None:
     """Show what is on the shelf."""
     ctx = _open(vault)
-    rows = list_shelf_items(ctx.conn)
-    if not rows:
+    items = library_api.shelf_items(ctx.conn)
+    if not items:
         typer.echo('Your shelf is empty. Add a note or file with: rpipe shelf add "your idea" (or a .md/.txt path).')
         return
-    typer.echo(f"Shelf: {_item_count(len(rows), 'item')}")
-    for r in rows:
-        typer.echo(f"  {r['name']}  {_item_count(r['n_chunks'], 'chunk')}  added {str(r['added_at'])[:10]}")
+    typer.echo(f"Shelf: {_item_count(len(items), 'item')}")
+    for item in items:
+        typer.echo(f"  {item.name}  {_item_count(item.chunks, 'chunk')}  added {item.added_at[:10]}")
 
 
 @shelf_app.command("remove")
@@ -1195,7 +1365,7 @@ def shelf_remove(
     """Take an item off the shelf (its file is moved to my_work/.removed/, not deleted)."""
     ctx = _open(vault)
     try:
-        moved = remove_from_shelf(ctx.conn, ctx.vault / "my_work", name)
+        moved = library_api.shelf_remove(ctx.conn, ctx.vault / "my_work", name)
     except KeyError as exc:
         raise _fail(str(exc.args[0])) from exc
     except ValueError as exc:
@@ -1210,19 +1380,20 @@ def shelf_remove(
 def shelf_sync(vault: VaultOption = None) -> None:
     """Re-index my_work/ after you added, edited or deleted files by hand."""
     ctx = _open(vault)
-    with _reporter() as reporter:
-        embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
-        res = sync_shelf(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
-    typer.echo(f"Shelf synced: {len(res.added)} added, {len(res.updated)} updated, {len(res.removed)} removed.")
-    for label, names in (("Added", res.added), ("Updated", res.updated), ("Removed", res.removed)):
-        if names:
-            typer.echo(f"  {label}: {', '.join(names)}")
-    if res.ignored:
-        typer.echo(
-            f"Ignored {len(res.ignored)} file(s): {', '.join(res.ignored)}. "
-            "Only .md and .txt files directly in my_work/ are indexed "
-            "(if a .md and a .txt share a name, the .md is used)."
-        )
+    with _pipeline_lock(ctx, "rpipe shelf sync"):
+        with _reporter() as reporter:
+            embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
+            res = library_api.shelf_sync(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
+        typer.echo(f"Shelf synced: {len(res.added)} added, {len(res.updated)} updated, {len(res.removed)} removed.")
+        for label, names in (("Added", res.added), ("Updated", res.updated), ("Removed", res.removed)):
+            if names:
+                typer.echo(f"  {label}: {', '.join(names)}")
+        if res.ignored:
+            typer.echo(
+                f"Ignored {len(res.ignored)} file(s): {', '.join(res.ignored)}. "
+                "Only .md and .txt files directly in my_work/ are indexed "
+                "(if a .md and a .txt share a name, the .md is used)."
+            )
 
 
 # ---------------------------------------------------------------- gold commands
@@ -1237,7 +1408,7 @@ def _ask_facts() -> list[str]:
     typer.echo("Type one per line; press Enter on an empty line to finish. Aim for 3 or more.")
     facts: list[str] = []
     while True:
-        line = profile_edit.normalise_text(typer.prompt(f"Fact {len(facts) + 1}", default="", show_default=False))
+        line = profile_edit.normalise_text(_prompt(f"Fact {len(facts) + 1}", default="", show_default=False))
         if not line:
             return facts
         facts.append(line)
@@ -1251,47 +1422,48 @@ def gold_add(
 ) -> None:
     """Add a paper to the gold set, then enter the key facts about it."""
     ctx = _open(vault)
-    if text is None:
-        text = typer.prompt("arXiv link, id or title")
-    if not text.strip():
-        raise _fail("Input is empty: give an arXiv link, id or title.")
-    with _clean_errors():
-        existing = load_gold(ctx.vault)
-        try:
-            kind, value = parse_seed_input(text)
-        except ValueError as exc:
-            raise _fail(str(exc)) from exc
-        if kind == "id" and has_gold(existing, value):
-            typer.echo(f"{value} is already in your gold set. Add facts with: rpipe gold add-fact {value} \"...\"")
-            return
-        arxiv = make_arxiv(ctx.config)
-        try:
+    with _pipeline_lock(ctx, "rpipe gold add"):
+        if text is None:
+            text = _prompt("arXiv link, id or title")
+        if not text.strip():
+            raise _fail("Input is empty: give an arXiv link, id or title.")
+        with _clean_errors():
+            existing = load_gold(ctx.vault)
             try:
-                candidates = find_seed_candidates(text, arxiv)
-            except SourceError as exc:
-                raise _fail(f"Could not reach arXiv: {exc}. Nothing was changed.") from exc
-            if not candidates:
-                raise _fail(f'No paper found for "{text.strip()}". Try the arXiv link or id.')
-            try:
-                chosen = _choose(candidates, yes)
-            except _SeedProblem as exc:
+                kind, value = parse_seed_input(text)
+            except ValueError as exc:
                 raise _fail(str(exc)) from exc
-        finally:
-            _close(arxiv)
-        if chosen is None:
-            typer.echo("Cancelled. Nothing was changed.")
-            return
-        if has_gold(existing, chosen.id):
-            typer.echo(f"{chosen.id} is already in your gold set.")
-            return
-        facts = _ask_facts()
-        if not facts:
-            typer.echo("At least one key fact is needed, so nothing was saved. Run the command again.")
-            return
-        if len(facts) < 3:
-            typer.echo(f"Saved with {len(facts)} fact(s); 3 or more make a better test (rpipe gold add-fact).")
-        add_gold(ctx.vault, GoldPaper(paper_id=chosen.id, title=chosen.title, key_facts=facts))
-        typer.echo(f"Added {chosen.id}: {chosen.title}")
+            if kind == "id" and has_gold(existing, value):
+                typer.echo(f"{value} is already in your gold set. Add facts with: rpipe gold add-fact {value} \"...\"")
+                return
+            arxiv = make_arxiv(ctx.config)
+            try:
+                try:
+                    candidates = find_seed_candidates(text, arxiv)
+                except SourceError as exc:
+                    raise _fail(f"Could not reach arXiv: {exc}. Nothing was changed.") from exc
+                if not candidates:
+                    raise _fail(f'No paper found for "{text.strip()}". Try the arXiv link or id.')
+                try:
+                    chosen = _choose(candidates, yes)
+                except _SeedProblem as exc:
+                    raise _fail(str(exc)) from exc
+            finally:
+                _close(arxiv)
+            if chosen is None:
+                typer.echo("Cancelled. Nothing was changed.")
+                return
+            if has_gold(existing, chosen.id):
+                typer.echo(f"{chosen.id} is already in your gold set.")
+                return
+            facts = _ask_facts()
+            if not facts:
+                typer.echo("At least one key fact is needed, so nothing was saved. Run the command again.")
+                return
+            if len(facts) < 3:
+                typer.echo(f"Saved with {len(facts)} fact(s); 3 or more make a better test (rpipe gold add-fact).")
+            add_gold(ctx.vault, GoldPaper(paper_id=chosen.id, title=chosen.title, key_facts=facts))
+            typer.echo(f"Added {chosen.id}: {chosen.title}")
 
 
 @gold_app.command("list")
@@ -1315,18 +1487,19 @@ def gold_suggest(
 ) -> None:
     """Suggest papers from your vault for the gold set, spread across short to long."""
     ctx = _open(vault)
-    with _clean_errors():
-        picks = suggest_papers(ctx.conn, load_gold(ctx.vault), count)
-    if not picks:
-        typer.echo(
-            "No summarized papers with full text yet — run `rpipe run` first, "
-            "or add papers by hand with `rpipe gold add`."
-        )
-        return
-    typer.echo(f"{len(picks)} suggested paper(s), shortest to longest:")
-    for s in picks:
-        typer.echo(f"  {s.paper_id}  ~{s.tokens} tokens  {profile_edit.normalise_text(s.title)}")
-    typer.echo("Pick the ones you know well, then: rpipe gold draft ID ...")
+    with _pipeline_lock(ctx, "rpipe gold suggest"):
+        with _clean_errors():
+            picks = suggest_papers(ctx.conn, load_gold(ctx.vault), count)
+        if not picks:
+            typer.echo(
+                "No summarized papers with full text yet — run `rpipe run` first, "
+                "or add papers by hand with `rpipe gold add`."
+            )
+            return
+        typer.echo(f"{len(picks)} suggested paper(s), shortest to longest:")
+        for s in picks:
+            typer.echo(f"  {s.paper_id}  ~{s.tokens} tokens  {profile_edit.normalise_text(s.title)}")
+        typer.echo("Pick the ones you know well, then: rpipe gold draft ID ...")
 
 
 @gold_app.command("auto")
@@ -1336,47 +1509,48 @@ def gold_auto(
 ) -> None:
     """Fill the gold set with no questions: pick papers, let Claude draft the facts, save them unreviewed."""
     ctx = _open(vault)
-    pipeline = build_pipeline(ctx.config)
-    try:
-        llm = pipeline.make_judge()
-    except judge.JudgeUnavailable as exc:
-        raise _fail(f"The judge is not available: {exc}") from exc
-    with _clean_errors():
-        existing = load_gold(ctx.vault)
-        wanted = count if count is not None else GOLD_TARGET - len(existing)
-        if wanted <= 0:
-            typer.echo(f"The gold set already has {len(existing)} papers; nothing to add. Use --count N to add more.")
+    with _pipeline_lock(ctx, "rpipe gold auto"):
+        pipeline = build_pipeline(ctx.config)
+        try:
+            llm = pipeline.make_judge()
+        except judge.JudgeUnavailable as exc:
+            raise _fail(f"The judge is not available: {exc}") from exc
+        with _clean_errors():
+            existing = load_gold(ctx.vault)
+            wanted = count if count is not None else GOLD_TARGET - len(existing)
+            if wanted <= 0:
+                typer.echo(f"The gold set already has {len(existing)} papers; nothing to add. Use --count N to add more.")
+                return
+            picks = suggest_papers(ctx.conn, existing, wanted)
+        if not picks:
+            typer.echo("No summarized papers with full text yet: run `rpipe run` first, or add papers by hand with `rpipe gold add`.")
             return
-        picks = suggest_papers(ctx.conn, existing, wanted)
-    if not picks:
-        typer.echo("No summarized papers with full text yet: run `rpipe run` first, or add papers by hand with `rpipe gold add`.")
-        return
-    typer.echo(
-        "The paper text is sent to Claude to draft the facts. Nothing is reviewed: every paper is saved as unreviewed, "
-        "so the scores only compare runs with each other."
-    )
-    added = 0
-    with _reporter() as reporter, stage(reporter, "gold auto", total=len(picks)) as handle:
-        for number, pick in enumerate(picks, 1):
-            try:
-                # The title is already in the vault, so only the HTML page is fetched (no arXiv API call).
-                sections = ensure_usable(pipeline.fulltext_fetcher(pick.paper_id))
-                facts = [profile_edit.normalise_text(f) for f in judge.draft_facts(llm, pick.title, sections)]
-                facts = [f for f in facts if f]
-                if not facts:
-                    handle.step(pick.paper_id, current=number, outcome="no facts")
-                    continue
-                add_gold(ctx.vault, GoldPaper(paper_id=pick.paper_id, title=pick.title, key_facts=facts, unreviewed=True))
-                added += 1
-                handle.step(pick.paper_id, current=number)
-            except FullTextUnavailable:
-                handle.step(pick.paper_id, current=number, outcome="no full text")
-            except LlmLimitReached:
-                handle.step(pick.paper_id, current=number, outcome="usage limit reached")
-                break
-            except (LlmError, SourceError) as exc:
-                handle.step(pick.paper_id, current=number, outcome="failed", detail=str(exc))
-    typer.echo(f"Added {added} paper(s), all unreviewed. See them with `rpipe gold list`; replace any later with `rpipe gold remove ID` then `rpipe gold draft ID`.")
+        typer.echo(
+            "The paper text is sent to Claude to draft the facts. Nothing is reviewed: every paper is saved as unreviewed, "
+            "so the scores only compare runs with each other."
+        )
+        added = 0
+        with _reporter() as reporter, stage(reporter, "gold auto", total=len(picks)) as handle:
+            for number, pick in enumerate(picks, 1):
+                try:
+                    # The title is already in the vault, so only the HTML page is fetched (no arXiv API call).
+                    sections = ensure_usable(pipeline.fulltext_fetcher(pick.paper_id))
+                    facts = [profile_edit.normalise_text(f) for f in judge.draft_facts(llm, pick.title, sections)]
+                    facts = [f for f in facts if f]
+                    if not facts:
+                        handle.step(pick.paper_id, current=number, outcome="no facts")
+                        continue
+                    add_gold(ctx.vault, GoldPaper(paper_id=pick.paper_id, title=pick.title, key_facts=facts, unreviewed=True))
+                    added += 1
+                    handle.step(pick.paper_id, current=number)
+                except FullTextUnavailable:
+                    handle.step(pick.paper_id, current=number, outcome="no full text")
+                except LlmLimitReached:
+                    handle.step(pick.paper_id, current=number, outcome="usage limit reached")
+                    break
+                except (LlmError, SourceError) as exc:
+                    handle.step(pick.paper_id, current=number, outcome="failed", detail=str(exc))
+        typer.echo(f"Added {added} paper(s), all unreviewed. See them with `rpipe gold list`; replace any later with `rpipe gold remove ID` then `rpipe gold draft ID`.")
 
 
 @gold_app.command("draft")
@@ -1386,58 +1560,59 @@ def gold_draft(
 ) -> None:
     """Draft key facts for papers with the cloud judge, then review them one by one."""
     ctx = _open(vault)
-    pipeline = build_pipeline(ctx.config)
-    try:
-        llm = pipeline.make_judge()
-    except judge.JudgeUnavailable as exc:
-        raise _fail(f"The judge is not available: {exc}") from exc
-    with _clean_errors():
-        existing = load_gold(ctx.vault)
-    typer.echo("The paper text is sent to Claude to draft the facts. You review every one before it is saved.")
-    for number, paper_id in enumerate(ids, 1):
-        paper_id = paper_id.strip()
-        if has_gold(existing, paper_id):
-            typer.echo(f"{paper_id} is already in your gold set. Add facts with: rpipe gold add-fact {paper_id} \"...\"")
-            continue
+    with _pipeline_lock(ctx, "rpipe gold draft"):
+        pipeline = build_pipeline(ctx.config)
         try:
-            # The stage covers only the waiting work; review prompts happen after it closes.
-            with _reporter() as reporter, stage(reporter, "gold draft", total=len(ids), label=paper_id) as handle:
-                found = pipeline.seed_fetcher([paper_id])
-                if not found:
-                    handle.step(paper_id, current=number, outcome="not found")
-                    drafted = None
-                else:
-                    try:
-                        sections = ensure_usable(pipeline.fulltext_fetcher(found[0].id))
-                    except FullTextUnavailable:
-                        handle.step(paper_id, current=number, outcome="no full text")
-                        drafted = []
-                    else:
-                        drafted = judge.draft_facts(llm, found[0].title, sections)
-                        handle.step(paper_id, current=number)
+            llm = pipeline.make_judge()
         except judge.JudgeUnavailable as exc:
             raise _fail(f"The judge is not available: {exc}") from exc
-        except (LlmError, SourceError) as exc:
-            typer.echo(f"Could not draft facts for {paper_id}: {exc}. Add it by hand with `rpipe gold add {paper_id}`.")
-            continue
-        if drafted is None:
-            typer.echo(f"No paper found for {paper_id} on arXiv.")
-            continue
-        if not drafted:
-            typer.echo(f"There is no HTML full text for {paper_id}; add it by hand with `rpipe gold add {paper_id}`.")
-            continue
-        title = found[0].title
-        try:
-            facts = _review_drafted(drafted, profile_edit.normalise_text(title))
-        except (typer.Abort, KeyboardInterrupt, EOFError):
-            typer.echo(f"\nStopped. Nothing was saved for {paper_id}.")
-            return
-        if not facts:
-            typer.echo(f"No facts kept, so nothing was saved for {paper_id}.")
-            continue
-        add_gold(ctx.vault, GoldPaper(paper_id=found[0].id, title=title, key_facts=facts))
-        existing = load_gold(ctx.vault)
-        typer.echo(f"Added {paper_id} with {len(facts)} fact(s).")
+        with _clean_errors():
+            existing = load_gold(ctx.vault)
+        typer.echo("The paper text is sent to Claude to draft the facts. You review every one before it is saved.")
+        for number, paper_id in enumerate(ids, 1):
+            paper_id = paper_id.strip()
+            if has_gold(existing, paper_id):
+                typer.echo(f"{paper_id} is already in your gold set. Add facts with: rpipe gold add-fact {paper_id} \"...\"")
+                continue
+            try:
+                # The stage covers only the waiting work; review prompts happen after it closes.
+                with _reporter() as reporter, stage(reporter, "gold draft", total=len(ids), label=paper_id) as handle:
+                    found = pipeline.seed_fetcher([paper_id])
+                    if not found:
+                        handle.step(paper_id, current=number, outcome="not found")
+                        drafted = None
+                    else:
+                        try:
+                            sections = ensure_usable(pipeline.fulltext_fetcher(found[0].id))
+                        except FullTextUnavailable:
+                            handle.step(paper_id, current=number, outcome="no full text")
+                            drafted = []
+                        else:
+                            drafted = judge.draft_facts(llm, found[0].title, sections)
+                            handle.step(paper_id, current=number)
+            except judge.JudgeUnavailable as exc:
+                raise _fail(f"The judge is not available: {exc}") from exc
+            except (LlmError, SourceError) as exc:
+                typer.echo(f"Could not draft facts for {paper_id}: {exc}. Add it by hand with `rpipe gold add {paper_id}`.")
+                continue
+            if drafted is None:
+                typer.echo(f"No paper found for {paper_id} on arXiv.")
+                continue
+            if not drafted:
+                typer.echo(f"There is no HTML full text for {paper_id}; add it by hand with `rpipe gold add {paper_id}`.")
+                continue
+            title = found[0].title
+            try:
+                facts = _review_drafted(drafted, profile_edit.normalise_text(title))
+            except (typer.Abort, KeyboardInterrupt, EOFError):
+                typer.echo(f"\nStopped. Nothing was saved for {paper_id}.")
+                return
+            if not facts:
+                typer.echo(f"No facts kept, so nothing was saved for {paper_id}.")
+                continue
+            add_gold(ctx.vault, GoldPaper(paper_id=found[0].id, title=title, key_facts=facts))
+            existing = load_gold(ctx.vault)
+            typer.echo(f"Added {paper_id} with {len(facts)} fact(s).")
 
 
 def _review_drafted(drafted: list[str], title: str) -> list[str]:
@@ -1448,11 +1623,11 @@ def _review_drafted(drafted: list[str], title: str) -> list[str]:
         typer.echo(f"  {n}. {fact}")
         choice = ""
         while choice not in ("k", "e", "d"):
-            choice = typer.prompt("Keep, edit or drop? [k/e/d]", default="k", show_default=False).strip().lower()
+            choice = _prompt("Keep, edit or drop? [k/e/d]", default="k", show_default=False).strip().lower()
         if choice == "k":
             kept.append(fact)
         elif choice == "e":
-            new = profile_edit.normalise_text(typer.prompt("New text (empty keeps the draft)", default="", show_default=False))
+            new = profile_edit.normalise_text(_prompt("New text (empty keeps the draft)", default="", show_default=False))
             kept.append(new or fact)
     return kept + _ask_facts()
 
@@ -1491,7 +1666,7 @@ def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str)
     """Resolve (paper id, fact number, fact text), prompting for whatever was omitted. Validates before any write."""
     papers = load_gold(vault)
     if paper_id is None:
-        paper_id = typer.prompt("Paper id")
+        paper_id = _prompt("Paper id")
     matches = [p for p in papers if has_gold([p], paper_id)]
     if not matches:
         raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
@@ -1500,7 +1675,7 @@ def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str)
         typer.echo(f"{paper.paper_id}  {paper.title}")
         for n, fact in enumerate(paper.key_facts, 1):
             typer.echo(f"  {n}. {fact}")
-        number = typer.prompt(f"Number of the fact to {verb}", type=int)
+        number = _prompt(f"Number of the fact to {verb}", type=int)
     if not 1 <= number <= len(paper.key_facts):
         raise _fail(f"{paper.paper_id} has {len(paper.key_facts)} fact(s); there is no fact {number}. See: rpipe gold list")
     return paper.paper_id, number, paper.key_facts[number - 1]
@@ -1518,7 +1693,7 @@ def gold_edit_fact(
     with _clean_errors():
         paper_id, number, _old = _pick_fact(ctx.vault, paper_id, number, "edit")
         if text is None:
-            text = typer.prompt("New text for the fact")
+            text = _prompt("New text for the fact")
         text = profile_edit.normalise_text(text)
         if not text:
             raise _fail("The fact is empty.")
@@ -1542,7 +1717,7 @@ def gold_remove_fact(
     ctx = _open(vault)
     with _clean_errors():
         paper_id, number, fact = _pick_fact(ctx.vault, paper_id, number, "remove")
-        if not yes and not typer.confirm(f'Remove fact {number} of {paper_id} ("{fact}")?', default=False):
+        if not yes and not _confirm(f'Remove fact {number} of {paper_id} ("{fact}")?', default=False):
             typer.echo("Cancelled. Nothing was changed.")
             return
         try:
@@ -1575,52 +1750,53 @@ def eval_run(
 ) -> None:
     """Summarize every gold-set paper with the local model and write a report to grade."""
     ctx = _open(vault)
-    _require_model(ctx.config)
-    setting = ctx.config.summarize_mode if mode is None else mode.strip().lower()
-    if setting not in profile_edit.SUMMARIZE_MODES:
-        raise _fail(f"unknown mode {mode!r}: choose one of {', '.join(profile_edit.SUMMARIZE_MODES)}")
-    with _clean_errors():
-        papers = load_gold(ctx.vault)
-    if not papers:
-        raise _fail("Your gold set is empty. Add papers you know well with `rpipe gold add` first.")
-    if len(papers) < GOLD_TARGET:
-        typer.echo(f"Warning: the gold set has {len(papers)} papers; {GOLD_TARGET} make a fair test (rpipe gold add).")
-    pipeline = build_pipeline(ctx.config)
-    eval_judge: LLM | None = None
-    if use_judge:
+    with _pipeline_lock(ctx, "rpipe eval run"):
+        _require_model(ctx.config)
+        setting = ctx.config.summarize_mode if mode is None else mode.strip().lower()
+        if setting not in profile_edit.SUMMARIZE_MODES:
+            raise _fail(f"unknown mode {mode!r}: choose one of {', '.join(profile_edit.SUMMARIZE_MODES)}")
+        with _clean_errors():
+            papers = load_gold(ctx.vault)
+        if not papers:
+            raise _fail("Your gold set is empty. Add papers you know well with `rpipe gold add` first.")
+        if len(papers) < GOLD_TARGET:
+            typer.echo(f"Warning: the gold set has {len(papers)} papers; {GOLD_TARGET} make a fair test (rpipe gold add).")
+        pipeline = build_pipeline(ctx.config)
+        eval_judge: LLM | None = None
+        if use_judge:
+            try:
+                eval_judge = pipeline.make_judge()
+            except judge.JudgeUnavailable as exc:
+                raise _fail(f"The judge is not available: {exc}") from exc
+            typer.echo("The paper text is sent to Claude to grade the summaries.")
         try:
-            eval_judge = pipeline.make_judge()
-        except judge.JudgeUnavailable as exc:
-            raise _fail(f"The judge is not available: {exc}") from exc
-        typer.echo("The paper text is sent to Claude to grade the summaries.")
-    try:
-        llm = _ready_llm(pipeline)
-    except Exception as exc:  # noqa: BLE001
-        raise _fail(f"model unavailable: {exc}") from exc
-    if llm is None:
-        raise _fail(NO_MODEL)
+            llm = _ready_llm(pipeline)
+        except Exception as exc:  # noqa: BLE001
+            raise _fail(f"model unavailable: {exc}") from exc
+        if llm is None:
+            raise _fail(NO_MODEL)
 
-    def abstract_for(paper_id: str) -> str:
-        found = pipeline.seed_fetcher([paper_id])
-        return found[0].abstract if found else ""
+        def abstract_for(paper_id: str) -> str:
+            found = pipeline.seed_fetcher([paper_id])
+            return found[0].abstract if found else ""
 
-    today = date.today()
-    if eval_exists(ctx.vault, today):
-        typer.echo(f"Replacing today's earlier eval ({today.isoformat()}); its grades are cleared.")
-        if has_judged_run(ctx.vault, today):
-            typer.echo("Kept today's earlier judged run as the baseline for the comparison.")
-    typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
-    with _clean_errors():
-        with _reporter() as reporter:
-            read_mode = _read_mode(llm, setting, reporter,
-                                   set_with=None if mode is None else "--mode for this eval")
-            md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
-                          reporter=reporter, judge=eval_judge, mode=read_mode)
-    typer.echo(f"Report written: {md}")
-    if eval_judge:
-        typer.echo("Next: rpipe eval report")
-    else:
-        typer.echo("Next: rpipe eval grade, then rpipe eval report (or re-run with --judge to have Claude grade)")
+        today = date.today()
+        if eval_exists(ctx.vault, today):
+            typer.echo(f"Replacing today's earlier eval ({today.isoformat()}); its grades are cleared.")
+            if has_judged_run(ctx.vault, today):
+                typer.echo("Kept today's earlier judged run as the baseline for the comparison.")
+        typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
+        with _clean_errors():
+            with _reporter() as reporter:
+                read_mode = _read_mode(llm, setting, reporter,
+                                       set_with=None if mode is None else "--mode for this eval")
+                md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
+                              reporter=reporter, judge=eval_judge, mode=read_mode)
+        typer.echo(f"Report written: {md}")
+        if eval_judge:
+            typer.echo("Next: rpipe eval report")
+        else:
+            typer.echo("Next: rpipe eval grade, then rpipe eval report (or re-run with --judge to have Claude grade)")
 
 
 @eval_app.command("grade")
@@ -1647,11 +1823,11 @@ def eval_grade(vault: VaultOption = None) -> None:
             for label, c in (("Problem", s.problem), ("Approach", s.approach), ("Results", s.results), ("Limitations", s.limitations)):
                 typer.echo(f"  {label}: {c.text} [{', '.join(c.sections)}]")
             while True:
-                answer = typer.prompt("Is this summary accurate? [y/n]").strip().lower()
+                answer = _prompt("Is this summary accurate? [y/n]").strip().lower()
                 if answer in ("y", "n"):
                     break
                 typer.echo("Please answer y or n.")
-            note = typer.prompt("Note (optional)", default="", show_default=False).strip()
+            note = _prompt("Note (optional)", default="", show_default=False).strip()
             with _clean_errors():
                 save_grade(ctx.vault, day, Grade(paper_id=e.paper_id, accurate=answer == "y", note=note))
     except (typer.Abort, KeyboardInterrupt, EOFError):
@@ -1843,34 +2019,36 @@ def model_set_mode(
 def model_fit(vault: VaultOption = None) -> None:
     """Probe Ollama now: choose the best installed model and the largest context that fits in GPU memory."""
     ctx = _open(vault)
-    cfg = ctx.config
-    _ollama_only(cfg, "fit")
-    try:
-        if cfg.llm_model != "auto" and cfg.llm_num_ctx != "auto":
-            typer.echo(f"pinned: {cfg.llm_model} at {cfg.llm_num_ctx} tokens (nothing to probe)")
-            typer.echo(build_llm(cfg, ctx.vault).check())
-            return
-        typer.echo("Probing Ollama: this loads and unloads models and can take a few minutes.")
-        with _reporter() as reporter, stage(reporter, "model fit") as handle:
-            fit = ollama_fit.resolve(
-                cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True, log=handle.note,
-            )
-    except (LlmError, OSError, ValueError) as exc:
-        raise _fail(str(exc)) from exc
-    typer.echo(f"Using model {fit.model} with a context of {fit.num_ctx} tokens")
+    with _pipeline_lock(ctx, "rpipe model fit"):
+        cfg = ctx.config
+        _ollama_only(cfg, "fit")
+        try:
+            if cfg.llm_model != "auto" and cfg.llm_num_ctx != "auto":
+                typer.echo(f"pinned: {cfg.llm_model} at {cfg.llm_num_ctx} tokens (nothing to probe)")
+                typer.echo(build_llm(cfg, ctx.vault).check())
+                return
+            typer.echo("Probing Ollama: this loads and unloads models and can take a few minutes.")
+            with _reporter() as reporter, stage(reporter, "model fit") as handle:
+                fit = ollama_fit.resolve(
+                    cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True, log=handle.note,
+                )
+        except (LlmError, OSError, ValueError) as exc:
+            raise _fail(str(exc)) from exc
+        typer.echo(f"Using model {fit.model} with a context of {fit.num_ctx} tokens")
 
 
 @model_app.command("bench")
 def model_bench(vault: VaultOption = None) -> None:
     """Measure how fast the chosen model reads and writes, and estimate the time per paper."""
     ctx = _open(vault)
-    if ctx.config.llm_backend != "ollama":
-        raise _fail("the benchmark measures local models; the cloud backend's speed is the "
-                    "provider's. Nothing was measured.")
-    try:
-        _measure_speed(ctx.vault, ctx.conn, ctx.config)
-    except (LlmError, OSError, ValueError) as exc:
-        raise _fail(str(exc)) from exc
+    with _pipeline_lock(ctx, "rpipe model bench"):
+        if ctx.config.llm_backend != "ollama":
+            raise _fail("the benchmark measures local models; the cloud backend's speed is the "
+                        "provider's. Nothing was measured.")
+        try:
+            _measure_speed(ctx.vault, ctx.conn, ctx.config)
+        except (LlmError, OSError, ValueError) as exc:
+            raise _fail(str(exc)) from exc
 
 
 def _fit_cached(cfg: Config, vault: Path) -> bool:
@@ -1939,7 +2117,7 @@ def _tune_undo(url: str) -> None:
     typer.echo("This removes only rpipe's own settings file; other files are untouched. Commands:")
     for argv in commands:
         typer.echo("  " + " ".join(argv))
-    if not typer.confirm("Undo now?", default=False):
+    if not _confirm("Undo now?", default=False):
         typer.echo("Nothing was changed.")
         return
     if not _run_plan(commands):
@@ -1958,96 +2136,98 @@ def model_tune(
     if not _is_tty():
         raise _fail("rpipe model tune is interactive (it asks before using sudo); run it in a terminal")
     ctx = _open(vault)
-    cfg = ctx.config
-    url = cfg.llm_url
-    if undo:
-        _tune_undo(url)
-        return
-    with _reporter() as reporter, stage(reporter, "scan", label="the Ollama server"):
-        server = _scan_server(url)
-    note = ollama_tune.host_note(server, url)
-    if note:
-        typer.echo(note)
-    settings = ollama_tune.advise(server)
-    if not settings:
-        typer.echo("Ollama already has the recommended settings; nothing to change.")
-        for key in (ollama_tune.FLASH, ollama_tune.KV_TYPE, ollama_tune.PARALLEL):
-            if key in server.env:
-                source = setting_source(server, key)
-                typer.echo(f"  {key}={server.env[key]}" + (f" (set in {source})" if source else ""))
-        return
-    if server.how != "systemd":
-        typer.echo(ollama_tune.manual_instructions(server, settings))
-        return
-    if server.host_matches is False:
-        typer.echo("Warning: changing the service would not change the server rpipe uses.")
-        if not typer.confirm("Continue anyway?", default=False):
-            typer.echo("Nothing was changed.")
+    with _pipeline_lock(ctx, "rpipe model tune"):
+        cfg = ctx.config
+        url = cfg.llm_url
+        if undo:
+            _tune_undo(url)
             return
-    for s in settings:
-        typer.echo(f"{s.name}: {s.current or 'not set'} -> {s.value}\n  what: {s.what}\n  why: {s.why}")
-    written = ollama_tune.owned(server)
-    content = ollama_tune.render_dropin(written)
-    tmp_dir = Path(tempfile.mkdtemp())
-    tmp = tmp_dir / "rpipe.conf"
-    try:
-        tmp.write_text(content, encoding="utf-8")
-        commands = ollama_tune.apply_commands(tmp)
-        typer.echo(f"\nThis writes {ollama_tune.DROPIN} (it always lists all three of rpipe's settings, so a "
-                   f"later re-tune never drops one set earlier):\n{content}\nCommands (sudo will ask for your password):")
-        for argv in commands:
-            typer.echo("  " + " ".join(argv))
-        typer.echo(f"To undo later: {ollama_tune.UNDO_COMMAND}")
-        if not typer.confirm("Apply?", default=False):
-            typer.echo("Nothing was changed.")
+        with _reporter() as reporter, stage(reporter, "scan", label="the Ollama server"):
+            server = _scan_server(url)
+        note = ollama_tune.host_note(server, url)
+        if note:
+            typer.echo(note)
+        settings = ollama_tune.advise(server)
+        if not settings:
+            typer.echo("Ollama already has the recommended settings; nothing to change.")
+            for key in (ollama_tune.FLASH, ollama_tune.KV_TYPE, ollama_tune.PARALLEL):
+                if key in server.env:
+                    source = setting_source(server, key)
+                    typer.echo(f"  {key}={server.env[key]}" + (f" (set in {source})" if source else ""))
             return
-        before = None
-        if cfg.llm_backend == "ollama" and server.host_matches is not False:
-            try:
-                before = ollama_fit.cached_fit(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
-            except (LlmError, OSError, ValueError):
-                before = None
-        if not _run_plan(commands, undo_hint=True):
-            raise typer.Exit(code=1)
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-    if not _wait_for_ollama(ollama_tune.service_url(server, url)):
-        raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`. "
-                    f"To undo: {ollama_tune.UNDO_COMMAND}")
-    after = _scan_server(url)
-    missing = [s for s in written if after.env.get(s.name) != s.value]
-    if missing:
-        raise _fail("restarted, but these are not live: " + ", ".join(s.name for s in missing)
-                    + f". To undo: {ollama_tune.UNDO_COMMAND}")
-    typer.echo("All settings are live: " + ", ".join(f"{s.name}={s.value}" for s in written))
-    if server.host_matches is False:
-        typer.echo("Skipping the context re-measure: it would measure the server rpipe uses, "
-                   "which is not the service that changed.")
-        return
-    if cfg.llm_backend == "ollama":
-        typer.echo("Re-measuring the context that fits (this probes the GPU and can take a few minutes).")
+        if server.how != "systemd":
+            typer.echo(ollama_tune.manual_instructions(server, settings))
+            return
+        if server.host_matches is False:
+            typer.echo("Warning: changing the service would not change the server rpipe uses.")
+            if not _confirm("Continue anyway?", default=False):
+                typer.echo("Nothing was changed.")
+                return
+        for s in settings:
+            typer.echo(f"{s.name}: {s.current or 'not set'} -> {s.value}\n  what: {s.what}\n  why: {s.why}")
+        written = ollama_tune.owned(server)
+        content = ollama_tune.render_dropin(written)
+        tmp_dir = Path(tempfile.mkdtemp())
+        tmp = tmp_dir / "rpipe.conf"
         try:
-            with _reporter() as reporter, stage(reporter, "model fit") as handle:
-                fit = ollama_fit.resolve(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True,
-                                         log=handle.note)
-        except (LlmError, OSError, ValueError) as exc:
-            raise _fail(str(exc)) from exc
-        old = f"{before.num_ctx:,}" if before else "not measured before"
-        typer.echo(f"context: {old} -> {fit.num_ctx:,} tokens ({fit.model})")
+            tmp.write_text(content, encoding="utf-8")
+            commands = ollama_tune.apply_commands(tmp)
+            typer.echo(f"\nThis writes {ollama_tune.DROPIN} (it always lists all three of rpipe's settings, so a "
+                       f"later re-tune never drops one set earlier):\n{content}\nCommands (sudo will ask for your password):")
+            for argv in commands:
+                typer.echo("  " + " ".join(argv))
+            typer.echo(f"To undo later: {ollama_tune.UNDO_COMMAND}")
+            if not _confirm("Apply?", default=False):
+                typer.echo("Nothing was changed.")
+                return
+            before = None
+            if cfg.llm_backend == "ollama" and server.host_matches is not False:
+                try:
+                    before = ollama_fit.cached_fit(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
+                except (LlmError, OSError, ValueError):
+                    before = None
+            if not _run_plan(commands, undo_hint=True):
+                raise typer.Exit(code=1)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        if not _wait_for_ollama(ollama_tune.service_url(server, url)):
+            raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`. "
+                        f"To undo: {ollama_tune.UNDO_COMMAND}")
+        after = _scan_server(url)
+        missing = [s for s in written if after.env.get(s.name) != s.value]
+        if missing:
+            raise _fail("restarted, but these are not live: " + ", ".join(s.name for s in missing)
+                        + f". To undo: {ollama_tune.UNDO_COMMAND}")
+        typer.echo("All settings are live: " + ", ".join(f"{s.name}={s.value}" for s in written))
+        if server.host_matches is False:
+            typer.echo("Skipping the context re-measure: it would measure the server rpipe uses, "
+                       "which is not the service that changed.")
+            return
+        if cfg.llm_backend == "ollama":
+            typer.echo("Re-measuring the context that fits (this probes the GPU and can take a few minutes).")
+            try:
+                with _reporter() as reporter, stage(reporter, "model fit") as handle:
+                    fit = ollama_fit.resolve(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True,
+                                             log=handle.note)
+            except (LlmError, OSError, ValueError) as exc:
+                raise _fail(str(exc)) from exc
+            old = f"{before.num_ctx:,}" if before else "not measured before"
+            typer.echo(f"context: {old} -> {fit.num_ctx:,} tokens ({fit.model})")
 
 
 @model_app.command("check")
 def model_check(vault: VaultOption = None) -> None:
     """Check that the backend works (ollama: running, model installed; claude-code: logged in). With ollama `auto` settings this may probe the GPU (slow the first time)."""
     ctx = _open(vault)
-    _require_model(ctx.config)
-    try:
-        with _reporter() as reporter, stage(reporter, "model check") as handle:
-            llm = build_llm(ctx.config, ctx.vault, log=handle.note)
-            line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
-        typer.echo(line)
-    except (LlmError, OSError, ValueError) as exc:
-        raise _fail(str(exc)) from exc
+    with _pipeline_lock(ctx, "rpipe model check"):
+        _require_model(ctx.config)
+        try:
+            with _reporter() as reporter, stage(reporter, "model check") as handle:
+                llm = build_llm(ctx.config, ctx.vault, log=handle.note)
+                line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
+            typer.echo(line)
+        except (LlmError, OSError, ValueError) as exc:
+            raise _fail(str(exc)) from exc
 
 
 # ---------------------------------------------------------------- init wizard
@@ -2055,7 +2235,7 @@ def model_check(vault: VaultOption = None) -> None:
 
 def _ask(prompt: str) -> str:
     """One line of input; blank returns "". Ctrl-C or end of input raises typer.Abort."""
-    return typer.prompt(prompt, default="", show_default=False).strip()
+    return _prompt(prompt, default="", show_default=False).strip()
 
 
 def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
@@ -2068,7 +2248,7 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
     if not fresh_profile:
         label = "Your topics (these are the template examples, not topics of your own)" if is_template else "Your topics"
         typer.echo(f"{label}:\n{_numbered(profile.topics)}")
-        if not typer.confirm("Add more topics?", default=False):
+        if not _confirm("Add more topics?", default=False):
             return
     else:
         typer.echo("Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.")
@@ -2100,7 +2280,7 @@ def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
     current = ", ".join(config.arxiv_categories)
     if not fresh_config:
         typer.echo(f"arXiv categories: {_categories_text(config.arxiv_categories)}")
-        if not typer.confirm("Change categories?", default=False):
+        if not _confirm("Change categories?", default=False):
             return
     typer.echo(CATEGORY_HELP)
     typer.echo(
@@ -2108,7 +2288,7 @@ def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
         "every computer-science category (cs.*); more to fetch and rank). Change it any time with "
         "rpipe profile set-categories."
     )
-    entered = typer.prompt("arXiv categories (comma-separated)", default=current)
+    entered = _prompt("arXiv categories (comma-separated)", default=current)
     cats = ["all" if c.lower() == "all" else c for c in _split(entered)]
     if cats and cats != config.arxiv_categories:
         try:
@@ -2245,7 +2425,7 @@ def _pin_off_gpu(vault: Path, name: str) -> None:
 
 def _pick_candidate(count: int) -> int | None:
     while True:
-        text = typer.prompt("Use one? number, or Enter to keep your current model",
+        text = _prompt("Use one? number, or Enter to keep your current model",
                             default="", show_default=False).strip()
         if not text:
             return None
@@ -2280,7 +2460,7 @@ def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
         typer.echo("Ollama is not running, so nothing can be downloaded. Start it (or install it: "
                    f"{OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}) and try again.")
         return False
-    if not typer.confirm(f"Download {entry.pull} now ({entry.download_gb:g} GB)?", default=False):
+    if not _confirm(f"Download {entry.pull} now ({entry.download_gb:g} GB)?", default=False):
         return False
     try:
         with _reporter() as reporter, stage(reporter, "model pull", total=100, label=entry.pull) as handle:
@@ -2336,7 +2516,7 @@ def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
         except (LlmError, OSError, ValueError) as exc:
             typer.echo(f"The fit failed: {exc}")
             ok = False
-    if ok and typer.confirm("Measure its speed now (about 1-5 minutes)?", default=False):
+    if ok and _confirm("Measure its speed now (about 1-5 minutes)?", default=False):
         new_cfg = load_config(ctx.vault / "config.yaml").model_copy(update={"vault_path": ctx.vault})
         try:
             _measure_speed(ctx.vault, ctx.conn, new_cfg)
@@ -2353,60 +2533,61 @@ def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
 def model_recommend(vault: VaultOption = None) -> None:
     """Rank catalog models for this computer, installed or not; on a terminal, pick one to download, set and measure."""
     ctx = _open(vault)
-    cfg = ctx.config
-    with _reporter() as reporter, stage(reporter, "scan", label="this computer"):
-        info = detect_machine(cfg)
-    catalog = catalog_mod.load_catalog(ctx.vault)
-    candidates = recommender.rank(info, catalog, bench_mod.load_benches(ctx.vault))
-    _machine_summary(info)
-    if info.ollama is not None and info.ollama.how != "unknown":
-        note = ollama_tune.host_note(info.ollama, cfg.llm_url)
-        if note:
-            typer.echo(note + " The context estimates below assume its default settings.")
-        settings = ollama_tune.advise(info.ollama)
-        readable = info.ollama.how in ("systemd", "systemd-user") or bool(info.ollama.env)
-        if settings and not readable:
-            typer.echo("\nrpipe cannot read this server's settings. If these are not set yet, they would fit "
-                       "a longer context in the same memory:")
-            for st in settings:
-                typer.echo(f"  {st.name}={st.value}: {st.what}")
-            typer.echo("Run rpipe model tune for how to set them")
-        elif settings:
-            typer.echo("\nOllama settings that would fit a longer context in the same memory:")
-            for st in settings:
-                typer.echo(f"  {st.name}={st.value} (now: {st.current or 'not set'}): {st.what}")
-            typer.echo("Run rpipe model tune to apply them")
-    typer.echo("")
-    if candidates:
-        typer.echo("Models for this computer, best first:")
-        for i, cand in enumerate(candidates, 1):
-            typer.echo(f"  {i}. {cand.entry.pull} ({cand.entry.family}, {_model_kind(cand.entry)})")
-            for reason in cand.reasons:
-                typer.echo(f"     - {reason}")
-    else:
-        typer.echo("No model in the catalog fits this computer's GPU memory or its memory (RAM).")
-    for name in recommender.uncatalogued(info, catalog):
-        typer.echo(f"installed, not in the catalog: {name} (rpipe model fit measures any installed model)")
-    if info.claude_logged_in:
-        typer.echo("cloud: Claude Code is logged in; rpipe model set-backend claude-code uses it")
-    if not candidates or not _is_tty():
-        return
-    try:
-        pick = _pick_candidate(len(candidates))
-        if pick is None:
-            typer.echo("Nothing was changed.")
+    with _pipeline_lock(ctx, "rpipe model recommend"):
+        cfg = ctx.config
+        with _reporter() as reporter, stage(reporter, "scan", label="this computer"):
+            info = detect_machine(cfg)
+        catalog = catalog_mod.load_catalog(ctx.vault)
+        candidates = recommender.rank(info, catalog, bench_mod.load_benches(ctx.vault))
+        _machine_summary(info)
+        if info.ollama is not None and info.ollama.how != "unknown":
+            note = ollama_tune.host_note(info.ollama, cfg.llm_url)
+            if note:
+                typer.echo(note + " The context estimates below assume its default settings.")
+            settings = ollama_tune.advise(info.ollama)
+            readable = info.ollama.how in ("systemd", "systemd-user") or bool(info.ollama.env)
+            if settings and not readable:
+                typer.echo("\nrpipe cannot read this server's settings. If these are not set yet, they would fit "
+                           "a longer context in the same memory:")
+                for st in settings:
+                    typer.echo(f"  {st.name}={st.value}: {st.what}")
+                typer.echo("Run rpipe model tune for how to set them")
+            elif settings:
+                typer.echo("\nOllama settings that would fit a longer context in the same memory:")
+                for st in settings:
+                    typer.echo(f"  {st.name}={st.value} (now: {st.current or 'not set'}): {st.what}")
+                typer.echo("Run rpipe model tune to apply them")
+        typer.echo("")
+        if candidates:
+            typer.echo("Models for this computer, best first:")
+            for i, cand in enumerate(candidates, 1):
+                typer.echo(f"  {i}. {cand.entry.pull} ({cand.entry.family}, {_model_kind(cand.entry)})")
+                for reason in cand.reasons:
+                    typer.echo(f"     - {reason}")
+        else:
+            typer.echo("No model in the catalog fits this computer's GPU memory or its memory (RAM).")
+        for name in recommender.uncatalogued(info, catalog):
+            typer.echo(f"installed, not in the catalog: {name} (rpipe model fit measures any installed model)")
+        if info.claude_logged_in:
+            typer.echo("cloud: Claude Code is logged in; rpipe model set-backend claude-code uses it")
+        if not candidates or not _is_tty():
             return
-        _use_candidate(ctx, info, candidates[pick])
-    except (typer.Abort, KeyboardInterrupt, EOFError):
-        typer.echo("\nStopped. Nothing further was changed.")
-        raise typer.Exit(code=130) from None
+        try:
+            pick = _pick_candidate(len(candidates))
+            if pick is None:
+                typer.echo("Nothing was changed.")
+                return
+            _use_candidate(ctx, info, candidates[pick])
+        except (typer.Abort, KeyboardInterrupt, EOFError):
+            typer.echo("\nStopped. Nothing further was changed.")
+            raise typer.Exit(code=130) from None
 
 
 def _recheck(config: Config, info, problem: str, ok: Callable, question: str):
     """Show `problem` and re-detect the machine each time the user says they fixed it."""
     while not ok(info):
         typer.echo(problem)
-        if not typer.confirm(question, default=False):
+        if not _confirm(question, default=False):
             break
         info = detect_machine(config)
     return info
@@ -2450,7 +2631,7 @@ def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:
         "`haiku` uses less quota than `sonnet`; `opus` uses the most."
     )
     while True:
-        model = typer.prompt("Model (sonnet, haiku or opus)", default="sonnet").strip()
+        model = _prompt("Model (sonnet, haiku or opus)", default="sonnet").strip()
         try:
             resolve_model(model)
             break
@@ -2467,7 +2648,7 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
     the current backend; yes skips straight to the check, so a pinned model survives a re-run.
     Returns True when the final check passed (`none` counts as ready)."""
     config = load_config(vault / "config.yaml")
-    if offer_keep and typer.confirm(f"Keep current backend ({config.llm_backend})?", default=True):
+    if offer_keep and _confirm(f"Keep current backend ({config.llm_backend})?", default=True):
         return _check_backend(vault)
     info = detect_machine(config)
     _describe_machine(info)
@@ -2482,7 +2663,7 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
     for i, name in enumerate(options, 1):
         typer.echo(f"  {i}. {labels.get(name, name)}" + ("  [recommended]" if i == 1 else ""))
     while True:
-        pick = typer.prompt("Choice", default=1, type=int)
+        pick = _prompt("Choice", default=1, type=int)
         if 1 <= pick <= len(options):
             break
         typer.echo(f"Enter a number from 1 to {len(options)}.")
@@ -2558,7 +2739,7 @@ def catalog_update(vault: VaultOption = None) -> None:
         typer.echo(f"  {line}")
     if not _is_tty():
         raise _fail("Nothing saved: run in a terminal to confirm.")
-    if not typer.confirm("Save this catalog?", default=False):
+    if not _confirm("Save this catalog?", default=False):
         typer.echo("Not saved.")
         return
     catalog_mod.save_fetched(ctx.vault, text)
@@ -2571,13 +2752,14 @@ def model_setup(vault: VaultOption = None) -> None:
     if not _is_tty():
         raise _fail("rpipe model setup is interactive; use `rpipe model set-backend NAME` in scripts")
     ctx = _open(vault)
-    try:
-        ready = _wizard_backend(ctx.vault, offer_keep=True)
-    except (typer.Abort, KeyboardInterrupt, EOFError):
-        typer.echo("\nStopped. Nothing further was changed; run rpipe model setup to continue.")
-        raise typer.Exit(code=130) from None
-    if not ready:
-        raise typer.Exit(code=1)
+    with _pipeline_lock(ctx, "rpipe model setup"):
+        try:
+            ready = _wizard_backend(ctx.vault, offer_keep=True)
+        except (typer.Abort, KeyboardInterrupt, EOFError):
+            typer.echo("\nStopped. Nothing further was changed; run rpipe model setup to continue.")
+            raise typer.Exit(code=130) from None
+        if not ready:
+            raise typer.Exit(code=1)
 
 
 def _wizard_describe(vault: Path, config: Config) -> None:
@@ -2617,6 +2799,12 @@ def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
 def _resolve_paper(conn: sqlite3.Connection, text: str) -> str:
     """Turn an id or a title fragment into a paper id from the vault, or fail."""
     text = text.strip()
+    try:  # an id in any accepted spelling: 2611.25005v2, arXiv:2611.25005, an arxiv.org URL
+        pid = normalise_paper_id(text)
+    except ValueError:
+        pid = None
+    if pid is not None and get_paper(conn, pid) is not None:
+        return pid
     if get_paper(conn, text) is not None:
         return text
     escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -2638,7 +2826,7 @@ def _resolve_paper(conn: sqlite3.Connection, text: str) -> str:
     return rows[index]["id"]
 
 
-_VOTES = {"up": 1, "down": -1, "clear": 0}
+_VOTES = ("up", "down", "clear")
 
 
 @app.command("vote")
@@ -2653,7 +2841,7 @@ def vote(
     ctx = _open(vault)
     try:
         pid = _resolve_paper(ctx.conn, paper)
-        record_vote(ctx.conn, pid, _VOTES[direction])
+        library_api.vote(ctx.conn, pid, direction)
     except UnknownPaperError as exc:
         raise _fail(str(exc)) from exc
     finally:
@@ -2671,7 +2859,7 @@ def _save_command(saved: bool) -> None:
         ctx = _open(vault)
         try:
             pid = _resolve_paper(ctx.conn, paper)
-            set_saved(ctx.conn, pid, saved)
+            library_api.save(ctx.conn, pid, saved)
         except UnknownPaperError as exc:
             raise _fail(str(exc)) from exc
         finally:
@@ -2691,22 +2879,21 @@ def feedback(vault: VaultOption = None) -> None:
     """List your current votes and saved papers."""
     ctx = _open(vault)
     try:
-        titles = {r["id"]: r["title"] for r in ctx.conn.execute("SELECT id, title FROM papers")}
-        votes = current_votes(ctx.conn)
-        saves = list_saved(ctx.conn)
-        waiting = len(later_queue(ctx.conn))
+        votes = library_api.list_votes(ctx.conn)
+        saves = library_api.saved_papers(ctx.conn)
+        waiting = len(library_api.later_queue(ctx.conn))
     finally:
         ctx.conn.close()
     typer.echo("Votes")
     if not votes:
         typer.echo("  No votes yet. Try `rpipe vote ID up`.")
-    for r in votes:
-        typer.echo(f"  {'up  ' if r['vote'] > 0 else 'down'}  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")
+    for v in votes:
+        typer.echo(f"  {'up  ' if v.vote > 0 else 'down'}  {v.paper_id}  {v.title or '(unknown paper)'}")
     typer.echo("Saved")
     if not saves:
         typer.echo("  No saved papers yet. Try `rpipe save ID`.")
-    for r in saves:
-        typer.echo(f"  {r['paper_id']}  {titles.get(r['paper_id'], '(unknown paper)')}")
+    for p in saves:
+        typer.echo(f"  {p.id}  {p.title or '(unknown paper)'}")
     typer.echo("Review later")
     if waiting:
         typer.echo(f"  {waiting} {'paper' if waiting == 1 else 'papers'} waiting. Run `rpipe review --later`.")
@@ -2717,23 +2904,22 @@ def feedback(vault: VaultOption = None) -> None:
 _REVIEW_KEYS = {"u": "up", "d": "down", "s": "skip", "q": "quit"}
 
 
-def _show_paper(conn: sqlite3.Connection, row: sqlite3.Row, header: str) -> None:
+def _show_paper(paper: library_api.PaperView, header: str) -> None:
     typer.echo(f"\n{header}\n")
-    typer.echo(row["title"])
-    typer.echo(f"id: {row['id']}")
-    reasons = json.loads(row["triage_reasons"]) if row["triage_reasons"] else []
-    if reasons:
-        typer.echo("why: " + "; ".join(reasons))
+    typer.echo(paper.title)
+    typer.echo(f"id: {paper.id}")
+    if paper.triage_reasons:
+        typer.echo("why: " + "; ".join(paper.triage_reasons))
     typer.echo("")
-    ps = get_summary(conn, row["id"])
+    ps = paper.summary
     if ps is not None:
         typer.echo("\n".join(render_summary(ps)).rstrip())
         if ps.read_mode != "whole":
             how = "map-reduce" if ps.read_mode == "map_reduce" else ps.read_mode
             typer.echo(f"\nread in parts: {how}, {ps.parts} notes call{'s' if ps.parts != 1 else ''}")
     else:
-        typer.echo((row["abstract"] or "").strip() or "No abstract available.")
-    typer.echo(f"\n{row['url']}")
+        typer.echo(paper.abstract.strip() or "No abstract available.")
+    typer.echo(f"\n{paper.url}")
 
 
 @app.command("review")
@@ -2746,37 +2932,37 @@ def review(
         raise _fail("rpipe review needs a terminal. Use `rpipe vote ID up|down` instead.")
     ctx = _open(vault)
     try:
-        queue = later_queue(ctx.conn) if later else review_queue(ctx.conn)
+        queue = library_api.later_queue(ctx.conn) if later else library_api.review_queue(ctx.conn)
         if not queue:
             typer.echo("Nothing waiting in review later." if later else "Nothing to review.")
             return
         voted = skipped = 0
         aborted = False
         try:
-            for i, row in enumerate(queue, start=1):
+            for i, paper in enumerate(queue, start=1):
                 if later:
                     header = f"Review later · {i} of {len(queue)}"
                 else:
-                    handled, total = queue_progress(ctx.conn, row["digest_date"])
-                    header = f"Digest {row['digest_date']} · paper {handled + 1} of {total}"
-                _show_paper(ctx.conn, row, f"{header} · {voted} voted, {skipped} skipped")
+                    progress = library_api.queue_progress(ctx.conn, paper.digest_date or "")
+                    header = f"Digest {paper.digest_date} · paper {progress.handled + 1} of {progress.total}"
+                _show_paper(paper, f"{header} · {voted} voted, {skipped} skipped")
                 while True:
-                    answer = typer.prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
+                    answer = _prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
                     if answer in _REVIEW_KEYS:
                         break
                     typer.echo("Please answer u, d, s or q.")
                 if answer == "q":
                     break
                 if answer == "s":
-                    record_skip(ctx.conn, row["id"])
+                    library_api.skip(ctx.conn, paper.id)
                     skipped += 1
                 else:
-                    record_vote(ctx.conn, row["id"], 1 if answer == "u" else -1)
-                    clear_skip(ctx.conn, row["id"])
+                    library_api.vote(ctx.conn, paper.id, "up" if answer == "u" else "down")
+                    library_api.unskip(ctx.conn, paper.id)
                     voted += 1
         except (typer.Abort, KeyboardInterrupt, EOFError):
             aborted = True
-        left = len(later_queue(ctx.conn) if later else review_queue(ctx.conn))
+        left = len(library_api.later_queue(ctx.conn) if later else library_api.review_queue(ctx.conn))
         typer.echo(f"Voted {voted}, skipped {skipped} this session. {left} left in the queue.")
         if aborted:
             raise typer.Abort()
@@ -2798,11 +2984,11 @@ def show(
     ctx = _open(vault)
     try:
         pids = [_resolve_paper(ctx.conn, p) for p in papers or []]
-        rows = [get_paper(ctx.conn, pid) for pid in pids]
+        shown = [library_api.get_paper(ctx.conn, pid) for pid in pids]
         if recent is not None:
-            rows += recent_digest_papers(ctx.conn, recent)
-        for row in rows:
-            _show_paper(ctx.conn, row, f"Paper {row['id']}")
+            shown += library_api.recent_papers(ctx.conn, recent)
+        for paper in shown:
+            _show_paper(paper, f"Paper {paper.id}")
     finally:
         ctx.conn.close()
 

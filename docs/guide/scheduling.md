@@ -2,7 +2,7 @@
 
 ## What it does
 
-`rpipe schedule` makes the pipeline run by itself every night, without cron and without you remembering. It writes two small files that tell systemd (the Linux service manager) to run `rpipe run` once a day at a time you choose (default 03:00), and switches them on.
+`rpipe schedule` makes the pipeline run by itself every night, without cron and without you remembering. It writes two small files that tell systemd (the Linux service manager) to run `rpipe run` once a day at a time you choose (default 03:00), and switches them on. That nightly run also works through the request list: papers you asked to have summarized (see "The request list" in `running.md`) are done after the night's own summaries, so nothing extra needs scheduling.
 
 Commands (`install` and `show` take `--time` and `--vault`; no file editing needed):
 
@@ -47,13 +47,13 @@ WantedBy=timers.target
 
 Quoting: systemd splits `ExecStart` on spaces and expands `%` and `$`, so paths are wrapped in double quotes, `\` and `"` are backslash-escaped, `%` is written `%%` and (in `ExecStart`) `$` as `$$`. A vault path with spaces therefore works. `Environment="NAME=value"` quotes the whole assignment.
 
-**Persistent=true** means: if the machine was off or asleep at 03:00, systemd runs the missed job as soon as it can (once) instead of skipping the night. (Runs cannot overlap: `rpipe run` takes a lock on the vault, so if a catch-up run starts while one you launched by hand is still going, the second one exits at once with code 75 and the message `` another `rpipe run` is already using <vault> ``; systemd shows that night's unit as failed in the journal, which is harmless, and the next night runs normally. See `running.md`.)
+**Persistent=true** means: if the machine was off or asleep at 03:00, systemd runs the missed job as soon as it can (once) instead of skipping the night. (Jobs cannot overlap: the nightly `rpipe run` and the pipeline commands you run by hand (`summarize`, `model tune`, `gold draft` and the rest of the list in `running.md`) share one lock on the vault. If a catch-up run starts while a command you launched by hand is still going, it exits at once with code 75 and a message naming the job that holds the lock, for example `` rpipe summarize is already working on <vault>; nothing was started. ``; systemd shows that night's unit as failed in the journal, which is harmless, and the next night runs normally. The same applies the other way round: a hand-run pipeline command refuses while the nightly run works. App commands such as `rpipe vote`, `rpipe save` and `rpipe review` never take the lock and work during a run. See "One pipeline job at a time" in `running.md`.)
 
 **Linger.** A user timer normally only runs while you have a login session. `loginctl enable-linger $USER` (run once, by you) tells systemd to keep your user services alive while logged out, so a 03:00 run happens even if nobody is logged in. It changes machine-wide login behaviour, which is why `rpipe` never runs it for you.
 
 ## The morning deadline
 
-**What it governs: reruns only.** Some papers are too long for the model's context window, so part of their core text is cut before the model reads them (a *body cut*, see `glossary.md`). A later stage reads such papers again with a bigger context, which only fits with part of the model in ordinary RAM (a *spill*), so it is slow. These *reruns* happen after the normal work and must be finished by a morning time you choose, so the computer is free when you want it. Normal papers are never held back by the deadline: they always run, however late it gets. How the reruns use the deadline (time estimates, free RAM, grouping) is in `running.md`, "Reading cut papers whole: reruns".
+**What it governs: reruns only.** Some papers are too long for the model's context window, so part of their core text is cut before the model reads them (a *body cut*, see `glossary.md`). A later stage reads such papers again with a bigger context, which only fits with part of the model in ordinary RAM (a *spill*), so it is slow. These *reruns* happen after the normal work and must be finished by a morning time you choose, so the computer is free when you want it. The same deadline also stops the nightly drain of the request list from starting new requests (see "The request list" in `running.md`); requests not started wait for the next night. Normal papers are never held back by the deadline: they always run, however late it gets. How the reruns use the deadline (time estimates, free RAM, grouping) is in `running.md`, "Reading cut papers whole: reruns".
 
 - Default: `07:00`. Set it with `rpipe schedule set-deadline 06:30`, which answers `Reruns of cut papers must finish by 06:30.`
 - `rpipe schedule set-deadline off` turns reruns off (answer: `Reruns of cut papers are off.`).

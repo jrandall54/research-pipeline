@@ -14,7 +14,7 @@
 
 **Rowid** — SQLite's internal integer row number. We give `papers` an explicit one so the search index can point at the same row reliably.
 
-**WAL (write-ahead log)** — a SQLite journal mode where changes are appended to a log before being merged into the main file. Readers do not block the writer and crashes are safer.
+**WAL (write-ahead log)** — a SQLite journal mode where changes are appended to a log before being merged into the main file. Readers do not block the writer and crashes are safer. Writers still go one at a time (see busy timeout).
 
 **Upsert** — "update or insert": add the record if it is new, otherwise merge it into the existing one. See `upsert_paper` in `data-model.md`.
 
@@ -168,7 +168,11 @@
 
 **DNS rebinding.** A trick where a web page makes your browser treat a private address (such as a Tailscale IP) as if it belonged to the page's own site, so the page can read a server that has no login. Servers defend by checking the `Host` header; Datasette does not (see `browsing.md`).
 
-**flock (file lock)** — an operating-system lock on an open file. `rpipe run` takes one on `.run.lock` in the vault so two runs cannot overlap; the system releases it automatically when the process ends, however it ends.
+**flock (file lock)** — an operating-system lock on an open file. Every pipeline command (`rpipe run`, `summarize`, `model tune` and the others listed in `running.md`) takes one on `.run.lock` in the vault so two pipeline jobs cannot overlap; the system releases it automatically when the process ends, however it ends.
+
+**Lock holder** — the command currently holding the vault lock, written as text into `.run.lock` (for example `rpipe run`) while it works and erased when it ends. A command refused by the lock reads it to say who is working: `rpipe run is already working on <vault>`. An interactive command lets go of the lock (and empties the file) while it waits for your answer. See `running.md`.
+
+**Busy timeout** — how long a SQLite connection keeps retrying when another connection is writing, before giving up with "database is locked". `rpipe` sets 5 seconds, so a vote cast during a nightly run waits briefly instead of failing. See `running.md`.
 
 **Skip** — in `rpipe review`, choosing "not now" for a paper instead of voting. It is stored in the `skips` table, is not a vote, and does not change your profile. See `data-model.md`.
 
@@ -304,7 +308,7 @@
 
 **Bucket (of reruns)** — a group of cut papers reread at the same context window. Each paper's needed context is rounded up to a multiple of 8,192 tokens; papers that land on the same number share one bucket, so the model is loaded once for all of them instead of once per paper (each load takes tens of seconds). Papers needing 61,440 and 63,488 tokens both go in the 65,536 bucket. See "Reading cut papers whole: reruns" in `running.md`.
 
-**Morning deadline (`night_deadline`)** — the clock time (default 07:00) by which reruns of cut papers must finish, or `off`. It never stops normal papers. If the next such time is more than 12 hours away there is no deadline and reruns are skipped. Set with `rpipe schedule set-deadline`. See `scheduling.md`.
+**Morning deadline (`night_deadline`)** — the clock time (default 07:00) by which reruns of cut papers must finish, or `off`. The nightly drain of the request list also starts no new request after it. It never stops normal papers. If the next such time is more than 12 hours away there is no deadline and reruns are skipped. Set with `rpipe schedule set-deadline`. See `scheduling.md`.
 
 **Call time limit** — how long one request to the local model may take before rpipe gives up on it (a timeout). Normally 600 seconds; on a machine `rpipe model bench` measured as slow it is raised to 1.5 times the time needed to read a full context and write the longest allowed answer at the measured speeds. See "The time limit for one call" in `llm.md`.
 
@@ -325,3 +329,23 @@
 **Condensing notes** — when the notes from all parts of a paper are too long to send in one call, they are sent back to the model in batches to be merged into fewer notes, keeping every cited section. At most 3 rounds; if they still do not fit, every note is shortened by the same share and the summary is marked `body_cut`. See `summaries.md`.
 
 **CUDA context** — the working state a program sets up on an NVIDIA graphics card the first time it uses it (through CUDA, NVIDIA's GPU programming toolkit): loaded GPU code, memory bookkeeping and the like. It takes a few hundred MB of GPU memory and stays until the program exits; it cannot be handed back earlier. This is why rpipe runs its embedding model on the CPU: a context created for embedding would hold GPU memory the summarizing model needs for the rest of the run. See "Why it's built this way" in `triage.md`.
+
+**Request list** — the `requests` table: work the app asks the pipeline to do later, such as "summarise this paper". Each request has a kind, details (payload) and a status (`pending`, `running`, `done`, `failed`). Ask for a summary with `rpipe requests add PAPER`. Asking for the same thing twice while it is still waiting gives back the first request. See "The request list" in `data-model.md`.
+
+**Draining (the request list)** — working through the waiting requests until none is left to do; the nightly `rpipe run` and `rpipe requests run` do it. In the nightly run it stops at the morning deadline; requests not started yet wait for the next night. See "The request list" in `running.md`.
+
+**Retry rule (requests)** — a request gets 3 tries (`requests.tries` counts them). A failed try puts it back to `pending`; the third failure leaves it `failed` for good (ask again to queue a fresh one). A usage-limit stop gives the try back, because it was not the request's fault; a try cut short by a crash or Ctrl-C still counts. See "The request list" in `running.md`.
+
+**Canonical JSON** — JSON written one fixed way (here with keys sorted), so two copies of the same data are always the same text and can be compared directly. See `data-model.md`.
+
+**Paper-id normalisation** — turning the ways people write an arXiv id (`2611.25005v2`, `arXiv:2611.25005`, an arxiv.org link) into the bare id the database stores (`2611.25005`). Done by `ids.normalise_paper_id`. See "Paper-id spellings" in `data-model.md`.
+
+**Data object (view)** — what `library_api.py` hands back instead of printed text: a Pydantic object with named, typed fields (`PaperView` has `title`, `vote`, `saved`, `summary`, ...) that turns into JSON with one call. The terminal commands print it; a future web or desktop app can lay out the same object its own way. See "The app's door" in `architecture.md`.
+
+**Pipeline (code group)** — the modules that get and process material: collect, triage, fetch, summarize, digest, plus choosing and tuning the model, the lock and draining the request list. They run unattended and may not import app modules. See `architecture.md`.
+
+**App (code group)** — the modules for what you do with the papers: votes, saves, the review queue, the shelf, the browser view and `library_api`. They may not import pipeline modules; heavy work goes through the request list. See `architecture.md`.
+
+**Composition layer** — the code allowed to use both the pipeline and the app and wire them together: `cli.py` (every `rpipe` command) and `progress_render.py` (turns progress events into terminal lines). For example, `rpipe run` syncs the shelf (app) and then runs the pipeline stages. See `architecture.md`.
+
+**One door** — the rule that the app reaches the database only through `library_api.py`, so every front end (the terminal today, a web page or MCP tool later) uses the same functions and gets the same data. See `architecture.md`.

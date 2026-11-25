@@ -8,7 +8,8 @@ import pytest
 from typer.testing import CliRunner
 
 from research_pipeline import cli, serve
-from research_pipeline.db import current_votes, is_saved, list_saved, open_db, upsert_paper
+from research_pipeline.db import open_db, upsert_paper
+from research_pipeline.library import current_votes, is_saved, list_saved
 from research_pipeline.models import PaperMeta
 from research_pipeline.vault import init_vault
 

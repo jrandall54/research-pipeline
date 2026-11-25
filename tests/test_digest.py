@@ -182,7 +182,7 @@ def test_cited_section_names_cannot_break_digest_structure(tmp_path):
 
 
 def test_digest_item_shows_id_and_saved_marker_and_footer_hint(conn, tmp_path):
-    from research_pipeline.db import record_vote, set_saved
+    from research_pipeline.library import record_vote, set_saved
 
     add(conn, "2411.00001", 0.9)
     add(conn, "2411.00002", 0.5)

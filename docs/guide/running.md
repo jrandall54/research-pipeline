@@ -58,12 +58,15 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 | Command | What it does | Writes |
 | --- | --- | --- |
-| `run` | `start_run`, then collect, seed lookup, triage, summarize, reruns of cut papers (Ollama only, at night; see "Reading cut papers whole: reruns" below), digest for today, then `finish_run` with the merged counts and errors (always, even after a crash; exit code 1 if a stage crashed) | the `runs` row, papers, summaries, `digests/<today>.md` |
+| `run` | `start_run`, then collect, seed lookup, shelf sync, triage, summarize, requests waiting in the request list (see "The request list" below), reruns of cut papers (Ollama only, at night; see "Reading cut papers whole: reruns" below), digest for today, then `finish_run` with the merged counts and errors (always, even after a crash; exit code 1 if a stage crashed) | the `runs` row, papers, summaries, `digests/<today>.md` |
 | `collect` | fetch from arXiv and Hugging Face into the database | papers (status `new`) |
 | `triage` | rank the `new` papers, keep the top N | statuses, scores, reasons, embeddings |
 | `summarize` | summarise and critique every paper still waiting (`triaged`, `fetched`, or in today's digest without a summary) with the configured summary model (fetching arXiv HTML full text first; abstract only if there is none); `--backlog [--limit N]` adds older digests' unsummarized papers, and `summarize ID...` does exactly the papers you name (`--refetch` first re-downloads their full text) | full texts, summaries, statuses `fetched` then `summarized` (papers already in a digest, or skipped, keep their status) |
 | `runs [--limit N]` | list recent runs, newest first | nothing |
 | `serve [--host H] [--port 8001]` | browse the vault and vote/save from a phone with Datasette over Tailscale (needs the `serve` extra: `uv sync --extra embed --extra serve`, or `uv tool install --editable '.[embed,serve]' --force`; see [browsing.md](browsing.md)) | `votes`, `saves` (only when you press a button) |
+| `requests add PAPER` | ask for one paper to be summarized (id in any spelling, arXiv URL, or part of the title); it is done in tonight's `run` or now with `requests run` (see "The request list" below) | one `requests` row |
+| `requests run` | do the waiting requests now instead of at night (see "The request list" below) | summaries, request statuses |
+| `requests list` | list every request, newest first, with its status, tries and last error | nothing |
 | `review [--later]` | read each unreviewed digest paper in the terminal and vote up/down, skip or quit; `--later` goes through skipped papers (needs a terminal; see [review.md](review.md)) | `votes`, `skips` |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
@@ -138,7 +141,7 @@ Ollama is running at http://localhost:11434 and model qwen3:8b is installed.
 
 Illustrative output; your numbers will differ.
 
-Feedback commands (`rpipe vote ID up|down|clear`, `rpipe save ID`, `rpipe unsave ID`, `rpipe feedback`) record what you thought of a digest item. `ID` is the `id:` shown under each item (an arXiv id) or part of the title; an ambiguous title shows a numbered list, an unknown one changes nothing. See `digest.md`.
+Feedback commands (`rpipe vote ID up|down|clear`, `rpipe save ID`, `rpipe unsave ID`, `rpipe feedback`) record what you thought of a digest item. `ID` is the `id:` shown under each item (an arXiv id, also accepted as `2611.25005v2`, `arXiv:2611.25005` or an arxiv.org link) or part of the title; an ambiguous title shows a numbered list, an unknown one changes nothing. See `digest.md`.
 
 ```
 $ uv run rpipe vote 2307.15043 up
@@ -170,7 +173,7 @@ Illustrative commands; see `evaluation.md` for a sample report.
 
 Only `run` writes a row to `runs`; the single-stage commands print their counts and errors instead (a deliberate choice: the table is the history of nightly runs). Only `run` and `triage` need the `embed` extra: the embedding model is created lazily (`Pipeline.make_embedder`), so `collect` and `digest` work on a machine without it.
 
-**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `75` when another `rpipe run` already holds the run lock (the lock file is `.run.lock` in the vault; the nightly unit is unchanged). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, `--date` is not a date, or `vault.sqlite` was written by a newer rpipe (it stops and says to upgrade rather than touch it).
+**Exit codes.** `0` normally, **including when a source failed or Ollama was down** (summaries are then skipped; `rpipe summarize` alone exits 1 in that case) (the failure is recorded, see below). `75` when another pipeline command already holds the vault lock (the lock file is `.run.lock` in the vault; see "One pipeline job at a time" below for which commands take it). `1` when the vault is missing or has no `config.yaml`, a config file is invalid, a `profile` command is given bad input, the `embed` extra is missing, `--date` is not a date, or `vault.sqlite` was written by a newer rpipe (it stops and says to upgrade rather than touch it).
 
 ### Reading cut papers whole: reruns
 
@@ -210,6 +213,87 @@ The health line shows ` · rerun 2` (papers read whole tonight) and ` · rerun w
 **How to check it.** `uv run pytest tests/test_spill.py -q` (fake Ollama, fake clock and fake RAM reading: candidates, buckets, the memory formula, a full night, the deadline stopping midway, no RAM reading, free RAM read only after the previous bucket's model is unloaded, a benchmark saved without the `:latest` tag, a load that uses more RAM than estimated, another model loaded, a failure and a timeout, and the `run` wiring). After a real night: the health line, and `rpipe show ID` for a rerun paper (its summary no longer ends with "part of it was left out"). Today's digest is written after the reruns, so it shows the new summaries; a digest file from an earlier day is not rewritten (it is that night's record), but the new summary is what `rpipe show` and the browser show.
 
 **Where the code is.** `src/research_pipeline/spill.py` (`rerun_candidates`, `buckets`, `ram_part_bytes`, `run_reruns`, `_unload_and_wait`, constants `RERUN_STEP`, `SPILL_GUESS`, `FIRST_RERUN_MARGIN`, `MIN_CALL_TIMEOUT`, `UNLOAD_WAIT`, `UNLOAD_POLL`), its call in `_run_locked` and the health-line additions in `cli.py`, `ollama_fit.unload`.
+
+### The request list: work the app asked for
+
+**What it does.** The app half of rpipe (today `rpipe requests add PAPER`; later a button in the app, both calling `library_api.request`) never runs the model itself. When you ask for a paper to be summarized, it writes a `pending` row in the `requests` table (see "The request list" in [data-model.md](data-model.md)) and the pipeline does the work: every night inside `rpipe run`, or straight away with `rpipe requests run`. This is called **draining** the request list (working through it until nothing is left to do). `rpipe requests list` shows every request and how it went.
+
+**How it works.** `requests_queue.drain_requests` does this, step by step:
+
+1. Rows left `running` (a run died while working on them) go back to `pending` (`db.reset_running_requests`). The try they used still counts, so a row whose third try was cut short has no tries left: it is marked `failed` with the error `stopped part-way through 3 times (the run was interrupted or crashed); gave up` and counted in `requests_failed`, instead of sitting `pending` for ever.
+2. It takes the `pending` `summarize` rows that have had fewer than 3 tries (`MAX_SUMMARY_TRIES`), oldest first, and for each one:
+   - marks it `running` and counts one try (`db.mark_request(..., add_try=True)`);
+   - summarizes that one paper with `run_summarize(paper_ids=[id])`, exactly what `rpipe summarize ID` does: any status, an existing summary is replaced, and a paper's own retry cap is ignored because you asked for it;
+   - **summarized** → `done`, `result` = `{"summarized": true}`, `error` cleared;
+   - **failed** (network error, model error, the paper is not in the vault) → back to `pending` with the error line, or `failed` if this was the third try;
+   - **usage limit reached** (Claude Code) → back to `pending` with the try given back (not the request's fault), and the drain stops: the next request would hit the same limit;
+   - **model timed out** → counted as a failed try like any failure, then the drain stops: a hung model would make every later request wait out the full timeout too.
+3. **The morning deadline.** In the nightly `rpipe run`, before *starting* each request the drain looks at the clock. If the morning deadline (`night_deadline`, default 07:00, see "The morning deadline" in [scheduling.md](scheduling.md)) has been reached, it stops: the rest stay `pending` with no try used, the stage shows `N requests wait for a later night: the morning deadline 07:00 has passed`, and the health line gets `requests: stopped at the night deadline 07:00; N waiting` (worded like the rerun stage's deadline notes). A request already started is never cut off, so the drain can end a few minutes past the deadline. `rpipe requests run` is a hand run, so it passes no deadline and never looks at the clock; neither does a run with no deadline tonight (set to `off`, or more than 12 hours away, as in a daytime run).
+4. It counts `requests_done` and `requests_failed` (gave up after 3 tries, including tries cut short) for this drain, and `requests_waiting` (pending rows left), and returns them with the error lines for the health line.
+
+The **retry rule** in one line: a request gets 3 tries; a usage-limit stop does not use one up; a request that failed 3 times is left `failed` and never tried again (ask again to queue a fresh one). `requests.tries` is the counter that matters; the paper's own `retry_count` still goes up on a failure (as with `rpipe summarize ID`) but the drain does not look at it.
+
+Worked example. On Monday you ask for `2611.25005` (row 7) and `2611.30001` (row 8). That night:
+
+```
+summarize…           (the normal stage: tonight's kept papers)
+requests…
+  writing the summary for 2611.25005
+  writing the critique for 2611.25005
+  [1/2] 2611.25005 done
+  fetching 2611.30001
+  [2/2] 2611.30001 failed: arXiv returned 503
+```
+
+You asked for them with:
+
+```
+$ rpipe requests add 2611.25005
+Request 7: summarize 2611.25005.
+It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+$ rpipe requests add "https://arxiv.org/abs/2611.30001v2"
+Request 8: summarize 2611.30001.
+It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+$ rpipe requests add 2611.25005
+Request 7 to summarize 2611.25005 is already waiting; nothing new was added.
+It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+```
+
+The third line asked again for a paper that was still waiting, so it got request 7 back instead of a second copy.
+
+Row 7 is `done` (1 try). Row 8 is `pending` with 1 try and the 503 as its error; the health line says `requests waiting 1`. Tuesday night it works: `done`, 2 tries. Had it failed on Tuesday and Wednesday too, it would be `failed` after Wednesday's third try and the health line would say `requests failed 1`.
+
+**In `rpipe run`** the order is summarize → requests → reruns → digest. The drain uses the same reading mode and `fallback_above` as the summarize stage, so a requested paper that had to be cut is read whole by the rerun stage like any other. A quiet night with no new papers still loads the model when requests are waiting (the summarize stage counts them as work). Only requests that can still run count: `requests_queue.runnable_requests` (pending or running, `summarize`, fewer than 3 tries) is the one check used by `rpipe run`, `rpipe requests run` and the drain itself, so a request with no tries left never makes a night load the model for nothing. The drain is **skipped** when the summarize stage just stopped on a usage limit or a model timeout: the model has stopped answering, so trying requests would only use up their tries; the rows stay `pending` with their tries untouched and the health line shows `requests waiting N`. A drain that times out is passed on to the rerun stage, which then skips (as after a summarize timeout). With the `none` backend, the model unavailable, or a usage limit hit before the first call, no drain runs, but the health line still shows `requests waiting N` so you can see they are queued. If the drain itself crashes (for example a database error), the run records `requests: <message>` in its errors and carries on with the reruns and the digest; the night still exits 0, like a rerun problem.
+
+**Progress.** The drain is its own `requests` stage with one `[i/N]` step per request (outcome `done`, `failed` or `stopped`) and, above each, the notes from the summary (`fetching …`, `writing the summary for …`). The inner one-paper summarize run would otherwise show its own `summarize` stage with a `[1/1]` line for every request; a small adapter (`_NotesOnly`) passes only its notes into the `requests` stage. With nothing queued the stage is not shown at all.
+
+**Commands.**
+
+```
+$ rpipe requests add 2611.30001
+Request 8 to summarize 2611.30001 is already waiting; nothing new was added.
+It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+$ rpipe requests list
+8  pending  summarize  2611.30001  1  2026-11-23T09:12:40+00:00  arXiv returned 503
+7  done     summarize  2611.25005  1  2026-11-23T09:12:02+00:00
+$ rpipe requests run
+Requests:
+  requests_done=1, requests_failed=0, requests_waiting=0
+```
+
+`rpipe requests add PAPER` (not locked, no model) finds the paper the way `rpipe vote` does (`_resolve_paper`: an id in any spelling such as `2611.25005v2`, `arXiv:2611.25005` or an arxiv.org URL, else part of the title, with a numbered list to pick from when several titles match), then calls `library_api.request(conn, "summarize", {"paper_id": ...})`. It prints the request id and when it will run. If the same paper is already waiting (or being worked on) it says `already waiting` and gives that request's id; a paper not in your vault gives `No paper in your vault matches '...'. ... Nothing was changed.` and exit 1, with no row added. It only adds one row, a single short write, so it runs safely beside the nightly job. `rpipe requests list` (not locked, no model) prints every request newest first: id, status, kind, paper id, tries, when it was asked, and the last error if any; `No requests.` when there are none. `rpipe requests run` takes the pipeline lock (as `rpipe requests run`), needs a model (exit 1 with the `none` backend, or when the model is unavailable), says `No requests waiting.` and stops if no request can still run, else picks the reading mode like `rpipe summarize` and drains with progress.
+
+**Why it's built this way.**
+- **`requests.tries` is the counter, not the paper's `retry_count`.** A request is something you asked for; its own row is where you look to see how it went, and `rpipe requests list` shows it. Rejected: reusing the paper's counter (a paper that failed three times in the nightly stage could then never be requested again).
+- **A usage limit gives the try back; a timeout does not.** A limit says nothing about the paper; a timeout might (a huge paper) and costs real time, so it counts like the nightly stage counts it.
+- **Requests after the summarize stage, before reruns.** Tonight's new papers come first (they are the digest); requests are extra. Running before the reruns lets a cut requested paper be reread whole the same night. Rejected: a separate nightly timer for requests (two jobs fighting over one lock and one GPU).
+- **The drain stops at the morning deadline, the normal summarize stage does not.** Tonight's new papers are the digest, so they always run; requests are extra and can wait a day, like reruns. Checking only before a request starts means a summary is never thrown away half-written. Rejected: a time budget per request (a slow paper would be cut off and its try wasted).
+- **`requests add` is an app command, not locked.** It writes one row and never touches the model, so it must work while the nightly run holds the lock (you may want to queue a paper while it runs). Rejected: making it run the summary straight away (that is `rpipe requests run`, which needs the lock and the GPU).
+- **One step per request, not a stage per request.** Twenty requests would otherwise print twenty `summarize` stages of `[1/1]`.
+
+**How to check it.** `uv run pytest tests/test_requests_queue.py tests/test_cli_requests.py -q` (done, a stale `running` row, three failures then `failed`, a usage limit keeping both rows pending with no try used, a timeout stopping the drain, the progress events, a request whose last try was cut short marked `failed`, the deadline stopping the drain before the first and between requests (fake clock), no clock read without a deadline, `requests add` (a row added, a versioned id and a title, an unknown paper, a repeat giving the same id, no lock), the deadline passed by `rpipe run` and not by `rpipe requests run`, `requests waiting` on nights with no model, the nightly wiring including a quiet night, the skip after a usage limit and after a summarize timeout, a drain timeout passed on to the reruns, a crashing drain recorded while reruns and the digest still run, the list output and the lock).
+
+**Where the code is.** `src/research_pipeline/requests_queue.py` (`drain_requests`, `runnable_requests`, `GAVE_UP_CUT_SHORT`, `_NotesOnly`); `db.mark_request`, `db.reset_running_requests`; `library_api.request`, `library_api.open_request_ids`; in `cli.py`, the `requests` stage in `_run_locked`, `_count_waiting_requests`, `requests_add`, `requests_run`, `requests_list` and the health-line counts.
 
 ### A real run, step by step
 
@@ -270,7 +354,40 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 
 **What is guaranteed.** Both a crash and Ctrl-C finish the run row (`finish_run` sits in a `finally`, so it executes exactly once whichever way the command ends). After Ctrl-C the error is `<stage>: interrupted`, no digest is attempted (you wanted out), and the interrupt then propagates, so the exit code is the usual one for an interrupt. Counts are kept for stages that completed before the failure; the partial counts of the stage that crashed mid-way are lost (stage functions only return counts when they finish). `SIGTERM` (what `systemctl stop` and a plain `kill` send) is treated like Ctrl-C while `run` executes, so it is recorded the same way. An interrupt that lands while the digest is being written is recorded as `digest: interrupted`. Failing to load the embedding model is recorded as `embed: ...` (the run row is created before the model is loaded, so this and every later failure leaves a record). Only a hard kill (power cut, `kill -9`) leaves `finished_at` empty. If `finish_run` itself fails (for example a full disk) while another error is already propagating, the failure is printed as `warning: could not record the run: ...` and the original error still wins; if nothing else went wrong, the `finish_run` failure is raised.
 
-**One run at a time.** `run` first takes a non-blocking lock (`flock` on `<vault>/.run.lock`). If another `rpipe run` holds it (for example a `Persistent=true` catch-up that woke up while you were running by hand), the second command prints `` another `rpipe run` is already using <vault> `` (then "nothing was started. Wait for it to finish (see `rpipe runs`).") and exits at once with code `75` (the standard "try again later" code), without creating a `runs` row. The operating system drops the lock when the process ends for any reason (crash, `kill -9`, SIGTERM), so a stale lock file never blocks a later run; the file itself is harmless and stays in the vault.
+**One pipeline job at a time.** Every command that does pipeline work takes the same vault lock before it starts: `flock` (an operating-system file lock, see the glossary) on `<vault>/.run.lock`, non-blocking, so a second job never waits, it stops. While a command holds the lock, the lock file contains that command's name (the **lock holder**, for example `rpipe run`); the file is emptied when the command ends. A refused command reads the name and prints it, then exits at once with code `75` (the standard "try again later" code), without creating a `runs` row or touching the database:
+
+```
+$ rpipe summarize
+rpipe run is already working on /home/you/research-vault; nothing was started. Wait for it to finish (see `rpipe runs`).
+```
+
+Worked example: the nightly run starts at 03:00 and is still summarizing at 07:30 when you type `rpipe model tune`. Without the lock, tune would restart Ollama under the run and every remaining paper would fail. With it, tune prints the line above (naming `rpipe run`) and changes nothing; you run it again once `rpipe runs` shows the night finished. The same happens the other way round: a `Persistent=true` catch-up run that wakes up while your hand-started `rpipe summarize --backlog` is going exits 75 naming `rpipe summarize`, and the next night runs normally. The operating system drops the lock when the process ends for any reason (crash, `kill -9`, SIGTERM), so a stale lock file never blocks a later run; the file itself is harmless and stays in the vault. If the file is empty while locked (an older rpipe holds it, or the holder has not written its name yet) the message says `unknown is already working on ...`.
+
+Which commands take the lock:
+
+| Command | Locked? | Why |
+| --- | --- | --- |
+| `run`, `collect`, `triage`, `digest` | yes | pipeline stages: fetch into the vault, load the embedder, rewrite `papers` and the digest |
+| `summarize` (all forms, including `--backlog` and `--refetch`) | yes | uses the model (GPU memory) and fetches full text |
+| `eval run` | yes | summarizes the gold set with the model |
+| `model fit`, `model check`, `model bench` | yes | load and unload models in Ollama; a probe during a run would push the run's model out of GPU memory |
+| `model tune` (and `--undo`) | yes | restarts the Ollama service, which would break a running job |
+| `model recommend` | yes | can download a model and re-measure its context |
+| `model setup` | yes | can download, measure and test a model |
+| `profile suggest` | yes | uses the model |
+| `gold add`, `gold suggest`, `gold auto`, `gold draft` | yes | fetch from arXiv or call the judge; grouped with the other gold-set builders so one job builds the set at a time |
+| `requests run` | yes | uses the model (GPU memory) and fetches full text |
+| `shelf add`, `shelf sync` | yes | load the embedder and rewrite shelf rows; `rpipe run` also syncs the shelf, so two syncs could collide |
+| `vote`, `save`, `unsave`, `feedback`, `review`, `show`, `runs`, `serve`, `shelf list`, `shelf remove`, `requests add`, `requests list` | no | app commands: quick reads and single-row writes that are safe beside a running job |
+| `profile show`, `profile add-seed`, `profile set-*`, `model show`, `model set*`, `model scan`, `model catalog show`, `model catalog update`, `gold list`, `gold remove`, `gold add-fact`, `gold edit-fact`, `gold remove-fact`, `eval grade`, `eval report`, `schedule *`, `sources *`, `init`, `plugins` | no | settings and read-only commands. `profile add-seed` does look the paper up on arXiv, but it writes only `profile.yaml`, never the database, so it cannot collide with a run |
+
+A locked command takes the lock right after it opens the vault (`_open`) and before anything that leaves the process: no network request, no model or embedder load, no Ollama probe or restart happens while another job holds the lock. **A command lets go of the lock while it waits for you.** Interactive locked commands (`gold add`, `gold draft`, `model tune`, `model setup`, `model recommend`, `profile suggest`) ask questions between stretches of work. Every question goes through `_prompt` or `_confirm` in `cli.py`, which releases the lock (and empties the file) just before asking and takes it back right after you answer. So the lock is held only while the command is actually working (fetching, calling the model, downloading, restarting Ollama), never while a question sits on screen. Worked example: at 23:00 you start `rpipe gold draft 2401.00001`, it drafts the facts (lock held), then asks `Keep, edit or drop?` and you go to bed. At 03:00 the nightly run finds the lock free, runs and finishes. If you answer while the run is still working, the command cannot take the lock back, so it stops with `rpipe run is already working on <vault>; nothing further was started.` and exit 75; whatever it had saved before the question stays saved, and you run it again later. Outside a locked command (for example the `rpipe init` wizard, which is not locked) `_prompt` and `_confirm` behave exactly like Typer's own prompts.
+
+The `sudo` password prompt during `model tune` is the one exception: it belongs to the restart itself, so the lock stays held (sudo gives up on its own after a few minutes).
+
+Unlocked commands can still write to `vault.sqlite` while a job runs. SQLite allows one writer at a time; the database is in WAL mode (readers never wait) and every connection has a **busy timeout** of 5 seconds (`open_db` passes `timeout=5.0`): a write that finds the database busy retries for up to 5 s before failing with "database is locked". The pipeline's writes are short, so in practice a vote or save during a run just waits a moment.
+
+`tests/test_run_lock.py` checks the lock itself (the holder is recorded, read back by a refused caller, cleared on release and after a crash, `unknown` when empty) and the waiting rule on `rpipe gold add`: at each question another job can take the lock, after the answer the lock is held again, and a job that took it during a question stops the command with `nothing further was started`; `test_locked_commands_stop` in `tests/test_runs.py` holds the lock as `rpipe run` and invokes every locked command in the table: each must exit 75 naming `rpipe run`, with no new `papers` or `runs` rows and no digest, and every network, model, embedder and Ollama entry point is replaced by one that fails the test, so a command that reached one before the lock would fail loudly.
 
 **A hung model stops after one timeout.** The first time the model does not answer within its time limit (`LlmTimeout`; 600 s, or more on a machine `rpipe model bench` measured as slow, see "The time limit for one call" in `llm.md`), `run_summarize` records the paper's failure, adds `summarize: stopped calling the model after the first timeout; remaining papers show abstracts only` to the errors, and stops calling the model for the rest of that run (the rerun stage is skipped too: its cut papers wait for another night). Collecting, triage and the digest carry on; the unsummarized papers keep their status and are retried on the next run. Rejected: continuing, which would make every remaining paper wait out the full timeout (hours for a night's batch).
 
@@ -285,8 +402,12 @@ To run it every night automatically, use `rpipe schedule install` (a systemd use
 ## Why it's built this way
 
 - **One command that records itself**: `run` owns the `runs` row, so counts from every stage and every error end up in one place. The individual stage functions return counts and errors rather than finishing the run.
-- **A failed source does not fail the run**: a nightly job that exits non-zero because one website was down would train you to ignore failures. The error is written to the digest's first line and to `runs.errors` instead; exit code 1 is kept for "nothing could run". Exit `75` means only "another run was in progress".
+- **A failed source does not fail the run**: a nightly job that exits non-zero because one website was down would train you to ignore failures. The error is written to the digest's first line and to `runs.errors` instead; exit code 1 is kept for "nothing could run". Exit `75` means only "another pipeline job was in progress".
 - **`flock`, not a PID file**: the OS releases a `flock` when its owner dies, so there is no stale-lock cleanup to get wrong. Rejected: a PID file (needs liveness checks and can go stale after a crash) and a blocking lock (the catch-up run would sit waiting for hours).
+- **One lock for every pipeline command, not just `run`**: before Phase 7 only `run` took the lock, so a hand-started `rpipe summarize` or `rpipe model tune` could run beside the nightly job, two processes fought over GPU memory, and a tune restarted Ollama mid-run. One lock, one rule: anything that does pipeline work, uses the model or GPU, restarts Ollama or fetches into the vault takes it. Rejected: a separate lock per resource (GPU, Ollama, database), which is harder to explain and still lets two jobs interleave their writes to `papers`; and making the app commands (`vote`, `save`, `review`) wait for the lock, which would block a quick vote for hours during a run.
+- **Let go of the lock at every question, not around hand-marked work blocks**: an unanswered question must never cost a night's run, which is worse than the collision the lock prevents. Rejected: marking each stretch of work in every interactive command by hand, because the questions sit deep inside helpers shared with the unlocked `init` wizard, and a new question added later would silently hold the lock again. Routing every question through `_prompt`/`_confirm` makes the rule hold everywhere at once. The cost: an answer given while another job works is refused and the step must be redone.
+- **The lock file names its holder**: "another job is running" leaves you guessing whether it is the nightly run (wait) or a command you forgot in another terminal (go and stop it). Writing the command's name into the lock file costs nothing and the refused command can read it. It is emptied on release so a leftover name never misleads. Rejected: also writing the process id (a reader would be tempted to `kill` it; `rpipe runs` is the safer place to look).
+- **A 5-second busy timeout, written out**: it is Python's default, but now that the app commands write while a pipeline job runs, the value matters and is stated where the database is opened rather than left implicit.
 - **`build_pipeline` as the single seam**: `cli.py` builds the real sources, a lazy embedder factory, seed lookup, a lazy model-client factory (`make_llm`) and the full-text fetcher in one function. The end-to-end tests replace that one function with fixture-backed stubs, so the *real* CLI, database, ranking and digest code run offline.
 - **Optional `embed` extra**: keeps installs and tests light. Rejected: making PyTorch a hard dependency.
 - **No `feedparser` dependency**: the arXiv response is parsed with the standard library (see `sources.md`); RSS is a later phase and can add the library then.
@@ -349,8 +470,9 @@ Lint is `ruff` (a fast Python linter, installed with the dev group by `uv sync`)
 - `src/research_pipeline/seeds.py`: seed text lookup and cache
 - `src/research_pipeline/summarize.py`: `run_summarize` (the per-paper loop)
 - `src/research_pipeline/spill.py`: `run_reruns` (reading cut papers whole at night)
+- `src/research_pipeline/requests_queue.py`: `drain_requests` (the request list; `rpipe requests add|run|list` are in `cli.py`)
 - `src/research_pipeline/llm.py`, `fulltext.py`, `prompts.py`: model client, full-text fetching, prompts (see `llm.md`, `fulltext.md`, `summaries.md`)
 - `src/research_pipeline/gold.py`, `evaluate.py`: `rpipe gold` and `rpipe eval` (see `evaluation.md`)
-- `src/research_pipeline/run_lock.py`: `run_lock`, `RunLocked`
+- `src/research_pipeline/run_lock.py`: `VaultLock` (take, let go, take again), `run_lock`, `RunLocked` (with `.holder`); in `cli.py`, `_pipeline_lock` turns a refusal into the message and exit 75, and `_prompt`/`_confirm` (through `_waiting_for_you`) let go of the lock while a question waits
 - `src/research_pipeline/db.py`: `start_run`, `finish_run`, `list_runs`, `previous_run_unfinished`
-- `tests/test_runs.py`, `tests/test_run_lock.py`, `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`
+- `tests/test_runs.py`, `tests/test_run_lock.py`, `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`, `tests/test_requests_queue.py`, `tests/test_cli_requests.py`

@@ -102,6 +102,19 @@ CREATE TABLE IF NOT EXISTS shelf_chunks (
     PRIMARY KEY (item_name, chunk_idx)
 );
 
+-- The request list: work the app asks the pipeline to do (e.g. summarize one paper now).
+CREATE TABLE IF NOT EXISTS requests (
+    id         INTEGER PRIMARY KEY,
+    kind       TEXT NOT NULL,
+    payload    TEXT NOT NULL,          -- canonical JSON: json.dumps(payload, sort_keys=True)
+    status     TEXT NOT NULL DEFAULT 'pending',  -- pending | running | done | failed
+    tries      INTEGER NOT NULL DEFAULT 0,
+    error      TEXT,
+    result     TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts
     USING fts5(title, abstract, tokenize = 'unicode61');
 """
@@ -114,7 +127,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class SchemaTooNewError(RuntimeError):
@@ -133,11 +146,15 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         pass  # v1 -> v2: the `skips` table is added by CREATE TABLE IF NOT EXISTS
     if from_version < 3:
         pass  # v2 -> v3: `shelf_items` and `shelf_chunks` are added by CREATE TABLE IF NOT EXISTS
+    if from_version < 4:
+        pass  # v3 -> v4: the `requests` table is added by CREATE TABLE IF NOT EXISTS
 
 
 def open_db(path: Path) -> sqlite3.Connection:
     """Open (creating if needed) the database with all tables, WAL and Row access."""
-    conn = sqlite3.connect(path)
+    # Wait up to 5 s for another connection to finish writing before failing with "database is
+    # locked" (Python's default, written out: app commands write while a locked pipeline job runs).
+    conn = sqlite3.connect(path, timeout=5.0)
     conn.row_factory = sqlite3.Row
     # Check the version before anything that could write to the file (WAL, tables, migration).
     version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -158,77 +175,86 @@ def open_db(path: Path) -> sqlite3.Connection:
     return conn
 
 
+# Kinds of work the app may put on the request list. The pipeline knows how to do each one.
+REQUEST_KINDS: tuple[str, ...] = ("summarize",)
+
+
+def insert_request(conn: sqlite3.Connection, kind: str, payload: dict) -> int:
+    """Add a `pending` request and return its id. Commits.
+
+    If a `pending` or `running` request with the same kind and payload is already on the
+    list, return that one's id instead, so asking twice does not queue the work twice.
+    Callers validate `kind` and `payload` (see ``library_api.request``).
+    """
+    canonical = json.dumps(payload, sort_keys=True)
+    existing = conn.execute(
+        "SELECT id FROM requests WHERE kind = ? AND payload = ? AND status IN ('pending', 'running')"
+        " ORDER BY id LIMIT 1",
+        (kind, canonical),
+    ).fetchone()
+    if existing is not None:
+        return existing["id"]
+    now = _now()
+    cur = conn.execute(
+        "INSERT INTO requests (kind, payload, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        (kind, canonical, now, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def requests_by_status(conn: sqlite3.Connection, *statuses: str) -> list[sqlite3.Row]:
+    """Requests whose status is one of `statuses`, oldest first (none named -> empty list)."""
+    if not statuses:
+        return []
+    marks = ", ".join("?" * len(statuses))
+    return conn.execute(
+        f"SELECT * FROM requests WHERE status IN ({marks}) ORDER BY id", statuses
+    ).fetchall()
+
+
+def mark_request(
+    conn: sqlite3.Connection,
+    rid: int,
+    status: str,
+    *,
+    error: str | None = None,
+    result: dict | None = None,
+    add_try: bool = False,
+    undo_try: bool = False,
+) -> None:
+    """Set a request's status, `error` and `result` (None clears them) and `updated_at`. Commits.
+
+    ``add_try`` counts one more try (taken as the work starts); ``undo_try`` gives one back
+    (the work stopped for a reason that was not the request's fault, like a usage limit).
+    """
+    delta = int(add_try) - int(undo_try)
+    conn.execute(
+        "UPDATE requests SET status = ?, error = ?, result = ?, tries = MAX(0, tries + ?),"
+        " updated_at = ? WHERE id = ?",
+        (status, error, json.dumps(result, sort_keys=True) if result is not None else None,
+         delta, _now(), rid),
+    )
+    conn.commit()
+
+
+def reset_running_requests(conn: sqlite3.Connection) -> int:
+    """Put `running` requests back to `pending` and return how many. Commits.
+
+    A request is only `running` while a pipeline command works on it under the run lock, so
+    one still `running` when the next drain starts was left by a run that died mid-request.
+    Its try stays counted (the drain then fails a row that has no tries left).
+    """
+    cur = conn.execute(
+        "UPDATE requests SET status = 'pending', updated_at = ? WHERE status = 'running'", (_now(),)
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def _require_paper(conn: sqlite3.Connection, paper_id: str) -> None:
     if get_paper(conn, paper_id) is None:
         raise UnknownPaperError(f"No paper with id {paper_id!r} in the database.")
-
-
-def record_vote(
-    conn: sqlite3.Connection, paper_id: str, vote: int, now: str | None = None
-) -> None:
-    """Append a vote (+1, -1, or 0 to clear). Commits. Raises UnknownPaperError for a bad id."""
-    if vote not in (-1, 0, 1):
-        raise ValueError(f"vote must be -1, 0 or 1, got {vote!r}")
-    _require_paper(conn, paper_id)
-    conn.execute(
-        "INSERT INTO votes (paper_id, vote, created_at) VALUES (?, ?, ?)",
-        (paper_id, vote, now or _now()),
-    )
-    conn.commit()
-
-
-def record_skip(conn: sqlite3.Connection, paper_id: str, now: str | None = None) -> None:
-    """Mark a paper "review later" (refreshing the time if already skipped). Commits."""
-    _require_paper(conn, paper_id)
-    conn.execute(
-        "INSERT INTO skips (paper_id, skipped_at) VALUES (?, ?)"
-        " ON CONFLICT(paper_id) DO UPDATE SET skipped_at = excluded.skipped_at",
-        (paper_id, now or _now()),
-    )
-    conn.commit()
-
-
-def clear_skip(conn: sqlite3.Connection, paper_id: str) -> None:
-    """Remove a paper from the review-later list (harmless if it is not there). Commits."""
-    conn.execute("DELETE FROM skips WHERE paper_id = ?", (paper_id,))
-    conn.commit()
-
-
-def current_votes(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Latest vote per paper, leaving out papers whose latest vote is 0."""
-    return conn.execute(
-        "SELECT paper_id, vote, created_at FROM votes WHERE id IN"
-        " (SELECT MAX(id) FROM votes GROUP BY paper_id) AND vote != 0"
-        " ORDER BY id"
-    ).fetchall()
-
-
-def set_saved(
-    conn: sqlite3.Connection, paper_id: str, saved: bool, now: str | None = None
-) -> None:
-    """Save or unsave a paper (idempotent). Commits. Saving an unknown id raises UnknownPaperError."""
-    if saved:
-        _require_paper(conn, paper_id)
-        conn.execute(
-            "INSERT OR IGNORE INTO saves (paper_id, created_at) VALUES (?, ?)",
-            (paper_id, now or _now()),
-        )
-    else:
-        conn.execute("DELETE FROM saves WHERE paper_id = ?", (paper_id,))
-    conn.commit()
-
-
-def is_saved(conn: sqlite3.Connection, paper_id: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM saves WHERE paper_id = ?", (paper_id,)
-    ).fetchone() is not None
-
-
-def list_saved(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Saved papers, newest save first; columns paper_id, created_at."""
-    return conn.execute(
-        "SELECT paper_id, created_at FROM saves ORDER BY created_at DESC, rowid DESC"
-    ).fetchall()
 
 
 def _index(conn: sqlite3.Connection, rowid: int, title: str, abstract: str) -> None:
@@ -562,60 +588,3 @@ def record_failure(conn: sqlite3.Connection, paper_id: str, error: str) -> None:
 def clear_error(conn: sqlite3.Connection, paper_id: str) -> None:
     """Forget an earlier failure message once the paper gets through. Does not commit."""
     conn.execute("UPDATE papers SET error = NULL WHERE id = ?", (paper_id,))
-
-
-def shelf_embedding_id(name: str, idx: int) -> str:
-    """The ``embeddings.item_id`` for chunk ``idx`` of shelf item ``name``."""
-    return f"shelf:{name}#{idx}"
-
-
-def _delete_shelf_embeddings(conn: sqlite3.Connection, name: str) -> None:
-    # Only this item's own chunk ids: "shelf:<name>#<digits>". A bare prefix match would also
-    # hit item "notes#2" (ids "shelf:notes#2#0") when deleting item "notes".
-    prefix = f"shelf:{name}#"
-    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    rows = conn.execute(
-        "SELECT item_id FROM embeddings WHERE item_id LIKE ? ESCAPE '\\'", (escaped + "%",)
-    ).fetchall()
-    own = [r[0] for r in rows if r[0].startswith(prefix) and r[0][len(prefix):].isdigit()]
-    conn.executemany("DELETE FROM embeddings WHERE item_id = ?", [(i,) for i in own])
-
-
-def upsert_shelf_item(
-    conn: sqlite3.Connection, name: str, content_hash: str, chunks: list[str]
-) -> None:
-    """Store a shelf item, replacing any earlier chunks and their embeddings. Commits."""
-    delete_shelf_item(conn, name, commit=False)
-    conn.execute(
-        "INSERT INTO shelf_items (name, content_hash, added_at) VALUES (?, ?, ?)",
-        (name, content_hash, _now()),
-    )
-    conn.executemany(
-        "INSERT INTO shelf_chunks (item_name, chunk_idx, text) VALUES (?, ?, ?)",
-        [(name, i, text) for i, text in enumerate(chunks)],
-    )
-    conn.commit()
-
-
-def delete_shelf_item(conn: sqlite3.Connection, name: str, *, commit: bool = True) -> None:
-    """Remove a shelf item, its chunks (cascade) and its embeddings. Idempotent."""
-    _delete_shelf_embeddings(conn, name)
-    conn.execute("DELETE FROM shelf_items WHERE name = ?", (name,))
-    if commit:
-        conn.commit()
-
-
-def list_shelf_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Shelf items by name, with their chunk counts."""
-    return conn.execute(
-        "SELECT i.name, i.content_hash, i.added_at, COUNT(c.chunk_idx) AS n_chunks"
-        " FROM shelf_items i LEFT JOIN shelf_chunks c ON c.item_name = i.name"
-        " GROUP BY i.name ORDER BY i.name"
-    ).fetchall()
-
-
-def shelf_chunk_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Every shelf chunk, ordered by item then position."""
-    return conn.execute(
-        "SELECT item_name, chunk_idx, text FROM shelf_chunks ORDER BY item_name, chunk_idx"
-    ).fetchall()

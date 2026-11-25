@@ -1,6 +1,17 @@
-# Handoff — after Phase 6 Part B.6 (task splitting, map-reduce) (2026-11-25)
+# Handoff — after Phase 7 (pipeline/app split) built (2026-11-25)
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
+
+## Phase 7 built (2026-11-25, branch `pipeline-app-split`, NOT merged)
+
+Plan `plans/2026-11-22-pipeline-app-split.md` (refreshed 2026-11-25). `uv run pytest -q`: 1546 passing, ruff clean. Per-task spec+quality reviews (Task 5 needed one fix round), whole-branch review (opus) + one fix wave + scoped re-review. Guide page: `docs/guide/architecture.md`.
+
+- **What changed:** one lock for every pipeline command, naming the holder (`rpipe X is already working…`, exit 75); interactive commands release it while waiting at a prompt (`_prompt`/`_confirm`) so an open prompt never makes the 03:00 run skip (sudo's own password prompt inside `model tune` is the exception). User-action functions moved `db.py` → `library.py`. `library_api.py` is the app's one door (Pydantic views); vote/save/unsave/feedback/review/show/shelf use it. `requests` table (**schema 3 → 4**), `ids.normalise_paper_id` (`rpipe vote 2611.25005v2` now works), `rpipe requests add|run|list`; the nightly run drains requests after summarize, before reruns, stops at the night deadline, gives up after 3 tries. Shelf sync moved out of triage into the CLI. `tests/test_architecture.py` enforces the groups (shared / pipeline / app / composition).
+- **Rollout warning:** `rpipe` is an editable install, so the 03:00 run uses whatever branch is checked out. The checkout was left on `main`, so the real vault stays at schema 3 until the branch is merged. After merging, the first run migrates the vault to 4; from then on never check out a pre-merge commit for the nightly run (old code refuses a v4 vault; rollback note in `data-model.md`).
+- **Owner decisions open:** merge the branch; whether to add the line "Pipeline code and app code are separate groups; see docs/guide/architecture.md." to `CLAUDE.md` Conventions.
+- **Parked minors:** `schedule set-deadline`/`schedule show` messages and scheduling.md's "What it governs: reruns only" heading don't mention the request drain; `running.md` says "takes the pipeline lock (as `rpipe requests run`)" (circular); `requests list` shows a row whose 3rd try was cut short as pending until the next nightly drain; `_current_vote` duplicates `current_votes`; queue counts build full views; search rank order untested; returns-data test passes unannotated functions; test_requests.py hardcodes schema 4; only `vote` has a CLI test for id spellings; no guard test that prompts go only through the wrappers.
+- **Still pending from B.6:** check the 2026-11-26 nightly's `reading mode` note says whole (share 1.0); CPU-speed measurement of split.
+
 
 ## B.6 built (2026-11-25, merged and pushed)
 

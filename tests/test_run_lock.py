@@ -1,42 +1,81 @@
 import sqlite3
 
 import pytest
+from fakes import StubArxiv, paper
 from typer.testing import CliRunner
 
 from research_pipeline import cli
-from research_pipeline.run_lock import RunLocked, run_lock
+from research_pipeline.run_lock import LOCK_NAME, RunLocked, VaultLock, run_lock
 from research_pipeline.vault import init_vault
 
 runner = CliRunner()
 
 
 def test_second_acquisition_fails_at_once_and_release_frees_it(tmp_path):
-    with run_lock(tmp_path):
+    with run_lock(tmp_path, "rpipe run"):
         with pytest.raises(RunLocked, match="already"):
-            with run_lock(tmp_path):
+            with run_lock(tmp_path, "rpipe run"):
                 pass
-    with run_lock(tmp_path):  # released on exit, so a later run can start
+    with run_lock(tmp_path, "rpipe run"):  # released on exit, so a later run can start
         pass
 
 
 def test_lock_is_released_when_the_run_raises(tmp_path):
     with pytest.raises(ValueError):
-        with run_lock(tmp_path):
+        with run_lock(tmp_path, "rpipe run"):
             raise ValueError("crash")
-    with run_lock(tmp_path):
+    with run_lock(tmp_path, "rpipe run"):
         pass
+
+
+def test_lock_records_holder(tmp_path):
+    with run_lock(tmp_path, "rpipe run"):
+        with pytest.raises(RunLocked) as exc:
+            with run_lock(tmp_path, "rpipe summarize"):
+                pass
+    assert exc.value.holder == "rpipe run"
+    assert "rpipe run" in str(exc.value)
+
+
+def test_lock_released_holder_cleared(tmp_path):
+    with run_lock(tmp_path, "rpipe run"):
+        assert (tmp_path / LOCK_NAME).read_text() == "rpipe run"
+    assert (tmp_path / LOCK_NAME).read_text() == ""
+    with run_lock(tmp_path, "rpipe summarize"):  # no raise
+        assert (tmp_path / LOCK_NAME).read_text() == "rpipe summarize"
+
+
+def test_lock_holder_cleared_after_exception(tmp_path):
+    with pytest.raises(ValueError):
+        with run_lock(tmp_path, "rpipe run"):
+            raise ValueError("crash")
+    assert (tmp_path / LOCK_NAME).read_text() == ""
+    with run_lock(tmp_path, "rpipe collect"):
+        pass
+
+
+def test_empty_lock_file_names_an_unknown_holder(tmp_path):
+    """A lock held by an older rpipe (which wrote nothing) still gives a readable message."""
+    import fcntl
+
+    with open(tmp_path / LOCK_NAME, "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(RunLocked) as exc:
+            with run_lock(tmp_path, "rpipe run"):
+                pass
+    assert exc.value.holder == "unknown"
 
 
 def test_run_exits_75_with_a_clear_message_when_locked(tmp_path):
     vault = tmp_path / "v"
     init_vault(vault, topics=["x"])
-    with run_lock(vault):
+    with run_lock(vault, "rpipe summarize"):
         res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
     assert res.exit_code == cli.RUN_LOCKED_EXIT == 75
     assert (
-        f"another `rpipe run` is already using {vault}; nothing was started."
+        f"rpipe summarize is already working on {vault}; nothing was started."
         " Wait for it to finish (see `rpipe runs`)."
-    ) in " ".join(res.output.split())
+    ) in " ".join(res.stderr.split())
     # nothing was started: no runs row was written
     conn = sqlite3.connect(vault / "vault.sqlite")
     assert conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == 0
@@ -69,3 +108,124 @@ def test_failing_finish_run_alone_still_surfaces(tmp_path, monkeypatch):
     # a crash in a stage is recorded, finish_run then fails with nothing else in flight... but the stage
     # crash was swallowed into `errors`, so finish_run's failure is the only error left and must surface
     assert isinstance(res.exception, sqlite3.OperationalError)
+
+
+# ---- interactive commands let go of the lock while they wait for you
+
+
+def _gold_add_setup(tmp_path, monkeypatch):
+    vault = tmp_path / "v"
+    init_vault(vault, topics=["x"])
+    monkeypatch.setattr(cli, "make_arxiv", lambda config: StubArxiv(by_id=[paper()]))
+    return vault
+
+
+def test_lock_is_free_while_a_prompt_waits(tmp_path, monkeypatch):
+    vault = _gold_add_setup(tmp_path, monkeypatch)
+    seen: list[str] = []
+
+    def nightly_run_tries(*args, **kwargs):
+        with run_lock(vault, "rpipe run"):  # raises RunLocked if gold add still held it
+            seen.append("free")
+        return kwargs.get("default", True)
+
+    answers = iter(["fact one", ""])
+    monkeypatch.setattr(cli.typer, "confirm", nightly_run_tries)
+    monkeypatch.setattr(cli.typer, "prompt", lambda *a, **k: nightly_run_tries() and next(answers))
+    res = runner.invoke(cli.app, ["gold", "add", "2307.15043", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen == ["free"] * 3  # "Add this paper?", then two facts
+    assert (vault / LOCK_NAME).read_text() == ""
+
+
+def test_lock_is_held_again_after_the_answer(tmp_path, monkeypatch):
+    vault = _gold_add_setup(tmp_path, monkeypatch)
+    holders: list[str] = []
+    real_add = cli.add_gold
+
+    def add_and_look(*args, **kwargs):
+        holders.append((vault / LOCK_NAME).read_text())
+        return real_add(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "add_gold", add_and_look)
+    res = runner.invoke(cli.app, ["gold", "add", "2307.15043", "--vault", str(vault)], input="y\nfact one\n\n")
+    assert res.exit_code == 0, res.output
+    assert holders == ["rpipe gold add"]
+
+
+def test_a_job_that_starts_during_a_prompt_stops_the_command(tmp_path, monkeypatch):
+    vault = _gold_add_setup(tmp_path, monkeypatch)
+    nightly = VaultLock(vault, "rpipe run")
+
+    def run_starts_meanwhile(*args, **kwargs):
+        nightly.acquire()  # the nightly run takes the lock while you read the question
+        return True
+
+    monkeypatch.setattr(cli.typer, "confirm", run_starts_meanwhile)
+    try:
+        res = runner.invoke(cli.app, ["gold", "add", "2307.15043", "--vault", str(vault)])
+    finally:
+        nightly.release()
+    assert res.exit_code == cli.RUN_LOCKED_EXIT
+    assert "rpipe run is already working" in res.stderr
+    assert "nothing further was started" in res.stderr
+
+
+def test_acquire_closes_the_file_when_flock_fails_oddly(tmp_path, monkeypatch):
+    import errno
+
+    from research_pipeline import run_lock as run_lock_module
+
+    opened = []
+    real_open = open
+
+    def spy_open(*a, **k):
+        handle = real_open(*a, **k)
+        opened.append(handle)
+        return handle
+
+    def broken_flock(handle, flags):
+        raise OSError(errno.ENOLCK, "No locks available")
+
+    monkeypatch.setattr(run_lock_module, "open", spy_open, raising=False)
+    monkeypatch.setattr(run_lock_module.fcntl, "flock", broken_flock)
+    lock = VaultLock(tmp_path, "rpipe run")
+    with pytest.raises(OSError) as info:
+        lock.acquire()
+    assert info.value.errno == errno.ENOLCK
+    assert len(opened) == 1 and opened[0].closed
+    assert not lock.held
+
+
+def test_acquire_closes_and_unlocks_when_writing_the_holder_fails(tmp_path, monkeypatch):
+    from research_pipeline import run_lock as run_lock_module
+
+    opened = []
+    real_open = open
+
+    class FailingWrite:
+        def __init__(self, handle):
+            self._h = handle
+
+        def __getattr__(self, name):
+            return getattr(self._h, name)
+
+        def fileno(self):
+            return self._h.fileno()
+
+        def write(self, text):
+            raise OSError(28, "No space left on device")
+
+    def spy_open(*a, **k):
+        handle = FailingWrite(real_open(*a, **k))
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(run_lock_module, "open", spy_open, raising=False)
+    lock = VaultLock(tmp_path, "rpipe run")
+    with pytest.raises(OSError, match="No space"):
+        lock.acquire()
+    assert opened[0]._h.closed and not lock.held
+    monkeypatch.undo()
+    with run_lock(tmp_path, "rpipe run"):  # the lock was let go of with the file
+        pass

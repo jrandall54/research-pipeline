@@ -52,9 +52,9 @@ Worked example. The service has `OLLAMA_HOST=127.0.0.1:11436` and `llm_url` is `
 
 With a proxy recognised, `rpipe model recommend` uses the service's settings in its context estimates, and `rpipe model tune` neither warns nor asks "Continue anyway?". After a restart it waits at `llm_url` (the proxy passes the answer through), and it re-measures the context as usual.
 
-**Why it's built this way.** Comparing model lists is a cheap, read-only question both addresses can answer, and two different Ollama servers almost never hold exactly the same models with the same fingerprints. Two empty lists prove nothing, so they do not count as a match. Rejected alternatives: asking the user to point `rpipe` straight at the service's port (that would skip the proxy, which the owner wants to keep), and comparing only the version number (two separate servers often run the same version).
+**Why it's built this way.** Comparing model lists is a cheap, read-only question both addresses can answer. It is not proof: a digest is a fingerprint of the model's contents, so two separate Ollama servers that pulled the same models also match (for example an `ollama serve` started by hand on 11434 next to the system service on 11436, sharing one models folder). `rpipe` accepts that because such a setup is rare and the only cost is small: the service's settings are taken as the ones `rpipe` uses, and `rpipe model tune` skips its "different server" warning. Two empty lists prove nothing, so they do not count as a match. Rejected alternatives: asking the user to point `rpipe` straight at the service's port (that would skip the proxy, which the owner wants to keep), and comparing only the version number (two separate servers often run the same version).
 
-**How to check it.** `rpipe model scan` prints the proxy line above. Tests: `uv run pytest tests/test_scan.py -q -k proxy`. Code: `ollama_tags`, `_own_url` and the check at the end of `detect_ollama_server` in `src/research_pipeline/scan.py`.
+**How to check it.** `rpipe model scan` prints the proxy line above. Tests: `uv run pytest tests/test_scan.py -q -k proxy`. Code: `ollama_tag_digests`, `_own_url` and the check at the end of `detect_ollama_server` in `src/research_pipeline/scan.py`.
 
 ## How it works: the catalog
 
@@ -223,7 +223,7 @@ The setup walkthrough (`rpipe model setup`) also shows the new facts (free memor
 
 ## Where the code is
 
-- `src/research_pipeline/scan.py`: the probes (`flash_on`, `detect_cpu`, `ram_free_gb`, `disk_free_gb`, `all_gpus`, `detect_ollama_server`, `ollama_tags`, `service_url`, `parse_systemd_env`, `ollama_models_dir`, `setting_source`). `service_url` (where to wait after a restart) moved here from `ollama_tune.py`, which still offers it under the old name.
+- `src/research_pipeline/scan.py`: the probes (`flash_on`, `detect_cpu`, `ram_free_gb`, `disk_free_gb`, `all_gpus`, `detect_ollama_server`, `ollama_tag_digests`, `service_url`, `parse_systemd_env`, `ollama_models_dir`, `setting_source`). `service_url` (where to wait after a restart) moved here from `ollama_tune.py`, which still offers it under the old name.
 - `src/research_pipeline/machine.py`: `MachineInfo` and `detect_machine`, which call the scan.
 - `src/research_pipeline/cli.py`: `model scan` and the report text.
 - `tests/test_scan.py`: the tests.

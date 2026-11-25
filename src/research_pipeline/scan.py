@@ -210,7 +210,7 @@ def ollama_version(url: str) -> str | None:
         return None
 
 
-def ollama_tags(url: str) -> list[tuple[str, str]] | None:
+def ollama_tag_digests(url: str) -> list[tuple[str, str]] | None:
     """The installed models as sorted (name, digest) pairs from GET /api/tags; None on any failure."""
     try:
         resp = httpx.get(f"{url}/api/tags", timeout=PROBE_TIMEOUT)
@@ -238,7 +238,7 @@ def machine_key(url: str, run: CmdRunner = system_cmd) -> dict:
     env: dict[str, str] = {}
     gpus: list[str] = []
     try:
-        server = detect_ollama_server(url, run, version=ollama_version, tags=ollama_tags)
+        server = detect_ollama_server(url, run, version=ollama_version, tags=ollama_tag_digests)
         version = server.version
         env = {k: server.env[k] for k in MACHINE_KEY_SETTINGS if k in server.env}
     except Exception:  # a key must never stop a run
@@ -308,7 +308,7 @@ def detect_ollama_server(
     url: str,
     run: CmdRunner,
     version: Callable[[str], str | None] = ollama_version,
-    tags: Callable[[str], list[tuple[str, str]] | None] = ollama_tags,
+    tags: Callable[[str], list[tuple[str, str]] | None] = ollama_tag_digests,
 ) -> OllamaServer:
     """How the Ollama server runs and which OLLAMA_* settings it was started with.
 

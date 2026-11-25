@@ -125,18 +125,18 @@ def test_same_port_does_not_call_tags():
     assert not route.called
 
 
-def test_ollama_tags_sorted_and_none_on_failure():
-    from research_pipeline.scan import ollama_tags
+def test_ollama_tag_digests_sorted_and_none_on_failure():
+    from research_pipeline.scan import ollama_tag_digests
     with respx.mock:
         respx.get("http://h:1/api/tags").mock(return_value=httpx.Response(
             200, json={"models": [{"name": "b", "digest": "2"}, {"name": "a", "digest": "1"}]}))
-        assert ollama_tags("http://h:1") == [("a", "1"), ("b", "2")]
+        assert ollama_tag_digests("http://h:1") == [("a", "1"), ("b", "2")]
     with respx.mock:
         respx.get("http://h:1/api/tags").mock(return_value=httpx.Response(200, text="not json"))
-        assert ollama_tags("http://h:1") is None
+        assert ollama_tag_digests("http://h:1") is None
     with respx.mock:
         respx.get("http://h:1/api/tags").mock(side_effect=httpx.ConnectError("down"))
-        assert ollama_tags("http://h:1") is None
+        assert ollama_tag_digests("http://h:1") is None
 
 
 def test_model_scan_prints_proxy_line(tmp_path, monkeypatch):
@@ -215,7 +215,7 @@ def test_model_scan_command_prints_sections(tmp_path, monkeypatch):
 def test_machine_key_collects_version_settings_and_gpus(monkeypatch):
     from research_pipeline import scan
     monkeypatch.setattr(scan, "ollama_version", lambda url: "0.6.0")
-    monkeypatch.setattr(scan, "ollama_tags", lambda url: None)
+    monkeypatch.setattr(scan, "ollama_tag_digests", lambda url: None)
     run = fake_run({
         "systemctl is-active ollama": (0, "active\n"),
         "systemctl show ollama --property=Environment": (0, ENV_LINE + "\n"),

@@ -295,3 +295,7 @@
 **Pass-through proxy** — a small program that sits between `rpipe` and Ollama and passes every request on unchanged, for example to count tokens. `rpipe` talks to the proxy's port, Ollama listens on another, but there is only one server. `rpipe model scan` recognises it when both addresses list the same models (same names and digests). See "When rpipe talks to Ollama through a proxy" in `hardware.md`.
 
 **Digest (of a model)** — a fingerprint of a model's files, a long code computed from their contents. Two models with the same name but different files have different digests, so comparing digests tells whether two servers hold exactly the same model. See `hardware.md`.
+
+**`needed_ctx`** — on a summary whose core text was cut (`body_cut`), the context window in tokens that would have fit that core text whole: its characters divided by 3, plus the 4,000 reserved, rounded up to a multiple of 1024. 300,000 characters of core text gives 104,448. Empty when nothing was cut. Used to find papers worth reading again at a bigger context. See `summaries.md`.
+
+**GPU share (`gpu_share`)** — how much of the model sat in GPU memory while it wrote a summary, from 0 to 1 (`1.0` = all of it; `0.93` = 7% spilled to ordinary RAM). Read from Ollama's list of loaded models and stored in the summary's provenance; empty when unknown or for a cloud backend. See `summaries.md`.

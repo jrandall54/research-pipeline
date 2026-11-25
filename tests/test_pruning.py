@@ -1,7 +1,7 @@
 import pytest
 
 from research_pipeline.models import Section
-from research_pipeline.pruning import classify, fit_to_budget
+from research_pipeline.pruning import CHARS_PER_TOKEN, NEEDED_STEP, RESERVED_TOKENS, _size, classify, fit_to_budget
 from research_pipeline.summary_models import Dropped
 
 
@@ -96,3 +96,24 @@ def test_degenerate_inputs():
     assert fit_to_budget([], 32768).sections == []
     fit = fit_to_budget([sec("References")], 32768)
     assert fit.sections == [] and fit.body_cut is False
+
+
+def test_needed_ctx_set_only_when_body_cut():
+    core = [sec("Abstract", 2000), sec("1 Introduction", 98_000), sec("4 Results", 200_000)]
+    secs = [*core, sec("Appendix A Proofs", 90_000), sec("References", 5000)]
+    core_chars = _size(core)  # titles included; appendix and references left out
+    fit = fit_to_budget(secs, 32768)
+    assert fit.body_cut is True
+    assert (CHARS_PER_TOKEN, RESERVED_TOKENS, NEEDED_STEP) == (3, 4000, 1024)
+    assert fit.needed_ctx == -(-(-(-core_chars // 3) + 4000) // 1024) * 1024
+    assert fit.needed_ctx % 1024 == 0 and fit.needed_ctx > 32768
+
+
+def test_needed_ctx_none_when_the_paper_fits():
+    assert fit_to_budget([sec("Abstract"), sec("1 Intro", 1000)], 32768).needed_ctx is None
+
+
+def test_needed_ctx_none_when_only_appendices_overflow():
+    secs = [sec("1 Intro", 50_000), sec("Appendix A Proofs", 90_000)]
+    fit = fit_to_budget(secs, 32768)
+    assert fit.body_cut is False and fit.needed_ctx is None

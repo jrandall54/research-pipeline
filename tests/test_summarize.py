@@ -1,5 +1,5 @@
 import pytest
-from conftest import SECTIONS, FakeLLM, critique, summary
+from conftest import SECTIONS, AlwaysSummary, FakeLLM, critique, summary
 
 from research_pipeline.llm import LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section
@@ -404,6 +404,44 @@ def test_provenance_records_backend(conn):
     llm.name, llm.model_name = "claude-code", "sonnet"
     run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
     assert get_provenance(conn, "2501.00001")["backend"] == "claude-code"
+
+
+def test_run_summarize_stores_gpu_share(conn):
+    from research_pipeline.db import get_provenance
+
+    class OnGpu(FakeLLM):
+        def gpu_share(self):
+            return 1.0
+
+    add_triaged(conn, "2501.00001")
+    run_summarize(conn, OnGpu([summary(), critique()]), lambda pid: SECTIONS, 32768)
+    assert get_provenance(conn, "2501.00001")["gpu_share"] == 1.0
+
+    add_triaged(conn, "2501.00002")
+    run_summarize(conn, FakeLLM([summary(), critique()]), lambda pid: SECTIONS, 32768)
+    prov = get_provenance(conn, "2501.00002")
+    assert "gpu_share" in prov and prov["gpu_share"] is None
+
+
+def test_run_summarize_survives_a_failing_gpu_share(conn):
+    from research_pipeline.db import get_provenance
+
+    class Broken(FakeLLM):
+        def gpu_share(self):
+            raise RuntimeError("boom")
+
+    add_triaged(conn, "2501.00001")
+    counts, errors = run_summarize(conn, Broken([summary(), critique()]), lambda pid: SECTIONS, 32768)
+    assert counts["summarized"] == 1 and errors == []
+    assert get_provenance(conn, "2501.00001")["gpu_share"] is None
+
+
+def test_summarize_paper_passes_needed_ctx():
+    big = [Section(title="1 Introduction", text="x" * 150_000), Section(title="2 Results", text="y" * 150_000)]
+    out = summarize_paper(AlwaysSummary([]), "T", "A", big, 32768)
+    assert out.body_cut is True and out.needed_ctx is not None and out.needed_ctx % 1024 == 0
+    small = summarize_paper(AlwaysSummary([]), "T", "A", SECTIONS, 32768)
+    assert small.needed_ctx is None
 
 
 # ---------------------------------------------------------------- backlog and explicit ids

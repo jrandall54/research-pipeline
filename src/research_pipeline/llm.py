@@ -142,6 +142,27 @@ class OllamaClient:
         )
         self.last_stats = stats or None
 
+    def gpu_share(self) -> float | None:
+        """Share of this model held in GPU memory now (`/api/ps` size_vram / size, 2 places).
+
+        None when the model is not loaded, the reply is odd, or Ollama cannot be reached;
+        it never raises (it only records where the model sat, see docs/guide/summaries.md).
+        """
+        try:
+            resp = httpx.get(f"{self.url}/api/ps", timeout=CHECK_TIMEOUT)
+            if resp.status_code >= 400:
+                return None
+            for m in resp.json().get("models", []):
+                names = {_with_tag(str(m.get(k))) for k in ("name", "model") if m.get(k)}
+                if _with_tag(self.model_name) in names:
+                    size, vram = m.get("size"), m.get("size_vram")
+                    if isinstance(size, int) and isinstance(vram, int) and size > 0:
+                        return round(min(vram, size) / size, 2)
+                    return None
+        except (httpx.HTTPError, ValueError, AttributeError, TypeError):
+            return None
+        return None
+
     def ping(self) -> None:
         """Raise LlmError (with a fix) unless the server answers; says nothing about models."""
         self._request("GET", "/api/tags", timeout=CHECK_TIMEOUT)

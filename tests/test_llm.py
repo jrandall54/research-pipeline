@@ -312,3 +312,21 @@ def test_require_local_blocks_non_local_and_unknown():
     for llm in (Cloud(), Unknown()):
         with pytest.raises(PrivacyError, match="your shelf never leaves this machine"):
             require_local(llm, "your shelf")
+
+
+@respx.mock
+def test_gpu_share_from_ps():
+    llm = OllamaClient(URL, "m", num_ctx=32768)
+    route = respx.get(f"{URL}/api/ps")
+    route.mock(return_value=httpx.Response(200, json={"models": [
+        {"name": "other:latest", "size": 1000, "size_vram": 0},
+        {"name": "m:latest", "size": 1000, "size_vram": 930},
+    ]}))
+    assert llm.gpu_share() == 0.93
+    route.mock(return_value=httpx.Response(200, json={"models": [
+        {"name": "other:latest", "size": 1000, "size_vram": 1000}]}))
+    assert llm.gpu_share() is None
+    route.mock(return_value=httpx.Response(500, text="boom"))
+    assert llm.gpu_share() is None
+    route.mock(side_effect=httpx.ConnectError("down"))
+    assert llm.gpu_share() is None

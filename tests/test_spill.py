@@ -22,9 +22,10 @@ from research_pipeline.db import (
     save_summary,
     upsert_paper,
 )
-from research_pipeline.llm import LlmError, LlmTimeout, OllamaClient
+from research_pipeline.llm import CALL_TIMEOUT, LlmError, LlmTimeout, OllamaClient
 from research_pipeline.models import PaperMeta
 from research_pipeline.progress import ListReporter
+from research_pipeline.summarize import TIMEOUT_STOPPED
 from research_pipeline.summary_models import PaperSummary
 from research_pipeline.vault import init_vault
 
@@ -45,8 +46,10 @@ class SpillOllama:
         self.others: list[str] = []  # other models listed as loaded
         self.generate_calls: list[dict] = []
         self.squeeze = 0  # bytes of GPU memory lost on a spilled load (a lying estimate)
+        self.show_calls = 0
 
     def show(self, request):
+        self.show_calls += 1
         return httpx.Response(200, json={"model_info": {"qwen3.context_length": self.trained},
                                          "capabilities": ["completion"]})
 
@@ -102,11 +105,11 @@ def cut(needed, body_cut=True):
                         body_cut=body_cut, needed_ctx=needed if body_cut else None, unverified=[])
 
 
-def add_cut(conn, pid, needed, ran=FIT, body_cut=True, provenance=True):
+def add_cut(conn, pid, needed, ran=FIT, body_cut=True, provenance=True, backend="ollama"):
     upsert_paper(conn, PaperMeta(id=pid, title=f"Title {pid}", abstract="An abstract.",
                                  source="arxiv", url=f"https://arxiv.org/abs/{pid}"))
     save_fulltext(conn, pid, SECTIONS)
-    kw = dict(prompt_version="v", paper_version=1, num_ctx=ran, backend="ollama",
+    kw = dict(prompt_version="v", paper_version=1, num_ctx=ran, backend=backend,
               gpu_share=1.0) if provenance else {}
     save_summary(conn, pid, cut(needed, body_cut), MODEL, **kw)
     conn.commit()
@@ -164,6 +167,12 @@ def test_bucket_is_capped_at_the_model_cap(conn):
 def test_candidates_ignore_old_rows(conn):
     add_cut(conn, "2501.00001", 61440, provenance=False)
     add_cut(conn, "2501.00002", None)  # cut, but from before needed_ctx was recorded
+    assert spill.rerun_candidates(conn, 131072) == []
+
+
+def test_cloud_summaries_are_not_candidates(conn):
+    add_cut(conn, "2501.00001", 61440, backend="claude-code")
+    add_cut(conn, "2501.00002", 61440, backend=None)
     assert spill.rerun_candidates(conn, 131072) == []
 
 
@@ -238,8 +247,84 @@ def test_no_reruns_after_deadline(conn, tmp_path, ollama, monkeypatch):
     reporter = ListReporter()
     counts, errors = run(conn, tmp_path, None, reporter=reporter)
     assert counts == {"rerun": 0, "rerun_waiting": 2}
-    assert ollama.generate_calls == []
+    assert ollama.generate_calls == [] and ollama.show_calls == 0  # Ollama is not asked anything
     assert len([e for e in reporter.events if e.kind == "note"]) == 1
+    assert [e.outcome for e in reporter.events if e.kind == "step"] == ["waiting", "waiting"]
+
+
+def test_no_reruns_after_the_model_timed_out(conn, tmp_path, ollama, monkeypatch):
+    add_cut(conn, "2501.00001", 61440)
+    fake = fake_summarize()
+    monkeypatch.setattr(spill, "summarize_paper", fake)
+    reporter = ListReporter()
+    counts, _ = spill.run_reruns(conn, llm(), tmp_path, START + timedelta(hours=3),
+                                 reporter=reporter, now=Clock(), ram_free=lambda: 32.0,
+                                 model_timed_out=True)
+    assert counts == {"rerun": 0, "rerun_waiting": 1}
+    assert ollama.generate_calls == [] and fake.calls == []
+    assert any("timed out" in e.label for e in reporter.events if e.kind == "note")
+
+
+def test_loads_never_wait_longer_than_one_call(conn, tmp_path, ollama, monkeypatch):
+    add_cut(conn, "2501.00001", 61440)
+    save_test_bench(tmp_path)
+    monkeypatch.setattr(spill, "summarize_paper", fake_summarize(Clock()))
+    timeouts = []
+    real = spill._load
+    monkeypatch.setattr(spill, "_load", lambda u, m, c, t: timeouts.append(t) or real(u, m, c, t))
+    run(conn, tmp_path, START + timedelta(hours=10))
+    assert timeouts == [CALL_TIMEOUT] * 3  # normal context, 8192, the bucket
+
+
+def test_each_call_gets_only_the_time_left(conn, tmp_path, ollama, monkeypatch):
+    add_cut(conn, "2501.00001", 61440)
+    clock = Clock()
+    seen = []
+
+    def slow(llm, title, abstract, sections, num_ctx, on_phase=None):
+        on_phase("summary")
+        seen.append(llm.timeout)
+        clock.t += timedelta(minutes=30)
+        on_phase("critique")
+        seen.append(llm.timeout)
+        return cut(None, body_cut=False)
+
+    monkeypatch.setattr(spill, "summarize_paper", slow)
+    run(conn, tmp_path, START + timedelta(minutes=90), clock)
+    assert seen == [90 * 60, 60 * 60]
+
+
+def test_ram_allowance_is_free_ram_minus_margin_only(conn, tmp_path, ollama, monkeypatch):
+    add_cut(conn, "2501.00001", 61440)  # bucket 65536: 0.82 GB estimated, 0.55 GB really in RAM
+    add_cut(conn, "2501.00002", 90112)  # bucket 90112: 3.28 GB estimated
+    save_test_bench(tmp_path)
+    fake = fake_summarize(Clock())
+    monkeypatch.setattr(spill, "summarize_paper", fake)
+    # 2.9 GiB = 3.11 GB may be used: enough for the first bucket, not the second, even though
+    # the model already holds 0.55 GB of RAM when the second is checked (no add-back).
+    counts, _ = run(conn, tmp_path, START + timedelta(hours=3), ram=6.9)
+    assert counts == {"rerun": 1, "rerun_waiting": 1}
+    assert ollama.loads_at(90112) == []
+
+
+def test_unexpected_error_keeps_counts_so_far(conn, tmp_path, ollama, monkeypatch):
+    add_cut(conn, "2501.00001", 61440)
+    add_cut(conn, "2501.00002", 90112)
+    save_test_bench(tmp_path)
+    monkeypatch.setattr(spill, "summarize_paper", fake_summarize(Clock()))
+    real, calls = spill.ram_part_bytes, []
+
+    def flaky(*a):
+        calls.append(a)
+        if len(calls) == 2:
+            raise RuntimeError("boom")
+        return real(*a)
+
+    monkeypatch.setattr(spill, "ram_part_bytes", flaky)
+    counts, errors = run(conn, tmp_path, START + timedelta(hours=3))
+    assert counts == {"rerun": 1, "rerun_waiting": 1}
+    assert errors == ["rerun: RuntimeError: boom"]
+    assert not ollama.loaded
 
 
 def test_deadline_stops_midway(conn, tmp_path, ollama, monkeypatch):
@@ -261,8 +346,10 @@ def test_first_rerun_needs_the_margin_without_bench(conn, tmp_path, ollama, monk
     add_cut(conn, "2501.00001", 61440)
     fake = fake_summarize()
     monkeypatch.setattr(spill, "summarize_paper", fake)
-    counts, _ = run(conn, tmp_path, START + timedelta(minutes=59))
+    reporter = ListReporter()
+    counts, _ = run(conn, tmp_path, START + timedelta(minutes=59), reporter=reporter)
     assert counts == {"rerun": 0, "rerun_waiting": 1} and fake.calls == []
+    assert [e.outcome for e in reporter.events if e.kind == "step"] == ["waiting"]
     assert ollama.generate_calls == []  # nothing loaded when even the first cannot start
 
 
@@ -412,6 +499,17 @@ def test_ollama_backend_runs_reruns_and_reports_them(vault, monkeypatch):
     assert seen["vault"] == vault
     first = next((vault / "digests").glob("*.md")).read_text().splitlines()[0]
     assert " · rerun 2 · rerun waiting 1" in first
+
+
+def test_normal_pass_timeout_tells_reruns_the_model_is_hung(vault, monkeypatch):
+    install(monkeypatch, "ollama")
+    monkeypatch.setattr(cli, "run_summarize", lambda *a, **k: ({}, [TIMEOUT_STOPPED]))
+    seen = {}
+    monkeypatch.setattr(cli, "run_reruns",
+                        lambda *a, **k: seen.update(k) or ({"rerun_waiting": 1}, []))
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["model_timed_out"] is True
 
 
 def test_rerun_crash_becomes_an_error_line_and_digest_is_written(vault, monkeypatch):

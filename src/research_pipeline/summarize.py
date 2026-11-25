@@ -26,6 +26,11 @@ from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summ
 
 T = TypeVar("T", Summary, Critique)
 
+# The error line when the model timed out and the stage stopped (`rpipe run` then skips reruns).
+TIMEOUT_STOPPED = (
+    "summarize: stopped calling the model after the first timeout; remaining papers show abstracts only"
+)
+
 
 def _norm(title: str) -> str:
     return title.strip().casefold()
@@ -258,9 +263,6 @@ def run_summarize(
                 report("failed", " ".join(message.split())[:120])
                 if isinstance(exc, LlmTimeout):
                     # A hung model would make every remaining paper wait out the full timeout.
-                    errors.append(
-                        "summarize: stopped calling the model after the first timeout;"
-                        " remaining papers show abstracts only"
-                    )
+                    errors.append(TIMEOUT_STOPPED)
                     break
     return counts, errors

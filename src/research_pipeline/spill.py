@@ -23,7 +23,7 @@ import httpx
 
 from research_pipeline.bench import load_benches
 from research_pipeline.db import get_fulltext, get_paper, save_summary
-from research_pipeline.llm import CHECK_TIMEOUT, LlmError, LlmTimeout, OllamaClient
+from research_pipeline.llm import CALL_TIMEOUT, CHECK_TIMEOUT, LlmError, LlmTimeout, OllamaClient
 from research_pipeline.ollama_fit import CONTEXT_CEILING, unload
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import PROMPT_VERSION
@@ -53,7 +53,7 @@ def _int(value: object) -> int | None:
 def rerun_candidates(conn: sqlite3.Connection, model_cap: int) -> list[Rerun]:
     """Stored summaries that were cut and could be read whole (or at least at more context).
 
-    A candidate has `body_cut`, a recorded `needed_ctx`, and provenance showing it ran at a
+    A candidate has `body_cut`, a recorded `needed_ctx`, and Ollama provenance showing it ran at a
     context below both what it needs and the model's cap (one already run at the cap is not
     retried forever). Rows from before these were recorded are ignored. Sorted by needed
     context, newest digest first among equals.
@@ -74,6 +74,8 @@ def rerun_candidates(conn: sqlite3.Connection, model_cap: int) -> list[Rerun]:
         prov = data.get("provenance")
         needed = _int(data.get("needed_ctx"))
         ran = _int(prov.get("num_ctx")) if isinstance(prov, dict) else None
+        if not isinstance(prov, dict) or prov.get("backend") != "ollama":
+            continue  # only local summaries: a cloud backend reads long papers whole already
         if needed is None or ran is None or ran >= needed or ran >= model_cap:
             continue
         out.append(Rerun(row["paper_id"], needed, ran))
@@ -180,16 +182,20 @@ def run_reruns(
     reporter: Reporter | None = None,
     now: Callable[[], datetime] = datetime.now,
     ram_free: Callable[[], float | None] = lambda: ram_free_gb(platform.system()),
+    model_timed_out: bool = False,
 ) -> tuple[dict[str, int], list[str]]:
     """Rerun cut papers at a bigger context, within free RAM and before `deadline`.
 
     Returns counts {"rerun": papers rerun, "rerun_waiting": candidates left for a later
     night} and error lines (`rerun ID: ...` for a paper, `rerun: ...` for the stage). A failed
     rerun keeps the old summary and changes no retry count; a timeout stops the stage.
+    `model_timed_out=True` (the normal pass stopped on a timeout) means a hung model: nothing
+    is loaded and all candidates wait. With no deadline Ollama is not asked anything.
     `now` and `ram_free` are injectable for tests. See docs/guide/running.md.
     """
     url, model, fit_ctx = llm.url, llm.model_name, llm.num_ctx
-    cap = _model_cap(url, model)
+    # With no deadline nothing runs, so Ollama is not even asked for the model's limit.
+    cap = _model_cap(url, model) if deadline is not None and not model_timed_out else CONTEXT_CEILING
     candidates = rerun_candidates(conn, cap)
     total = len(candidates)
     errors: list[str] = []
@@ -197,11 +203,16 @@ def run_reruns(
     if not candidates:
         return {"rerun": 0, "rerun_waiting": 0}, errors
 
+    order = [r for _, group in buckets(candidates, cap) for r in group]
     with stage(reporter, "rerun", total=total) as handle:
         def waiting(why: str) -> tuple[dict[str, int], list[str]]:
             handle.note(f"{total} cut paper{'s' if total != 1 else ''} wait for a later night: {why}")
+            for i, r in enumerate(order, start=1):
+                handle.step(r.paper_id, current=i, outcome="waiting", detail=f"needs {r.needed_ctx} tokens")
             return {"rerun": 0, "rerun_waiting": total}, errors
 
+        if model_timed_out:
+            return waiting("the model timed out earlier tonight, so it may be hung")
         if deadline is None:
             return waiting("no deadline tonight (reruns only start within 12 hours of the "
                            "morning deadline; see `rpipe schedule show`)")
@@ -211,7 +222,6 @@ def run_reruns(
         if ram_free() is None:
             return waiting("free RAM cannot be read on this system, so a spill could not be kept safe")
 
-        order = [r for _, group in buckets(candidates, cap) for r in group]
         handled: set[str] = set()
         loaded = False
         s_per_token: float | None = None
@@ -221,6 +231,10 @@ def run_reruns(
 
         def left() -> float:
             return (deadline - now()).total_seconds()
+
+        def load_timeout() -> float:
+            # A load is not a paper: it never gets more than one normal call's limit.
+            return min(max(MIN_CALL_TIMEOUT, left()), CALL_TIMEOUT)
 
         def time_ok(r: Rerun) -> bool:
             if s_per_token is None:
@@ -236,11 +250,10 @@ def run_reruns(
 
             handle.note(f"measuring memory use of {model} at {fit_ctx} and {MEASURE_CTX} tokens")
             loaded = True
-            _load(url, model, fit_ctx, max(MIN_CALL_TIMEOUT, left()))
+            _load(url, model, fit_ctx, load_timeout())
             s_fit, v_fit = _sizes(url, model)
-            _load(url, model, MEASURE_CTX, max(MIN_CALL_TIMEOUT, left()))
-            s_8k, v_now = _sizes(url, model)
-            in_ram = s_8k - v_now
+            _load(url, model, MEASURE_CTX, load_timeout())
+            s_8k, _ = _sizes(url, model)
 
             index = 0
             stop = False
@@ -253,14 +266,15 @@ def run_reruns(
                 if free is None:
                     handle.note("free RAM could not be read; stopping reruns")
                     break
-                allowed = (free - RAM_SAFETY_GB) * GIB + in_ram
+                # Read fresh before each bucket; never plan to use the last RAM_SAFETY_GB.
+                allowed = (free - RAM_SAFETY_GB) * GIB
                 need = ram_part_bytes(ctx, fit_ctx, s_fit, v_fit, s_8k)
                 if need > allowed:
                     handle.note(f"a context of {ctx} tokens needs about {_gib(need)} of RAM, "
                                 f"only {_gib(max(0, allowed))} can be spared; stopping reruns")
                     break
                 handle.note(f"loading {model} at {ctx} tokens ({_gib(max(0, need))} in RAM)")
-                _load(url, model, ctx, max(MIN_CALL_TIMEOUT, left()))
+                _load(url, model, ctx, load_timeout())
                 size, vram = _sizes(url, model)
                 in_ram = size - vram
                 if in_ram > allowed:
@@ -286,6 +300,8 @@ def run_reruns(
                                               timeout=max(MIN_CALL_TIMEOUT, left()))
 
                         def on_phase(name: str) -> None:
+                            # Each call gets only the time left now, not the paper's start budget.
+                            client.timeout = max(MIN_CALL_TIMEOUT, left())  # noqa: B023
                             what = {"summary": "writing the summary for",
                                     "critique": "writing the critique for"}
                             handle.note(f"{what.get(name, 'retrying citations for')} {r.paper_id}")  # noqa: B023
@@ -314,9 +330,11 @@ def run_reruns(
                                 detail=f"{ctx} tokens, {took:.0f}s")
                 if stop:
                     break
-        except LlmError as exc:
-            errors.append(f"rerun: {' '.join(str(exc).split())}")
-            handle.note(f"stopped reruns: {exc}")
+        except Exception as exc:  # noqa: BLE001 - keep the counts earned so far; never stop the digest
+            msg = " ".join((str(exc) if isinstance(exc, LlmError)
+                            else f"{type(exc).__name__}: {exc}").split())
+            errors.append(f"rerun: {msg}")
+            handle.note(f"stopped reruns: {msg}")
         finally:
             if loaded:
                 unload(url, model, handle.note)

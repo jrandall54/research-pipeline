@@ -106,7 +106,7 @@ from research_pipeline.shelf import add_to_shelf, remove_from_shelf, sync_shelf
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.spill import run_reruns
-from research_pipeline.summarize import run_summarize
+from research_pipeline.summarize import TIMEOUT_STOPPED, run_summarize
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
     DEFAULT_TOPICS,
@@ -500,6 +500,7 @@ def _run_locked(ctx: _Context) -> None:
                                         ctx.conn, llm, ctx.vault,
                                         schedule.deadline_at(datetime.now(), ctx.config.night_deadline),
                                         reporter=reporter,
+                                        model_timed_out=TIMEOUT_STOPPED in sum_errors,
                                     )
                                 counts |= rerun_counts
                                 errors += rerun_errors

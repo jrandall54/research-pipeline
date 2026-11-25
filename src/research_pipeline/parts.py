@@ -38,6 +38,9 @@ FRONT_WORDS: tuple[str, ...] = (
 )
 # Rounds of condensing before the notes are trimmed and the result marked body_cut (Decision 5).
 MAX_CONDENSE_ROUNDS = 3
+# Smallest context a paper is read in parts at: the config's floor for `llm_num_ctx`. Below it a
+# chunk would be a few characters and the combine prompt could not fit its own instructions.
+MIN_PARTS_CTX = 8192
 
 Group = tuple[Focus, list[Section]]
 
@@ -61,7 +64,9 @@ def split_groups(sections: list[Section], num_ctx: int) -> tuple[list[Group], li
     only if body plus appendices fit one call's budget; otherwise they are dropped with reason
     ``appendix``. A subsection (``1.1``) goes with its parent (``1 Introduction``). If the
     headings give no front matter or no body, the whole paper is one ``general`` group, which
-    is then read in size-based chunks.
+    is then read in size-based chunks. Only top-level sections (``4 Discussion``) and unnumbered
+    ones are sorted by their heading words: a numbered subsection always goes with its parent,
+    so ``4.3 Discussion`` under ``4 Experiments`` stays in the body.
     """
     paper, appendix, _ = partition(sections)
     budget = _budget(num_ctx)
@@ -70,12 +75,12 @@ def split_groups(sections: list[Section], num_ctx: int) -> tuple[list[Group], li
     front_keys: list[str] = []
     for s in paper:
         num = _number(s.title)
-        if _words(s.title).startswith(FRONT_WORDS):
+        if num is not None and "." in num:  # a subsection: goes where its parent went
+            (front if any(num.startswith(k + ".") for k in front_keys) else body).append(s)
+        elif _words(s.title).startswith(FRONT_WORDS):
             front.append(s)
             if num is not None:
                 front_keys.append(num)
-        elif num is not None and any(num.startswith(k + ".") for k in front_keys):
-            front.append(s)
         else:
             body.append(s)
 
@@ -197,8 +202,11 @@ def read_in_parts(
     `MAX_CONDENSE_ROUNDS`, then trimmed and marked ``body_cut``), then combined
     (``summary``, ``critique``). ``retry`` is told before a citation retry.
     ``dropped`` (what the caller left out) is recorded as given.
-    Raises LlmError if the model fails, ValueError if there is nothing to read.
+    Raises LlmError if the model fails, ValueError if there is nothing to read or ``num_ctx``
+    is below `MIN_PARTS_CTX`.
     """
+    if num_ctx < MIN_PARTS_CTX:
+        raise ValueError(f"reading in parts needs a context of at least {MIN_PARTS_CTX} tokens, got {num_ctx}")
     chunks = [(focus, c) for focus, secs in groups for c in chunk_to_budget(secs, num_ctx)]
     if not chunks:
         raise ValueError("nothing to read in parts")

@@ -234,3 +234,29 @@ def test_condense_gives_up_after_three_rounds():
     _, user = llm.calls[-1]
     block = user[user.index("<notes>"): user.index("</notes>") + len("</notes>")]
     assert len(block) <= b
+
+
+# --- B.6 Task 3 rulings -------------------------------------------------------------------
+
+
+def test_numbered_subsection_of_body_stays_in_body():
+    groups, _ = split_groups([S("Abstract"), S("1 Introduction"), S("4 Experiments"),
+                              S("4.3 Discussion"), S("5 Analysis"), S("5.2 Summary"),
+                              S("6 Conclusion")], 32768)
+    assert [(f, [s.title for s in g]) for f, g in groups] == [
+        ("front", ["Abstract", "1 Introduction", "6 Conclusion"]),
+        ("body", ["4 Experiments", "4.3 Discussion", "5 Analysis", "5.2 Summary"])]
+
+
+def test_unnumbered_and_top_level_front_words_still_count():
+    groups, _ = split_groups([S("Introduction"), S("2 Method"), S("Discussion"), S("7 Limitations")], 32768)
+    assert [(f, [s.title for s in g]) for f, g in groups] == [
+        ("front", ["Introduction", "Discussion", "7 Limitations"]), ("body", ["2 Method"])]
+
+
+def test_read_in_parts_refuses_a_context_below_the_floor():
+    import pytest
+
+    with pytest.raises(ValueError, match="8192"):
+        read_in_parts(FakeLLM([]), "T", [("general", [S("1 A")])], 8191,
+                      read_mode="split", dropped=[])

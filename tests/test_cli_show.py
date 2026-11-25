@@ -104,3 +104,32 @@ def test_show_prints_summary_and_critique(vault):
     conn.close()
     r = run(vault, "show", "2401.00003")
     assert "Summary line here" in r.output and "Distinctive claim text" in r.output
+
+
+def _save(vault, pid, **kw):
+    c = Claim(text="t", sections=["Abstract"])
+    conn = open_db(vault / "vault.sqlite")
+    save_summary(conn, pid, PaperSummary(
+        summary=Summary(one_line="o", problem=c, approach=c, results=c, limitations=c),
+        critique=Critique(strengths=[c], weaknesses=[], questions=[]),
+        basis="full_text", unverified=[], **kw), "m")
+    conn.commit()
+    conn.close()
+
+
+@pytest.mark.parametrize(("mode", "parts", "line"), [
+    ("split", 3, "read in parts: split, 3 notes calls"),
+    ("map_reduce", 5, "read in parts: map-reduce, 5 notes calls"),
+])
+def test_show_says_when_a_paper_was_read_in_parts(vault, mode, parts, line):
+    _save(vault, "2401.00003", read_mode=mode, parts=parts)
+    r = run(vault, "show", "2401.00003")
+    assert r.exit_code == 0, r.output
+    assert line in r.output
+
+
+def test_show_is_silent_about_whole_reads(vault):
+    _save(vault, "2401.00003")
+    r = run(vault, "show", "2401.00003")
+    assert r.exit_code == 0, r.output
+    assert "read in parts" not in r.output

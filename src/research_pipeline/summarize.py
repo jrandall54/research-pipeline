@@ -15,15 +15,22 @@ from research_pipeline.citations import claims, generate_checked, unknown_citati
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.llm import LLM, LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section, Status
+from research_pipeline.parts import MIN_PARTS_CTX, read_in_parts, split_groups
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import (
     PROMPT_VERSION,
     build_critique_prompt,
     build_summary_prompt,
 )
-from research_pipeline.pruning import fit_to_budget
+from research_pipeline.pruning import fit_to_budget, partition
 from research_pipeline.sources.base import SourceError
-from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary  # noqa: F401 (re-exported)
+from research_pipeline.summary_models import (  # noqa: F401 (re-exported)
+    Claim,
+    Critique,
+    Dropped,
+    PaperSummary,
+    Summary,
+)
 
 # The error line when the model timed out and the stage stopped (`rpipe run` then skips reruns).
 TIMEOUT_STOPPED = (
@@ -43,21 +50,67 @@ def _gpu_share(llm: LLM) -> float | None:
     return share if isinstance(share, (int, float)) and not isinstance(share, bool) else None
 
 
+def phase_note(name: str, pid: str) -> str:
+    """Progress note for a phase `summarize_paper` reports (``notes 2/3`` → reading part 2 of 3)."""
+    if name.startswith("notes "):
+        part, of = name.removeprefix("notes ").split("/")
+        return f"reading part {part} of {of} of {pid}"
+    label = {"summary": "writing the summary for", "critique": "writing the critique for",
+             "condense": "condensing notes for"}
+    return f"{label.get(name, 'retrying citations for')} {pid}"
+
+
 def summarize_paper(
     llm: LLM, title: str, abstract: str, sections: list[Section] | None, num_ctx: int,
     on_phase: Callable[[str], None] | None = None,
+    *,
+    mode: Literal["whole", "split"] = "whole",
+    fallback_above: int | None = None,
 ) -> PaperSummary:
     """Summary and critique of one paper. ``sections=None`` means abstract only.
 
+    ``mode="whole"`` reads the paper in one call per output (cut to fit the context if needed).
+    ``mode="split"`` reads front matter and body as separate parts, then combines the notes
+    (parts.py). An abstract-only paper, a paper with no paper sections left after pruning, or a
+    context below `MIN_PARTS_CTX` is always read whole.
+    In whole mode, a paper whose core text had to be cut is read in size-based parts instead
+    (map-reduce, appendices left out) when the context it needs is above ``fallback_above``;
+    ``None`` never falls back (reruns pass it: they exist to read papers whole), ``0`` always
+    does. See "Reading a paper in parts" in docs/guide/summaries.md.
+
     ``on_phase(name)`` is told ``summary`` and ``critique``, and ``retry`` when a
-    citation retry runs, just before each model call.
+    citation retry runs, just before each model call; reading in parts also tells it
+    ``notes i/N`` and ``condense``.
 
     Raises LlmError if the model fails; a bad citation never raises, it is flagged.
     """
     basis: Literal["full_text", "abstract"] = "full_text"
     if sections is None:
         sections, basis = [Section(title="Abstract", text=abstract)], "abstract"
+    in_parts_ok = basis == "full_text" and num_ctx >= MIN_PARTS_CTX
+
+    if mode == "split" and in_parts_ok:
+        groups, dropped = split_groups(sections, num_ctx)
+        if any(secs for _, secs in groups):  # else nothing but non-paper text: read it whole
+            return read_in_parts(llm, title, groups, num_ctx, read_mode="split",
+                                 dropped=dropped, on_phase=on_phase)
+
     fit = fit_to_budget(sections, num_ctx)
+    if (in_parts_ok and fit.body_cut and fallback_above is not None
+            and fit.needed_ctx is not None and fit.needed_ctx > fallback_above):
+        # No rerun can read this paper whole: read all of its core text in parts instead.
+        paper, appendix, _ = partition(sections)
+        if paper:
+            # Left out, in paper order: non-paper text, and the appendices (core text first).
+            read, is_appendix = {id(s) for s in paper}, {id(s) for s in appendix}
+            dropped = [
+                Dropped(title=s.title, chars=len(s.title) + len(s.text),
+                        reason="appendix" if id(s) in is_appendix else "non_paper")
+                for s in sections if id(s) not in read
+            ]
+            return read_in_parts(llm, title, [("general", paper)], num_ctx, read_mode="map_reduce",
+                                 dropped=dropped, on_phase=on_phase)
+
     fitted = fit.sections
     titles = [s.title for s in fitted]
 
@@ -96,6 +149,8 @@ def run_summarize(
     *,
     reporter: Reporter | None = None,
     refetch: bool = False,
+    mode: Literal["whole", "split"] = "whole",
+    fallback_above: int | None = None,
 ) -> tuple[dict[str, int], list[str]]:
     """Summarise the papers that need it: full text (stored, else fetched), then the model.
 
@@ -116,6 +171,8 @@ def run_summarize(
     ``refetch=True`` (needs ``paper_ids``) re-downloads and re-parses each paper's full text
     and replaces the stored sections first; if the HTML is no longer usable the stored text
     is kept (else the abstract is used) and a note is added to the errors.
+    ``mode`` and ``fallback_above`` are passed to `summarize_paper` for every paper; counts
+    ``in_parts`` the papers that fell back to map-reduce (cut papers read in parts).
     See docs/guide/running.md.
     """
     if refetch and paper_ids is None:
@@ -134,7 +191,8 @@ def run_summarize(
         set_status,
     )
 
-    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "body_cut": 0, "summary_failed": 0}
+    counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "body_cut": 0, "summary_failed": 0,
+              "in_parts": 0}
     errors: list[str] = []
     today = today or date.today()
     if paper_ids is not None:
@@ -186,11 +244,11 @@ def run_summarize(
                     set_status(conn, pid, Status.fetched)
                 counts["fetched" if sections is not None else "abstract_only"] += 1
                 def on_phase(name: str) -> None:
-                    label = {"summary": "writing the summary for", "critique": "writing the critique for"}
-                    handle.note(f"{label.get(name, 'retrying citations for')} {pid}")  # noqa: B023
+                    handle.note(phase_note(name, pid))  # noqa: B023
 
                 result = summarize_paper(
-                    llm, paper["title"], paper["abstract"], sections, num_ctx, on_phase=on_phase
+                    llm, paper["title"], paper["abstract"], sections, num_ctx, on_phase=on_phase,
+                    mode=mode, fallback_above=fallback_above,
                 )
                 save_summary(
                     conn, pid, result, llm.model_name,
@@ -204,6 +262,7 @@ def run_summarize(
                     set_status(conn, pid, Status.summarized)  # commits the summary rows too
                 counts["summarized"] += 1
                 counts["body_cut"] += int(result.body_cut)
+                counts["in_parts"] += int(result.read_mode == "map_reduce")
                 report("done")
             except LlmLimitReached:
                 # Not the paper's fault: no retry is burned, it stays queued for the next run.

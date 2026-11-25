@@ -119,8 +119,9 @@ def fake_summarize(clock=None, advance=timedelta(minutes=5), fail=None):
     """Stand-in for summarize_paper: records the context, moves the clock, returns an uncut summary."""
     calls = []
 
-    def run(llm, title, abstract, sections, num_ctx, on_phase=None):
+    def run(llm, title, abstract, sections, num_ctx, on_phase=None, **kw):
         calls.append((title, llm.num_ctx, num_ctx, llm.timeout))
+        run.kwargs.append(kw)
         if clock is not None:
             clock.t += advance
         if fail is not None and fail(title):
@@ -128,6 +129,7 @@ def fake_summarize(clock=None, advance=timedelta(minutes=5), fail=None):
         return cut(None, body_cut=False)
 
     run.calls = calls
+    run.kwargs = []
     return run
 
 
@@ -221,6 +223,23 @@ def test_reruns_happy_path(conn, tmp_path, ollama, monkeypatch):
     assert reporter.events[0].stage == "rerun" and reporter.events[0].total == 2
 
 
+def test_rerun_never_falls_back(conn, tmp_path, ollama, monkeypatch):
+    # A rerun exists to read the paper whole: it must never be sent to map-reduce instead.
+    add_cut(conn, "2501.00001", 61440)
+    save_test_bench(tmp_path)
+    fake = fake_summarize(Clock())
+    monkeypatch.setattr(spill, "summarize_paper", fake)
+    counts, _ = run(conn, tmp_path, START + timedelta(hours=3))
+    assert counts["rerun"] == 1
+    assert fake.kwargs == [{"fallback_above": None}]
+
+
+def test_model_cap_is_public(ollama):
+    assert spill.model_cap(URL, MODEL) == 131072
+    ollama.trained = 65536
+    assert spill.model_cap(URL, MODEL) == 65536
+
+
 def test_rerun_context_is_capped_at_the_trained_context(conn, tmp_path, ollama, monkeypatch):
     ollama.trained = 65536
     add_cut(conn, "2501.00001", 90112)
@@ -281,7 +300,7 @@ def test_each_call_gets_only_the_time_left(conn, tmp_path, ollama, monkeypatch):
     clock = Clock()
     seen = []
 
-    def slow(llm, title, abstract, sections, num_ctx, on_phase=None):
+    def slow(llm, title, abstract, sections, num_ctx, on_phase=None, **kw):
         on_phase("summary")
         seen.append(llm.timeout)
         clock.t += timedelta(minutes=30)

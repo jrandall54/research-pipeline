@@ -385,6 +385,8 @@ def health_line(
         extras += f" · abstract-only {counts['abstract_only']}"
     if counts.get("body_cut"):
         extras += f" · body cut {counts['body_cut']}"
+    if counts.get("in_parts"):
+        extras += f" · in parts {counts['in_parts']}"
     if counts.get("summary_failed"):
         extras += f" · summary failures {counts['summary_failed']}"
     if counts.get("rerun"):
@@ -2632,6 +2634,9 @@ def _show_paper(conn: sqlite3.Connection, row: sqlite3.Row, header: str) -> None
     ps = get_summary(conn, row["id"])
     if ps is not None:
         typer.echo("\n".join(render_summary(ps)).rstrip())
+        if ps.read_mode != "whole":
+            how = "map-reduce" if ps.read_mode == "map_reduce" else ps.read_mode
+            typer.echo(f"\nread in parts: {how}, {ps.parts} notes call{'s' if ps.parts != 1 else ''}")
     else:
         typer.echo((row["abstract"] or "").strip() or "No abstract available.")
     typer.echo(f"\n{row['url']}")

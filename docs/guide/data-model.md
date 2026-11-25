@@ -120,6 +120,8 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 
 Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; Phase 3 uses `votes` and `saves`; the review loop uses `skips`; the shelf ([shelf design](../superpowers/specs/2026-11-22-shelf-design.md)) uses `shelf_items` and `shelf_chunks`.
 
+**Who writes which tables.** The code is split in two halves. `db.py` owns the schema, the connection and the pipeline's own writes (`papers`, `runs`, `summaries`, `fulltexts`, `embeddings`, and `papers_fts`). `library.py` owns the writes you make by hand: `votes`, `saves`, `skips`, `shelf_items` and `shelf_chunks`. Its functions are the ones `rpipe vote`, `save`, `review` and `shelf` call. The pipeline (`triage.py`, `rank.py`, `digest.py`) reads only the names listed in `library.PIPELINE_READS`, so the nightly code never writes your votes. Both halves share one database file. `library.py` imports two helpers from `db.py`: `_now()` (the timestamp format) and `_require_paper()` (the check that a paper id exists).
+
 | Table | Columns | Purpose |
 | --- | --- | --- |
 | `embeddings` | `item_id`, `embedding_model`, `vector` (BLOB), `dim`; primary key (`item_id`, `embedding_model`) | Cached vectors, one per item per model, so changing the model never mixes vectors. `item_id` is a paper id for papers and `shelf:<name>#<chunk_idx>` for a shelf chunk (built by `shelf_embedding_id()`), so the two never collide. |
@@ -200,10 +202,10 @@ Note that the query string itself is FTS5 syntax (quotes, `*`, `AND`/`OR`), so u
 
 ## How to run / check the database
 
-`uv run pytest tests/test_db.py tests/test_feedback_db.py -v`
+`uv run pytest tests/test_db.py tests/test_feedback_db.py tests/test_library.py -v`
 
 To see a vault's schema version: `sqlite3 <vault>/vault.sqlite 'PRAGMA user_version'`.
 
 ## Where the database code is
 
-`src/research_pipeline/db.py`, `src/research_pipeline/summary_models.py`, `tests/test_db.py`, `tests/test_feedback_db.py`
+`src/research_pipeline/db.py`, `src/research_pipeline/library.py`, `src/research_pipeline/summary_models.py`, `tests/test_db.py`, `tests/test_feedback_db.py`, `tests/test_library.py`

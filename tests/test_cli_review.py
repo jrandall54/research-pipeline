@@ -4,16 +4,8 @@ import pytest
 from typer.testing import CliRunner
 
 from research_pipeline import cli
-from research_pipeline.db import (
-    current_votes,
-    mark_in_digest,
-    open_db,
-    record_skip,
-    record_vote,
-    save_summary,
-    set_status,
-    upsert_paper,
-)
+from research_pipeline.db import mark_in_digest, open_db, save_summary, set_status, upsert_paper
+from research_pipeline.library import current_votes, record_skip, record_vote
 from research_pipeline.models import PaperMeta, Status
 from research_pipeline.summarize import Claim, Critique, PaperSummary, Summary
 from research_pipeline.vault import init_vault

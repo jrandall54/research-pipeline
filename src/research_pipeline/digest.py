@@ -6,7 +6,8 @@ import sqlite3
 from datetime import date
 from pathlib import Path
 
-from research_pipeline.db import current_votes, get_provenance, get_summary, is_saved, mark_in_digest
+from research_pipeline.db import get_provenance, get_summary, mark_in_digest
+from research_pipeline.library import current_votes, is_saved
 from research_pipeline.models import Status
 from research_pipeline.summarize import Claim, PaperSummary
 

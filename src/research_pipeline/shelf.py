@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from research_pipeline import db
+from research_pipeline import library
 from research_pipeline.embed import Embedder
 from research_pipeline.progress import Reporter, stage
 
@@ -120,7 +120,7 @@ def _shelf_files(my_work: Path) -> tuple[dict[str, Path], list[str]]:
 
 
 def _has_embeddings(conn: sqlite3.Connection, name: str, n_chunks: int, model: str) -> bool:
-    ids = [db.shelf_embedding_id(name, i) for i in range(n_chunks)]
+    ids = [library.shelf_embedding_id(name, i) for i in range(n_chunks)]
     found = 0
     for i in range(0, len(ids), 500):
         batch = ids[i : i + 500]
@@ -137,7 +137,7 @@ def sync_shelf(
     """Bring the database in line with ``my_work/``: add, re-index, or drop items. Commits."""
     res = SyncResult()
     files, res.ignored = _shelf_files(my_work)
-    existing = {r["name"]: r for r in db.list_shelf_items(conn)}
+    existing = {r["name"]: r for r in library.list_shelf_items(conn)}
     todo: list[tuple[str, Path, bytes, str]] = []  # files that need (re)embedding
     for name, path in files.items():
         try:
@@ -157,14 +157,14 @@ def sync_shelf(
     with stage(reporter, "shelf", total=len(todo) or None) as handle:  # nothing changed: start/done only
         for i, (name, path, data, digest) in enumerate(todo, 1):
             chunks = chunk_text(name, data.decode("utf-8", errors="replace"))
-            db.upsert_shelf_item(conn, name, digest, chunks)
+            library.upsert_shelf_item(conn, name, digest, chunks)
             if chunks:
                 vecs = np.asarray(embedder.embed(chunks), dtype=np.float32)
                 conn.executemany(
                     "INSERT OR REPLACE INTO embeddings (item_id, embedding_model, vector, dim)"
                     " VALUES (?, ?, ?, ?)",
                     [
-                        (db.shelf_embedding_id(name, j), embedder.model_name, v.tobytes(), len(v))
+                        (library.shelf_embedding_id(name, j), embedder.model_name, v.tobytes(), len(v))
                         for j, v in enumerate(vecs)
                     ],
                 )
@@ -172,7 +172,7 @@ def sync_shelf(
             handle.step(path.name, current=i)
     for name in existing:
         if name not in files:
-            db.delete_shelf_item(conn, name, commit=False)
+            library.delete_shelf_item(conn, name, commit=False)
             res.removed.append(name)
     conn.commit()
     return res
@@ -242,7 +242,7 @@ def remove_from_shelf(conn: sqlite3.Connection, my_work: Path, name: str) -> lis
     stem move, otherwise a leftover ``a.txt`` would come back as item ``a`` at the next sync.
     """
     files, _ = _shelf_files(my_work)
-    known = {r["name"] for r in db.list_shelf_items(conn)}
+    known = {r["name"] for r in library.list_shelf_items(conn)}
     if name not in files and name not in known:
         matches = difflib.get_close_matches(name, sorted(files.keys() | known), n=3)
         hint = f" Close matches: {', '.join(matches)}." if matches else ""
@@ -262,5 +262,5 @@ def remove_from_shelf(conn: sqlite3.Connection, my_work: Path, name: str) -> lis
                 dest = _unique(path.stem, taken, trash, suffix)
                 shutil.move(str(path), trash / f"{dest}{suffix}")
                 moved.append(f"{dest}{suffix}")
-    db.delete_shelf_item(conn, name)
+    library.delete_shelf_item(conn, name)
     return moved

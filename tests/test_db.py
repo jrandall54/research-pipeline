@@ -371,7 +371,8 @@ def test_open_db_still_refuses_newer_version(tmp_path):
 def test_record_skip_unknown_paper_raises(tmp_path):
     import pytest
 
-    from research_pipeline.db import UnknownPaperError, record_skip
+    from research_pipeline.db import UnknownPaperError
+    from research_pipeline.library import record_skip
 
     conn = open_db(tmp_path / "p.db")
     with pytest.raises(UnknownPaperError):
@@ -380,7 +381,7 @@ def test_record_skip_unknown_paper_raises(tmp_path):
 
 
 def test_record_skip_twice_refreshes_timestamp(tmp_path):
-    from research_pipeline.db import record_skip
+    from research_pipeline.library import record_skip
 
     conn = open_db(tmp_path / "p.db")
     upsert_paper(conn, make())
@@ -391,7 +392,7 @@ def test_record_skip_twice_refreshes_timestamp(tmp_path):
 
 
 def test_clear_skip_is_idempotent(tmp_path):
-    from research_pipeline.db import clear_skip, record_skip
+    from research_pipeline.library import clear_skip, record_skip
 
     conn = open_db(tmp_path / "p.db")
     upsert_paper(conn, make())

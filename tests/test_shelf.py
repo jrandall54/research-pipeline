@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from research_pipeline import db, shelf
+from research_pipeline import db, library, shelf
 from research_pipeline.shelf import MAX_CHUNK_CHARS, chunk_text, sync_shelf
 
 
@@ -26,7 +26,7 @@ def _vec_ids(conn) -> set[str]:
 
 
 def _names(conn) -> list[str]:
-    return [r["name"] for r in db.list_shelf_items(conn)]
+    return [r["name"] for r in library.list_shelf_items(conn)]
 
 
 # ---- chunking ----
@@ -114,8 +114,8 @@ def test_edited_file_replaces_chunks_and_vectors(conn, my_work, embedder):
     res = sync_shelf(conn, my_work, embedder)
     assert res.updated == ["a"]
     assert _vec_ids(conn) == {"shelf:a#0"}
-    assert db.list_shelf_items(conn)[0]["n_chunks"] == 1
-    assert len(db.shelf_chunk_rows(conn)) == 1
+    assert library.list_shelf_items(conn)[0]["n_chunks"] == 1
+    assert len(library.shelf_chunk_rows(conn)) == 1
 
 
 def test_deleted_file_drops_item(conn, my_work, embedder):
@@ -133,7 +133,7 @@ def test_empty_file_indexes_with_zero_chunks(conn, my_work, embedder):
     (my_work / "zero.txt").write_text("")
     res = sync_shelf(conn, my_work, embedder)
     assert sorted(res.added) == ["blank", "zero"]
-    assert all(r["n_chunks"] == 0 for r in db.list_shelf_items(conn))
+    assert all(r["n_chunks"] == 0 for r in library.list_shelf_items(conn))
     assert embedder.calls == 0
     assert sync_shelf(conn, my_work, embedder).added == []  # stable second run
 
@@ -205,7 +205,7 @@ def test_remove_moves_file_and_clears_rows(conn, my_work, embedder):
     assert not list(my_work.glob("*.md"))
     assert (my_work / ".removed" / f"{name}.md").exists()
     assert _names(conn) == []
-    assert db.shelf_chunk_rows(conn) == []
+    assert library.shelf_chunk_rows(conn) == []
     assert _vec_ids(conn) == set()
 
 

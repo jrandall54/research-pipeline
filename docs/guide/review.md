@@ -106,6 +106,7 @@ Both commands accept `--vault PATH`.
 
 - `src/research_pipeline/cli.py`: the `review` command and `_show_paper`; `feedback` prints the review-later count.
 - `src/research_pipeline/review.py`: `review_queue`, `later_queue`, `queue_progress`.
-- `src/research_pipeline/db.py`: `record_vote`, `record_skip`, `clear_skip`, `get_summary`; the `skips` table ([data-model.md](data-model.md)).
+- `src/research_pipeline/library.py`: `record_vote`, `record_skip`, `clear_skip`; the `skips` table ([data-model.md](data-model.md)).
+- `src/research_pipeline/db.py`: `get_summary`.
 - `src/research_pipeline/digest.py`: `render_summary`, shared with the digest file.
 - Tests: `tests/test_cli_review.py`, `tests/test_review.py`.

@@ -9,8 +9,8 @@ from datetime import UTC, datetime
 
 import numpy as np
 
-from research_pipeline.db import shelf_chunk_rows, shelf_embedding_id
 from research_pipeline.embed import Embedder
+from research_pipeline.library import shelf_chunk_rows, shelf_embedding_id
 from research_pipeline.models import Profile
 
 log = logging.getLogger(__name__)

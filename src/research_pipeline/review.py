@@ -1,7 +1,7 @@
 """Queue logic for `rpipe review`: which papers are still waiting for a decision.
 
 Pure database reads, no terminal I/O. A paper has an *active vote* when the latest
-`votes` row for it is not 0 (same rule as `db.current_votes`); a cleared vote (0)
+`votes` row for it is not 0 (same rule as `library.current_votes`); a cleared vote (0)
 puts it back in the queue.
 """
 

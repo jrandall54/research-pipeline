@@ -114,7 +114,7 @@ Vectors are stored in the `embeddings` table as raw float32 bytes, keyed by (pap
 
 Your explicit profile (seeds, topics) is what you *said* you like. Your votes and saves are what you *did* like. Each night triage turns them into a second, **implicit profile** and nudges scores toward papers resembling your up-votes and saves, and away from papers resembling your down-votes.
 
-1. `run_triage` reads the latest non-neutral vote per paper (`db.current_votes`) and every save (`db.list_saved`), and loads those papers' stored embeddings. Papers with no embedding are skipped (no crash). An up vote that was later cleared contributes nothing.
+1. `run_triage` reads the latest non-neutral vote per paper (`library.current_votes`) and every save (`library.list_saved`), and loads those papers' stored embeddings. Papers with no embedding are skipped (no crash). An up vote that was later cleared contributes nothing.
 2. `rank.build_feedback_vectors` gives each one a weight `0.5 ** (age_days / half-life)`. The **half-life** is the number of days after which a vote counts half as much; the default is 60 days (`feedback_halflife_days` in your profile). An up vote and a save both start at weight 1.0; a paper that is both counts once with the larger (fresher) weight. A down vote beats a save of the same paper. Timestamps may be ISO with `T`/`Z` or plain `YYYY-MM-DD HH:MM:SS`.
 3. For each candidate paper, `score_papers` finds the liked paper with the largest weight × cosine; the score gains `0.20 ×` that. The same over disliked papers subtracts `0.15 ×`.
 

@@ -174,7 +174,8 @@ Tests: `uv run pytest -q tests/test_digest.py tests/test_db.py` (offline; they u
 ## Where the code is
 
 - `src/research_pipeline/digest.py`: `write_digest` and the markdown rendering (including the summary block).
-- `src/research_pipeline/db.py`: `mark_in_digest`, `record_vote`, `current_votes`, `set_saved`, `is_saved`, `list_saved`.
+- `src/research_pipeline/db.py`: `mark_in_digest`.
+- `src/research_pipeline/library.py`: `record_vote`, `current_votes`, `set_saved`, `is_saved`, `list_saved` (the digest reads votes and saves from here).
 - `src/research_pipeline/digest.py`: `render_summary` is public because `rpipe review` shows the same summary text.
 - `src/research_pipeline/cli.py`: the `vote`, `save`, `unsave` and `feedback` commands (`_resolve_paper` turns an id or title fragment into a paper id).
 - `tests/test_digest.py`, `tests/test_db.py`, `tests/test_cli_feedback.py`.

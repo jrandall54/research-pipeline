@@ -2,14 +2,8 @@ import json
 
 import pytest
 
-from research_pipeline.db import (
-    get_paper,
-    open_db,
-    papers_with_status,
-    record_vote,
-    set_saved,
-    upsert_paper,
-)
+from research_pipeline.db import get_paper, open_db, papers_with_status, upsert_paper
+from research_pipeline.library import record_vote, set_saved
 from research_pipeline.models import PaperMeta, Profile, Status
 from research_pipeline.triage import run_triage
 

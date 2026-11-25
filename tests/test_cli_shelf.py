@@ -4,7 +4,8 @@ from typer.testing import CliRunner
 
 from research_pipeline import cli
 from research_pipeline.cli import Pipeline
-from research_pipeline.db import list_shelf_items, open_db
+from research_pipeline.db import open_db
+from research_pipeline.library import list_shelf_items
 from research_pipeline.vault import init_vault
 
 runner = CliRunner()

@@ -6,8 +6,9 @@ from pathlib import Path
 
 import numpy as np
 
-from research_pipeline.db import current_votes, list_saved, papers_with_status, set_status
+from research_pipeline.db import papers_with_status, set_status
 from research_pipeline.embed import Embedder
+from research_pipeline.library import current_votes, list_saved
 from research_pipeline.models import Profile, Status
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.rank import (

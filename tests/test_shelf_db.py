@@ -1,7 +1,7 @@
-from research_pipeline.db import (
+from research_pipeline.db import open_db
+from research_pipeline.library import (
     delete_shelf_item,
     list_shelf_items,
-    open_db,
     shelf_chunk_rows,
     shelf_embedding_id,
     upsert_shelf_item,

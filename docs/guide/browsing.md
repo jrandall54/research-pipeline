@@ -53,7 +53,7 @@ Open the printed address, click `vault`, and use the canned queries. Stop with C
 
 Errors: `Tailscale not running; use --host 127.0.0.1 to serve locally` (Tailscale is off or not installed); `Datasette is not installed. Install it with: uv sync --extra embed --extra serve (in the repo), or for plain `rpipe`: uv tool install --editable '.[embed,serve]' --force`; `Refusing to listen on '0.0.0.0': it is not a loopback or Tailscale address, and this server has no login. Allowed: ...` (you passed `0.0.0.0`, `::` or another non-allowlisted address). To check a vote landed: `rpipe feedback`.
 
-The tests (`tests/test_serve.py`) run each canned query's SQL against a temporary vault with plain `sqlite3` and read the result back with `current_votes`, `list_saved` and `is_saved`; they inject a fake Tailscale runner and never start Datasette.
+The tests (`tests/test_serve.py`) run each canned query's SQL against a temporary vault with plain `sqlite3` and read the result back with `library.current_votes`, `library.list_saved` and `library.is_saved`; they inject a fake Tailscale runner and never start Datasette.
 
 ## Where the code is
 

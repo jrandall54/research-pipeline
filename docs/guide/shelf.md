@@ -132,4 +132,4 @@ Use the commands above. Tests: `uv run pytest tests/test_shelf.py tests/test_cli
 
 ## Where the code is
 
-The commands are `shelf_app` in `src/research_pipeline/cli.py`. Logic is in `src/research_pipeline/shelf.py`: `chunk_text`, `sync_shelf`, `add_to_shelf`, `remove_from_shelf`, `SyncResult`. Storage helpers are in `db.py` (`upsert_shelf_item`, `delete_shelf_item`, `list_shelf_items`, `shelf_chunk_rows`); the tables are described in [data-model.md](data-model.md).
+The commands are `shelf_app` in `src/research_pipeline/cli.py`. Logic is in `src/research_pipeline/shelf.py`: `chunk_text`, `sync_shelf`, `add_to_shelf`, `remove_from_shelf`, `SyncResult`. Storage helpers are in `library.py` (`upsert_shelf_item`, `delete_shelf_item`, `list_shelf_items`, `shelf_chunk_rows`), next to the other functions you write by hand; the tables are described in [data-model.md](data-model.md).

@@ -50,6 +50,7 @@ from research_pipeline.db import (
     papers_given_up_on,
     papers_to_summarize,
     previous_run_unfinished,
+    requests_by_status,
     start_run,
 )
 from research_pipeline.digest import render_summary, write_digest
@@ -96,6 +97,7 @@ from research_pipeline.parts import SPLIT_BELOW_CTX, resolve_mode
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
+from research_pipeline.requests_queue import drain_requests
 from research_pipeline.run_lock import RunLocked, VaultLock
 from research_pipeline.scan import (
     DEFAULT_OLLAMA_PORT,
@@ -109,7 +111,7 @@ from research_pipeline.seeds import SeedFetchError, cache_seed, resolve_seed_tex
 from research_pipeline.sources.arxiv import ArxivSource
 from research_pipeline.sources.base import Source, SourceError
 from research_pipeline.spill import model_cap, run_reruns
-from research_pipeline.summarize import TIMEOUT_STOPPED, run_summarize
+from research_pipeline.summarize import LIMIT_STOPPED, TIMEOUT_STOPPED, run_summarize
 from research_pipeline.triage import run_triage
 from research_pipeline.vault import (
     DEFAULT_TOPICS,
@@ -391,6 +393,10 @@ def health_line(
         extras += f" · rerun {counts['rerun']}"
     if counts.get("rerun_waiting"):
         extras += f" · rerun waiting {counts['rerun_waiting']}"
+    for key, label in (("requests_done", "requests done"), ("requests_failed", "requests failed"),
+                       ("requests_waiting", "requests waiting")):
+        if counts.get(key):
+            extras += f" · {label} {counts[key]}"
     if counts.get("summaries_off"):
         extras += " · summaries off (abstracts-only mode)"
     if unknown_categories:
@@ -582,8 +588,10 @@ def _run_locked(ctx: _Context) -> None:
                 stage = "triage"
                 with _reporter() as reporter:
                     seeds = _seed_texts(ctx, profile, pipeline, errors, reporter=reporter)
+                    # Your my_work/ files -> shelf rows, every night (even with no new papers).
+                    library_api.shelf_sync(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
                     counts |= run_triage(
-                        ctx.conn, embedder, profile, seeds, ctx.vault / "my_work", reporter=reporter
+                        ctx.conn, embedder, profile, seeds, use_shelf=True, reporter=reporter
                     )
                 # Triage is done with the embedder; free its GPU memory before the model probe
                 # measures what is free (the nightly summaries run without it).
@@ -593,8 +601,7 @@ def _run_locked(ctx: _Context) -> None:
                 try:
                     llm = _ready_llm(pipeline)
                 except LlmLimitReached:
-                    errors.append("summarize: summaries stopped: usage limit reached;"
-                                  " remaining papers wait for the next run")
+                    errors.append(LIMIT_STOPPED)
                 except Exception as exc:  # noqa: BLE001 - no model must never stop the digest
                     errors.append(f"summaries skipped, model unavailable: {exc}")
                 else:
@@ -607,7 +614,8 @@ def _run_locked(ctx: _Context) -> None:
                             # The setting, not tonight's clock: a paper cut in a daytime run is
                             # still rerun whole on a later night (rerun_candidates looks at every day).
                             # Nothing queued: no reason to load the model just to pick a mode.
-                            has_work = bool(papers_to_summarize(ctx.conn, date.today()))
+                            has_work = bool(papers_to_summarize(ctx.conn, date.today())) or bool(
+                                requests_by_status(ctx.conn, "pending", "running"))
                             mode, fallback_above = _summarize_plan(
                                 llm, ctx.config, ctx.config.night_deadline != "off", reporter,
                                 has_work=has_work)
@@ -617,6 +625,22 @@ def _run_locked(ctx: _Context) -> None:
                             )
                         counts |= sum_counts
                         errors += sum_errors
+                        timed_out = TIMEOUT_STOPPED in sum_errors
+                        stage = "requests"
+                        if LIMIT_STOPPED in sum_errors or timed_out:
+                            # The model just stopped: don't spend a call (or a timeout) on requests.
+                            waiting = len(requests_by_status(ctx.conn, "pending", "running"))
+                            if waiting:
+                                counts["requests_waiting"] = waiting
+                        else:
+                            with _reporter() as reporter:
+                                req_counts, req_errors = drain_requests(
+                                    ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+                                    reporter=reporter, mode=mode, fallback_above=fallback_above,
+                                )
+                            counts |= req_counts
+                            errors += req_errors
+                            timed_out = TIMEOUT_STOPPED in req_errors
                         if getattr(llm, "name", "") == "ollama":
                             stage = "rerun"
                             try:
@@ -624,7 +648,7 @@ def _run_locked(ctx: _Context) -> None:
                                     rerun_counts, rerun_errors = run_reruns(
                                         ctx.conn, llm, ctx.vault, deadline,
                                         reporter=reporter,
-                                        model_timed_out=TIMEOUT_STOPPED in sum_errors,
+                                        model_timed_out=timed_out,
                                     )
                                 counts |= rerun_counts
                                 errors += rerun_errors
@@ -724,8 +748,9 @@ def triage(vault: VaultOption = None) -> None:
         with _reporter() as reporter:
             embedder = _embedder(pipeline, ctx.config.embedding_model, reporter=reporter)
             seeds = _seed_texts(ctx, profile, pipeline, errors, reporter=reporter)
+            library_api.shelf_sync(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
             counts = run_triage(
-                ctx.conn, embedder, profile, seeds, ctx.vault / "my_work", reporter=reporter
+                ctx.conn, embedder, profile, seeds, use_shelf=True, reporter=reporter
             )
         typer.echo("Triaged:")
         _report(counts, errors)
@@ -840,6 +865,59 @@ def digest(
             raise _fail(f"--date must be YYYY-MM-DD, got {date_!r}") from exc
         out = write_digest(ctx.conn, ctx.vault, day, f"Digest {day.isoformat()}: written from stored papers (no collection run)")
         typer.echo(f"Digest written to {out}")
+
+
+# ---------------------------------------------------------------- request list
+
+requests_app = typer.Typer(
+    help="Work the app asked the pipeline to do (e.g. summarize one paper): see it, or do it now.",
+    no_args_is_help=True,
+)
+app.add_typer(requests_app, name="requests")
+
+
+@requests_app.command("run")
+def requests_run(vault: VaultOption = None) -> None:
+    """Do the waiting requests now instead of at the nightly run."""
+    ctx = _open(vault)
+    with _pipeline_lock(ctx, "rpipe requests run"):
+        _require_model(ctx.config)
+        pending = requests_by_status(ctx.conn, "pending", "running")
+        if not pending:
+            typer.echo("No requests waiting. `rpipe requests list` shows earlier ones.")
+            return
+        pipeline = build_pipeline(ctx.config)
+        try:
+            llm = _ready_llm(pipeline)
+        except Exception as exc:  # noqa: BLE001
+            raise _fail(f"model unavailable: {exc}") from exc
+        if llm is None:
+            raise _fail(NO_MODEL)
+        with _reporter() as reporter:
+            mode, fallback_above = _summarize_plan(
+                llm, ctx.config, ctx.config.night_deadline != "off", reporter, has_work=bool(pending))
+            counts, errors = drain_requests(
+                ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
+                reporter=reporter, mode=mode, fallback_above=fallback_above,
+            )
+        typer.echo("Requests:")
+        _report(counts, errors)
+
+
+@requests_app.command("list")
+def requests_list(vault: VaultOption = None) -> None:
+    """List every request, newest first: id, status, kind, paper, tries, when asked, last error."""
+    ctx = _open(vault)
+    rows = requests_by_status(ctx.conn, "pending", "running", "done", "failed")
+    if not rows:
+        typer.echo("No requests.")
+        return
+    for row in reversed(rows):
+        paper = json.loads(row["payload"]).get("paper_id", "-")
+        line = f"{row['id']}  {row['status']}  {row['kind']}  {paper}  {row['tries']}  {row['created_at']}"
+        if row["error"]:
+            line += f"  {' '.join(row['error'].split())}"
+        typer.echo(line)
 
 
 # ---------------------------------------------------------------- profile commands

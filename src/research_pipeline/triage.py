@@ -2,7 +2,6 @@
 
 import sqlite3
 from datetime import UTC, datetime
-from pathlib import Path
 
 import numpy as np
 
@@ -17,7 +16,6 @@ from research_pipeline.rank import (
     build_shelf_vectors,
     score_papers,
 )
-from research_pipeline.shelf import sync_shelf
 
 
 def _text(row: sqlite3.Row) -> str:
@@ -29,17 +27,16 @@ def run_triage(
     embedder: Embedder,
     profile: Profile,
     seed_texts: dict[str, str],
-    my_work: Path | None = None,
     *,
+    use_shelf: bool = False,
     reporter: Reporter | None = None,
 ) -> dict[str, int]:
     """Rank `new` papers; top `profile.top_n` become triaged, the rest skipped.
 
-    With `my_work`, the shelf is synced first, even when there are no new papers (new or edited notes are embedded) and papers near
-    your own notes get a boost.
+    With ``use_shelf=True`` papers near your own notes (the shelf rows already in the
+    database) get a boost. Triage only reads the shelf: bringing it in line with your
+    ``my_work/`` files is the caller's job (`rpipe run` and `rpipe triage` sync it just before).
     """
-    if my_work is not None:
-        sync_shelf(conn, my_work, embedder, reporter=reporter)  # always, so the index follows your files even on quiet nights
     papers = papers_with_status(conn, Status.new)
     if not papers:
         with stage(reporter, "triage"):  # nothing to do: start and done only
@@ -65,10 +62,10 @@ def run_triage(
                     " VALUES (?, ?, ?, ?)",
                     (p["id"], model, v.tobytes(), len(v)),
                 )
-        return _rank_and_store(conn, embedder, profile, seed_texts, my_work, papers, stored, len(todo))
+        return _rank_and_store(conn, embedder, profile, seed_texts, use_shelf, papers, stored, len(todo))
 
 
-def _rank_and_store(conn, embedder, profile, seed_texts, my_work, papers, stored, n_embedded):
+def _rank_and_store(conn, embedder, profile, seed_texts, use_shelf, papers, stored, n_embedded):
     paper_vecs = np.stack([stored[p["id"]] for p in papers])
     pv = build_profile_vectors(embedder, profile, seed_texts)
     votes, saves = current_votes(conn), list_saved(conn)
@@ -77,9 +74,7 @@ def _rank_and_store(conn, embedder, profile, seed_texts, my_work, papers, stored
         votes, saves, {k: v for k, v in stored.items() if k in wanted},
         profile.feedback_halflife_days, datetime.now(UTC),
     )
-    shelf = None
-    if my_work is not None:
-        shelf = build_shelf_vectors(conn, embedder)
+    shelf = build_shelf_vectors(conn, embedder) if use_shelf else None
     ranked = score_papers(papers, paper_vecs, profile, pv, feedback, shelf)
 
     for i, s in enumerate(ranked):

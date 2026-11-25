@@ -332,6 +332,10 @@
 
 **Request list** — the `requests` table: work the app asks the pipeline to do later, such as "summarise this paper". Each request has a kind, details (payload) and a status (`pending`, `running`, `done`, `failed`). Asking for the same thing twice while it is still waiting gives back the first request. See "The request list" in `data-model.md`.
 
+**Draining (the request list)** — working through the waiting requests until none is left to do; the nightly `rpipe run` and `rpipe requests run` do it. See "The request list" in `running.md`.
+
+**Retry rule (requests)** — a request gets 3 tries (`requests.tries` counts them). A failed try puts it back to `pending`; the third failure leaves it `failed` for good (ask again to queue a fresh one). A usage-limit stop gives the try back, because it was not the request's fault. See "The request list" in `running.md`.
+
 **Canonical JSON** — JSON written one fixed way (here with keys sorted), so two copies of the same data are always the same text and can be compared directly. See `data-model.md`.
 
 **Paper-id normalisation** — turning the ways people write an arXiv id (`2611.25005v2`, `arXiv:2611.25005`, an arxiv.org link) into the bare id the database stores (`2611.25005`). Done by `ids.normalise_paper_id`. See "Paper-id spellings" in `data-model.md`.

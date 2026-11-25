@@ -120,7 +120,7 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 
 Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; Phase 3 uses `votes` and `saves`; the review loop uses `skips`; the shelf ([shelf design](../superpowers/specs/2026-11-22-shelf-design.md)) uses `shelf_items` and `shelf_chunks`; the pipeline/app split (Phase 7) adds `requests`, the request list (below).
 
-**Who writes which tables.** The code is split in two halves. `db.py` owns the schema, the connection and the pipeline's own writes (`papers`, `runs`, `summaries`, `fulltexts`, `embeddings`, and `papers_fts`). `library.py` owns the writes you make by hand: `votes`, `saves`, `skips`, `shelf_items` and `shelf_chunks`. The app commands (`rpipe vote`, `save`, `unsave`, `feedback`, `review`, `show` and `shelf`) do not call `db.py` or `library.py` themselves: they go through `library_api.py`, the app's one door, which hands back data objects and passes each change on to `library.py` or `shelf.py` (see "The app's door" in [architecture.md](architecture.md)). The `requests` table (the request list, below) is written by both halves: the app adds requests through `library_api.request`, and the pipeline later marks them running, done or failed. The pipeline (`triage.py`, `rank.py`, `digest.py`) reads only the names listed in `library.PIPELINE_READS`, so the nightly code never writes your votes. Both halves share one database file. `library.py` imports two helpers from `db.py`: `_now()` (the timestamp format) and `_require_paper()` (the check that a paper id exists).
+**Who writes which tables.** The code is split in two halves. `db.py` owns the schema, the connection and the pipeline's own writes (`papers`, `runs`, `summaries`, `fulltexts`, `embeddings`, and `papers_fts`). `library.py` owns the writes you make by hand: `votes`, `saves`, `skips`, `shelf_items` and `shelf_chunks`. The app commands (`rpipe vote`, `save`, `unsave`, `feedback`, `review`, `show` and `shelf`) do not call `db.py` or `library.py` themselves: they go through `library_api.py`, the app's one door, which hands back data objects and passes each change on to `library.py` or `shelf.py` (see "The app's door" in [architecture.md](architecture.md)). The `requests` table (the request list, below) is written by both halves: the app adds requests through `library_api.request`, and the pipeline later marks them running, done or failed. The pipeline (`triage.py`, `rank.py`, `digest.py`) reads only the names listed in `library.PIPELINE_READS`, so the nightly code never writes your votes. One thing in a nightly run does write library rows: just before triage, `rpipe run` (and `rpipe triage`) rebuild the shelf rows from your `my_work/` files with `library_api.shelf_sync`, the same call as `rpipe shelf sync`. That call is made by the command (`cli.py`), not by triage, which only reads the shelf. Both halves share one database file. `library.py` imports two helpers from `db.py`: `_now()` (the timestamp format) and `_require_paper()` (the check that a paper id exists).
 
 | Table | Columns | Purpose |
 | --- | --- | --- |
@@ -168,7 +168,7 @@ How a request is added, step by step (`library_api.request(conn, "summarize", {"
 4. The paper must already be in `papers` (`get_paper`), else `UnknownPaperError`. There is no title search here: a request names a known paper.
 5. `db.insert_request` writes the row with the normalised id and commits, and returns its `id`. If a `pending` or `running` row with the same kind and the same canonical payload already exists, it returns that row's id instead of adding a second one, so pressing "summarise" twice queues the work once. A `done` or `failed` request does not block a new one: asking again after it finished adds a fresh row.
 
-`requests_by_status(conn, "pending", "running")` lists rows in any of the given statuses, oldest first (by `id`). Later tasks in Phase 7 add the code that runs the requests and moves them through the statuses.
+`requests_by_status(conn, "pending", "running")` lists rows in any of the given statuses, oldest first (by `id`). The pipeline moves rows through the statuses with `mark_request(conn, id, status, error=..., result=..., add_try=..., undo_try=...)` (sets `updated_at` and commits; `error` and `result` are written as given, so leaving them out clears them; `add_try` counts one more try, `undo_try` gives one back) and `reset_running_requests(conn)` (puts rows left `running` by a run that died back to `pending`, returning how many). How the pipeline works through the list, and the retry rule, are in "The request list" in [running.md](running.md).
 
 ### Paper-id spellings
 
@@ -234,9 +234,9 @@ Note that the query string itself is FTS5 syntax (quotes, `*`, `AND`/`OR`), so u
 
 ## How to run / check the database
 
-`uv run pytest tests/test_db.py tests/test_feedback_db.py tests/test_library.py tests/test_requests.py tests/test_ids.py -v`
+`uv run pytest tests/test_db.py tests/test_feedback_db.py tests/test_library.py tests/test_requests.py tests/test_requests_queue.py tests/test_ids.py -v`
 
-To see a vault's request list: `sqlite3 <vault>/vault.sqlite 'SELECT id, kind, payload, status, tries FROM requests'`.
+To see a vault's request list: `rpipe requests list` (or `sqlite3 <vault>/vault.sqlite 'SELECT id, kind, payload, status, tries FROM requests'`).
 
 To see a vault's schema version: `sqlite3 <vault>/vault.sqlite 'PRAGMA user_version'`.
 

@@ -65,7 +65,7 @@ A one-line note with no heading gives one chunk, `idea\nTry retrieval for malwar
 - **Edits replace, not append.** Re-indexing an item deletes its old chunks and vectors first, so stale text cannot keep influencing results (an anti-goal in the design).
 - **Remove moves, never deletes.** `.removed/` makes a mistake recoverable.
 - **Heading prefix on each chunk.** Without it a paragraph reading "It fails on long inputs." has no subject once separated from its note.
-- **Commands go through the app's door.** `rpipe shelf add|list|remove|sync` call `library_api.shelf_add`, `shelf_items`, `shelf_remove` and `shelf_sync`, which wrap `shelf.py` and return data (`ShelfItemView`: name, added date, chunk count; `SyncResult`) for `cli.py` to print. A future app can manage the shelf with the same calls. Loading the embedding model and showing progress stay in `cli.py`. See "The app's door" in [architecture.md](architecture.md). The nightly triage still syncs the shelf by calling `shelf.py` directly.
+- **Commands go through the app's door.** `rpipe shelf add|list|remove|sync` call `library_api.shelf_add`, `shelf_items`, `shelf_remove` and `shelf_sync`, which wrap `shelf.py` and return data (`ShelfItemView`: name, added date, chunk count; `SyncResult`) for `cli.py` to print. A future app can manage the shelf with the same calls. Loading the embedding model and showing progress stay in `cli.py`. See "The app's door" in [architecture.md](architecture.md). `rpipe run` and `rpipe triage` sync the shelf the same way, with `library_api.shelf_sync`, just before triage; triage itself only reads the shelf (see [triage.md](triage.md)).
 - **Plain size constants.** 200 and 1500 characters are rules of thumb; there is no setting for them, so there is nothing for a user to hand-edit.
 
 ## What never leaves your machine
@@ -90,7 +90,7 @@ Nobody has to touch files by hand: four `rpipe shelf` commands cover everything.
 - `rpipe shelf add <text-or-file>`: save a note (any text) or copy in a `.md`/`.txt` file, then index it.
 - `rpipe shelf list`: show every item with its chunk count and the day it was last indexed (a re-index after an edit refreshes it).
 - `rpipe shelf remove <name>`: move the item's file to `my_work/.removed/` and drop it from the index.
-- `rpipe shelf sync`: re-index after you dropped, edited or deleted files in `my_work/` yourself (the nightly triage also does this).
+- `rpipe shelf sync`: re-index after you dropped, edited or deleted files in `my_work/` yourself (`rpipe run` and `rpipe triage` also do this just before triage).
 
 Real output (fake embedder, fresh vault):
 
@@ -127,7 +127,7 @@ An unknown name for `remove` exits with code 1 and lists the closest names. `lis
 
 ## How to run / check it
 
-- Progress (stderr). `rpipe shelf sync` first shows `embedding model <name>` while the embedding model loads, then a `shelf` stage with one step per new or edited file (`[1/2] a.md`, `[2/2] b.txt`); files that did not change are not listed, and when nothing changed the stage starts and finishes with no steps. The **first run downloads the embedding model** (hundreds of MB; about 130 MB for the default). That can take minutes, and the "still waiting" heartbeat (every 30 s) shows it is working. `rpipe shelf add` shows the model-loading stage only. `sync_shelf` takes an optional `reporter`; the nightly triage passes its own down.
+- Progress (stderr). `rpipe shelf sync` first shows `embedding model <name>` while the embedding model loads, then a `shelf` stage with one step per new or edited file (`[1/2] a.md`, `[2/2] b.txt`); files that did not change are not listed, and when nothing changed the stage starts and finishes with no steps. The **first run downloads the embedding model** (hundreds of MB; about 130 MB for the default). That can take minutes, and the "still waiting" heartbeat (every 30 s) shows it is working. `rpipe shelf add` shows the model-loading stage only. `sync_shelf` takes an optional `reporter`; `rpipe run` and `rpipe triage` pass theirs down, so their `shelf` stage looks the same.
 
 Use the commands above. Tests: `uv run pytest tests/test_shelf.py tests/test_cli_shelf.py -q` (offline, fake embedder).
 

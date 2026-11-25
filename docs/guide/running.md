@@ -58,12 +58,14 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 | Command | What it does | Writes |
 | --- | --- | --- |
-| `run` | `start_run`, then collect, seed lookup, triage, summarize, reruns of cut papers (Ollama only, at night; see "Reading cut papers whole: reruns" below), digest for today, then `finish_run` with the merged counts and errors (always, even after a crash; exit code 1 if a stage crashed) | the `runs` row, papers, summaries, `digests/<today>.md` |
+| `run` | `start_run`, then collect, seed lookup, shelf sync, triage, summarize, requests waiting in the request list (see "The request list" below), reruns of cut papers (Ollama only, at night; see "Reading cut papers whole: reruns" below), digest for today, then `finish_run` with the merged counts and errors (always, even after a crash; exit code 1 if a stage crashed) | the `runs` row, papers, summaries, `digests/<today>.md` |
 | `collect` | fetch from arXiv and Hugging Face into the database | papers (status `new`) |
 | `triage` | rank the `new` papers, keep the top N | statuses, scores, reasons, embeddings |
 | `summarize` | summarise and critique every paper still waiting (`triaged`, `fetched`, or in today's digest without a summary) with the configured summary model (fetching arXiv HTML full text first; abstract only if there is none); `--backlog [--limit N]` adds older digests' unsummarized papers, and `summarize ID...` does exactly the papers you name (`--refetch` first re-downloads their full text) | full texts, summaries, statuses `fetched` then `summarized` (papers already in a digest, or skipped, keep their status) |
 | `runs [--limit N]` | list recent runs, newest first | nothing |
 | `serve [--host H] [--port 8001]` | browse the vault and vote/save from a phone with Datasette over Tailscale (needs the `serve` extra: `uv sync --extra embed --extra serve`, or `uv tool install --editable '.[embed,serve]' --force`; see [browsing.md](browsing.md)) | `votes`, `saves` (only when you press a button) |
+| `requests run` | do the waiting requests now instead of at night (see "The request list" below) | summaries, request statuses |
+| `requests list` | list every request, newest first, with its status, tries and last error | nothing |
 | `review [--later]` | read each unreviewed digest paper in the terminal and vote up/down, skip or quit; `--later` goes through skipped papers (needs a terminal; see [review.md](review.md)) | `votes`, `skips` |
 | `digest [--date YYYY-MM-DD]` | write the digest from papers already `triaged` (date defaults to today) | `digests/<date>.md`, `in_digest` |
 
@@ -211,6 +213,65 @@ The health line shows ` · rerun 2` (papers read whole tonight) and ` · rerun w
 
 **Where the code is.** `src/research_pipeline/spill.py` (`rerun_candidates`, `buckets`, `ram_part_bytes`, `run_reruns`, `_unload_and_wait`, constants `RERUN_STEP`, `SPILL_GUESS`, `FIRST_RERUN_MARGIN`, `MIN_CALL_TIMEOUT`, `UNLOAD_WAIT`, `UNLOAD_POLL`), its call in `_run_locked` and the health-line additions in `cli.py`, `ollama_fit.unload`.
 
+### The request list: work the app asked for
+
+**What it does.** The app half of rpipe (today the `library_api.request` call; later a button in the app) never runs the model itself. When you ask for a paper to be summarized now, it writes a `pending` row in the `requests` table (see "The request list" in [data-model.md](data-model.md)) and the pipeline does the work: every night inside `rpipe run`, or straight away with `rpipe requests run`. This is called **draining** the request list (working through it until nothing is left to do). `rpipe requests list` shows every request and how it went.
+
+**How it works.** `requests_queue.drain_requests` does this, step by step:
+
+1. Rows left `running` (a run died while working on them) go back to `pending` (`db.reset_running_requests`). The try they used still counts.
+2. It takes the `pending` `summarize` rows that have had fewer than 3 tries (`MAX_SUMMARY_TRIES`), oldest first, and for each one:
+   - marks it `running` and counts one try (`db.mark_request(..., add_try=True)`);
+   - summarizes that one paper with `run_summarize(paper_ids=[id])`, exactly what `rpipe summarize ID` does: any status, an existing summary is replaced, and a paper's own retry cap is ignored because you asked for it;
+   - **summarized** → `done`, `result` = `{"summarized": true}`, `error` cleared;
+   - **failed** (network error, model error, the paper is not in the vault) → back to `pending` with the error line, or `failed` if this was the third try;
+   - **usage limit reached** (Claude Code) → back to `pending` with the try given back (not the request's fault), and the drain stops: the next request would hit the same limit;
+   - **model timed out** → counted as a failed try like any failure, then the drain stops: a hung model would make every later request wait out the full timeout too.
+3. It counts `requests_done` and `requests_failed` (gave up after 3 tries) for this drain, and `requests_waiting` (pending rows left), and returns them with the error lines for the health line.
+
+The **retry rule** in one line: a request gets 3 tries; a usage-limit stop does not use one up; a request that failed 3 times is left `failed` and never tried again (ask again to queue a fresh one). `requests.tries` is the counter that matters; the paper's own `retry_count` still goes up on a failure (as with `rpipe summarize ID`) but the drain does not look at it.
+
+Worked example. On Monday you ask for `2611.25005` (row 7) and `2611.30001` (row 8). That night:
+
+```
+summarize…           (the normal stage: tonight's kept papers)
+requests…
+  writing the summary for 2611.25005
+  writing the critique for 2611.25005
+  [1/2] 2611.25005 done
+  fetching 2611.30001
+  [2/2] 2611.30001 failed: arXiv returned 503
+```
+
+Row 7 is `done` (1 try). Row 8 is `pending` with 1 try and the 503 as its error; the health line says `requests waiting 1`. Tuesday night it works: `done`, 2 tries. Had it failed on Tuesday and Wednesday too, it would be `failed` after Wednesday's third try and the health line would say `requests failed 1`.
+
+**In `rpipe run`** the order is summarize → requests → reruns → digest. The drain uses the same reading mode and `fallback_above` as the summarize stage, so a requested paper that had to be cut is read whole by the rerun stage like any other. A quiet night with no new papers still loads the model when requests are waiting (the summarize stage counts them as work). The drain is **skipped** when the summarize stage just stopped on a usage limit or a model timeout: the model has stopped answering, so trying requests would only use up their tries; the rows stay `pending` with their tries untouched and the health line shows `requests waiting N`. A drain that times out is passed on to the rerun stage, which then skips (as after a summarize timeout). With the `none` backend or the model unavailable, no drain runs.
+
+**Progress.** The drain is its own `requests` stage with one `[i/N]` step per request (outcome `done`, `failed` or `stopped`) and, above each, the notes from the summary (`fetching …`, `writing the summary for …`). The inner one-paper summarize run would otherwise show its own `summarize` stage with a `[1/1]` line for every request; a small adapter (`_NotesOnly`) passes only its notes into the `requests` stage. With nothing queued the stage is not shown at all.
+
+**Commands.**
+
+```
+$ rpipe requests list
+8  pending  summarize  2611.30001  1  2026-11-23T09:12:40+00:00  arXiv returned 503
+7  done     summarize  2611.25005  1  2026-11-23T09:12:02+00:00
+$ rpipe requests run
+Requests:
+  requests_done=1, requests_failed=0, requests_waiting=0
+```
+
+`rpipe requests list` (not locked, no model) prints every request newest first: id, status, kind, paper id, tries, when it was asked, and the last error if any; `No requests.` when there are none. `rpipe requests run` takes the pipeline lock (as `rpipe requests run`), needs a model (exit 1 with the `none` backend, or when the model is unavailable), says `No requests waiting.` and stops if there is nothing pending, else picks the reading mode like `rpipe summarize` and drains with progress.
+
+**Why it's built this way.**
+- **`requests.tries` is the counter, not the paper's `retry_count`.** A request is something you asked for; its own row is where you look to see how it went, and `rpipe requests list` shows it. Rejected: reusing the paper's counter (a paper that failed three times in the nightly stage could then never be requested again).
+- **A usage limit gives the try back; a timeout does not.** A limit says nothing about the paper; a timeout might (a huge paper) and costs real time, so it counts like the nightly stage counts it.
+- **Requests after the summarize stage, before reruns.** Tonight's new papers come first (they are the digest); requests are extra. Running before the reruns lets a cut requested paper be reread whole the same night. Rejected: a separate nightly timer for requests (two jobs fighting over one lock and one GPU).
+- **One step per request, not a stage per request.** Twenty requests would otherwise print twenty `summarize` stages of `[1/1]`.
+
+**How to check it.** `uv run pytest tests/test_requests_queue.py tests/test_cli_requests.py -q` (done, a stale `running` row, three failures then `failed`, a usage limit keeping both rows pending with no try used, a timeout stopping the drain, the progress events, the nightly wiring including a quiet night and the skip after a usage limit, the list output and the lock).
+
+**Where the code is.** `src/research_pipeline/requests_queue.py` (`drain_requests`, `_NotesOnly`); `db.mark_request`, `db.reset_running_requests`; in `cli.py`, the `requests` stage in `_run_locked`, `requests_run`, `requests_list` and the health-line counts.
+
 ### A real run, step by step
 
 This is a real run on a clean vault (profile: LLM security topics, four well-known seed papers, `top_n` 15). Nothing personal appears here.
@@ -292,8 +353,9 @@ Which commands take the lock:
 | `model setup` | yes | can download, measure and test a model |
 | `profile suggest` | yes | uses the model |
 | `gold add`, `gold suggest`, `gold auto`, `gold draft` | yes | fetch from arXiv or call the judge; grouped with the other gold-set builders so one job builds the set at a time |
+| `requests run` | yes | uses the model (GPU memory) and fetches full text |
 | `shelf add`, `shelf sync` | yes | load the embedder and rewrite shelf rows; `rpipe run` also syncs the shelf, so two syncs could collide |
-| `vote`, `save`, `unsave`, `feedback`, `review`, `show`, `runs`, `serve`, `shelf list`, `shelf remove` | no | app commands: quick reads and single-row writes that are safe beside a running job |
+| `vote`, `save`, `unsave`, `feedback`, `review`, `show`, `runs`, `serve`, `shelf list`, `shelf remove`, `requests list` | no | app commands: quick reads and single-row writes that are safe beside a running job |
 | `profile show`, `profile add-seed`, `profile set-*`, `model show`, `model set*`, `model scan`, `model catalog show`, `model catalog update`, `gold list`, `gold remove`, `gold add-fact`, `gold edit-fact`, `gold remove-fact`, `eval grade`, `eval report`, `schedule *`, `sources *`, `init`, `plugins` | no | settings and read-only commands. `profile add-seed` does look the paper up on arXiv, but it writes only `profile.yaml`, never the database, so it cannot collide with a run |
 
 A locked command takes the lock right after it opens the vault (`_open`) and before anything that leaves the process: no network request, no model or embedder load, no Ollama probe or restart happens while another job holds the lock. **A command lets go of the lock while it waits for you.** Interactive locked commands (`gold add`, `gold draft`, `model tune`, `model setup`, `model recommend`, `profile suggest`) ask questions between stretches of work. Every question goes through `_prompt` or `_confirm` in `cli.py`, which releases the lock (and empties the file) just before asking and takes it back right after you answer. So the lock is held only while the command is actually working (fetching, calling the model, downloading, restarting Ollama), never while a question sits on screen. Worked example: at 23:00 you start `rpipe gold draft 2401.00001`, it drafts the facts (lock held), then asks `Keep, edit or drop?` and you go to bed. At 03:00 the nightly run finds the lock free, runs and finishes. If you answer while the run is still working, the command cannot take the lock back, so it stops with `rpipe run is already working on <vault>; nothing further was started.` and exit 75; whatever it had saved before the question stays saved, and you run it again later. Outside a locked command (for example the `rpipe init` wizard, which is not locked) `_prompt` and `_confirm` behave exactly like Typer's own prompts.
@@ -385,8 +447,9 @@ Lint is `ruff` (a fast Python linter, installed with the dev group by `uv sync`)
 - `src/research_pipeline/seeds.py`: seed text lookup and cache
 - `src/research_pipeline/summarize.py`: `run_summarize` (the per-paper loop)
 - `src/research_pipeline/spill.py`: `run_reruns` (reading cut papers whole at night)
+- `src/research_pipeline/requests_queue.py`: `drain_requests` (the request list; `rpipe requests run|list` are in `cli.py`)
 - `src/research_pipeline/llm.py`, `fulltext.py`, `prompts.py`: model client, full-text fetching, prompts (see `llm.md`, `fulltext.md`, `summaries.md`)
 - `src/research_pipeline/gold.py`, `evaluate.py`: `rpipe gold` and `rpipe eval` (see `evaluation.md`)
 - `src/research_pipeline/run_lock.py`: `VaultLock` (take, let go, take again), `run_lock`, `RunLocked` (with `.holder`); in `cli.py`, `_pipeline_lock` turns a refusal into the message and exit 75, and `_prompt`/`_confirm` (through `_waiting_for_you`) let go of the lock while a question waits
 - `src/research_pipeline/db.py`: `start_run`, `finish_run`, `list_runs`, `previous_run_unfinished`
-- `tests/test_runs.py`, `tests/test_run_lock.py`, `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`
+- `tests/test_runs.py`, `tests/test_run_lock.py`, `tests/test_e2e.py`, `tests/test_summarize.py`, `tests/test_seeds.py`, `tests/test_requests_queue.py`, `tests/test_cli_requests.py`

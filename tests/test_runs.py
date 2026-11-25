@@ -98,6 +98,7 @@ LOCKED_COMMANDS = [
     ["gold", "draft", "2307.15043"],
     ["shelf", "sync"],
     ["shelf", "add", "NOTE"],
+    ["requests", "run"],
 ]
 
 

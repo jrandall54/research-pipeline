@@ -213,6 +213,45 @@ def requests_by_status(conn: sqlite3.Connection, *statuses: str) -> list[sqlite3
     ).fetchall()
 
 
+def mark_request(
+    conn: sqlite3.Connection,
+    rid: int,
+    status: str,
+    *,
+    error: str | None = None,
+    result: dict | None = None,
+    add_try: bool = False,
+    undo_try: bool = False,
+) -> None:
+    """Set a request's status, `error` and `result` (None clears them) and `updated_at`. Commits.
+
+    ``add_try`` counts one more try (taken as the work starts); ``undo_try`` gives one back
+    (the work stopped for a reason that was not the request's fault, like a usage limit).
+    """
+    delta = int(add_try) - int(undo_try)
+    conn.execute(
+        "UPDATE requests SET status = ?, error = ?, result = ?, tries = MAX(0, tries + ?),"
+        " updated_at = ? WHERE id = ?",
+        (status, error, json.dumps(result, sort_keys=True) if result is not None else None,
+         delta, _now(), rid),
+    )
+    conn.commit()
+
+
+def reset_running_requests(conn: sqlite3.Connection) -> int:
+    """Put `running` requests back to `pending` and return how many. Commits.
+
+    A request is only `running` while a pipeline command works on it under the run lock, so
+    one still `running` when the next drain starts was left by a run that died mid-request.
+    Its try stays counted.
+    """
+    cur = conn.execute(
+        "UPDATE requests SET status = 'pending', updated_at = ? WHERE status = 'running'", (_now(),)
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def _require_paper(conn: sqlite3.Connection, paper_id: str) -> None:
     if get_paper(conn, paper_id) is None:
         raise UnknownPaperError(f"No paper with id {paper_id!r} in the database.")

@@ -32,6 +32,10 @@ from research_pipeline.summary_models import (  # noqa: F401 (re-exported)
     Summary,
 )
 
+# The error line when the model's usage limit was reached and summaries stopped (no retry burned).
+LIMIT_STOPPED = (
+    "summarize: summaries stopped: usage limit reached; remaining papers wait for the next run"
+)
 # The error line when the model timed out and the stage stopped (`rpipe run` then skips reruns).
 TIMEOUT_STOPPED = (
     "summarize: stopped calling the model after the first timeout; remaining papers show abstracts only"
@@ -283,10 +287,7 @@ def run_summarize(
                 if paper["status"] == Status.triaged.value:
                     set_status(conn, pid, Status.triaged)  # undo the early `fetched` mark
                 report("stopped")
-                errors.append(
-                    "summarize: summaries stopped: usage limit reached;"
-                    " remaining papers wait for the next run"
-                )
+                errors.append(LIMIT_STOPPED)
                 break
             except Exception as exc:  # noqa: BLE001 - one bad paper must not stop the rest
                 counts["summary_failed"] += 1

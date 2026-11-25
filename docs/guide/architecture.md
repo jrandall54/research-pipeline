@@ -22,7 +22,7 @@ rpipe has two kinds of commands. The **pipeline** gets material on its own, usua
 | `ShelfItemView` | `name`, `added_at`, `chunks` | `shelf_items`, `shelf_add` |
 | `SyncResult` | `added`, `updated`, `removed`, `ignored` (lists of names) | `shelf_sync` |
 
-The changes it makes: `vote(conn, id, "up" | "down" | "clear")`, `save(conn, id, True | False)`, `skip` and `unskip` (the review-later list), `shelf_add`, `shelf_remove`, `shelf_sync`, and `request` (ask the pipeline to do work later; see "The request list" in [data-model.md](data-model.md)). Each change is one short transaction and commits. A paper id that is not in the database raises `UnknownPaperError`.
+The changes it makes: `vote(conn, id, "up" | "down" | "clear")`, `save(conn, id, True | False)`, `skip` and `unskip` (the review-later list), `shelf_add`, `shelf_remove`, `shelf_sync`, and `request` (ask the pipeline to do work later; see "The request list" in [data-model.md](data-model.md); the pipeline side, `requests_queue.drain_requests`, does the work in the nightly `rpipe run` or `rpipe requests run`, see "The request list" in [running.md](running.md)). Each change is one short transaction and commits. A paper id that is not in the database raises `UnknownPaperError`.
 
 `library_api` does not hold rules of its own about votes or the shelf. It passes each change on to the module that already owns it: `library.py` for votes, saves and skips, `shelf.py` for the shelf, `review.py` for the queue queries, `db.py` for papers and summaries.
 

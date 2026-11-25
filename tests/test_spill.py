@@ -707,3 +707,13 @@ def test_summarize_uses_deadline_setting_not_the_clock(vault, monkeypatch):
     res = runner.invoke(cli.app, ["summarize", "2611.00001", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
     assert seen["fallback_above"] == 0
+
+
+def test_daytime_run_with_deadline_set_still_passes_the_cap(vault, monkeypatch):
+    # deadline_at says "no reruns in this run" (over 12 hours away), but the deadline is set:
+    # a paper cut now is rerun on a later night, so only papers above the cap go to parts.
+    monkeypatch.setattr(cli.schedule, "deadline_at", lambda now, value: None)
+    seen = install_llm(monkeypatch, ModeOllama(share=1.0))
+    res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
+    assert res.exit_code == 0, res.output
+    assert seen["fallback_above"] == 40_960

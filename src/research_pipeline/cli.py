@@ -530,8 +530,10 @@ def _run_locked(ctx: _Context) -> None:
                         # None when reruns are off or the deadline is over 12 hours away.
                         deadline = schedule.deadline_at(datetime.now(), ctx.config.night_deadline)
                         with _reporter() as reporter:
+                            # The setting, not tonight's clock: a paper cut in a daytime run is
+                            # still rerun whole on a later night (rerun_candidates looks at every day).
                             mode, fallback_above = _summarize_plan(
-                                llm, ctx.config, deadline is not None, reporter)
+                                llm, ctx.config, ctx.config.night_deadline != "off", reporter)
                             sum_counts, sum_errors = run_summarize(
                                 ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
                                 reporter=reporter, mode=mode, fallback_above=fallback_above,

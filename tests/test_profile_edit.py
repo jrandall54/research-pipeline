@@ -341,3 +341,13 @@ def test_night_deadline_default_and_stored_quoted(vault):
     pe.set_night_deadline(vault, "9:05")
     # Quoted, so YAML never reads it as a number of minutes (sexagesimal).
     assert 'night_deadline: "09:05"' in (vault / "config.yaml").read_text()
+
+
+@pytest.mark.parametrize(("written", "loaded"), [("23:00", "23:00"), ("7:00", "07:00")])
+def test_unquoted_hand_written_deadline_loads_and_can_be_changed(vault, written, loaded):
+    path = vault / "config.yaml"
+    path.write_text(path.read_text().replace('night_deadline: "07:00"', f"night_deadline: {written}"))
+    assert f"night_deadline: {written}\n" in path.read_text()
+    assert load_config(path).night_deadline == loaded
+    pe.set_night_deadline(vault, "06:15")
+    assert load_config(path).night_deadline == "06:15"

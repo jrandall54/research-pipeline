@@ -70,7 +70,8 @@ def render_service(vault: Path, rpipe_cmd: str) -> str:
     )
 
 
-def _parse_time(time: str) -> tuple[int, int]:
+def parse_time(time: str) -> tuple[int, int]:
+    """(hour, minute) from a strict 24-hour HH:MM; ValueError with an example otherwise."""
     m = re.fullmatch(r"(\d{2}):(\d{2})", time)
     if not m or int(m[1]) > 23 or int(m[2]) > 59:
         raise ValueError(f"time must be HH:MM in 24-hour form (for example 03:00), got {time!r}")
@@ -78,7 +79,7 @@ def _parse_time(time: str) -> tuple[int, int]:
 
 
 def render_timer(time: str = "03:00") -> str:
-    hour, minute = _parse_time(time)
+    hour, minute = parse_time(time)
     return (
         "[Unit]\n"
         "Description=Run the research pipeline every night\n"
@@ -153,7 +154,7 @@ def deadline_at(now: datetime, value: str) -> datetime | None:
     """
     if value == "off":
         return None
-    hour, minute = _parse_time(value)
+    hour, minute = parse_time(value)
     at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if at <= now:
         at += timedelta(days=1)

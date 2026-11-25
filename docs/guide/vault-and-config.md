@@ -43,7 +43,7 @@ The pipeline currently writes `vault.sqlite` (which also holds full texts and su
 | `llm_backend` | `ollama` | Which backend writes summaries: `ollama`, `claude-code` or an installed plug-in (letters, digits, `_`, `-`). Old vaults without the key use Ollama. See `backends.md`. |
 | `llm_cli_path` | empty | Full path of the subscription CLI (such as `claude`), so the nightly timer finds it. Recorded by `rpipe model setup`. |
 | `sources` | `arxiv, hf_daily` | Paper sources collected from, in order; at least one, no repeats. Change with `rpipe sources list`, `enable NAME`, `disable NAME`. See `sources.md`, `plugins.md`. |
-| `night_deadline` | `"07:00"` | Morning time (24-hour, local) by which reruns of cut papers must finish, or `off` for no reruns. Normal papers always run. Change with `rpipe schedule set-deadline HH:MM` or `off`. Keep the quotes if you edit by hand. A missing key means `07:00`. See "The morning deadline" in `scheduling.md`. |
+| `night_deadline` | `"07:00"` | Morning time (24-hour, local) by which reruns of cut papers must finish, or `off` for no reruns. Normal papers always run. Change with `rpipe schedule set-deadline HH:MM` or `off`. The command writes it quoted; a hand-written unquoted `23:00` or `7:00` also works. A missing key means `07:00`. See "The morning deadline" in `scheduling.md`. |
 
 When either is `auto`, the choice is remembered in `cache/llm_fit.json` (the chosen model and context, keyed by the Ollama address and every installed model's name and digest, the Ollama version, the memory-related server settings and the GPUs). It is safe to delete; the next run probes again. `rpipe model fit` rewrites it.
 

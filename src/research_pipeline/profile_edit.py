@@ -19,7 +19,8 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 from research_pipeline.backends.claude_code import resolve_model
 from research_pipeline.categories import describe_unknown, unknown
 from research_pipeline.llm import NO_MODEL
-from research_pipeline.models import ALL_CATEGORIES, CATEGORY_RE, Config, Profile
+from research_pipeline.models import ALL_CATEGORIES, CATEGORY_RE, Config, Profile, normalise_deadline
+from research_pipeline.schedule import parse_time
 from research_pipeline.vault import ConfigError, load_config, load_profile
 
 CATEGORY_ERROR_HINT = (
@@ -396,17 +397,17 @@ def set_llm_num_ctx(vault: Path, n: int | str) -> None:
 
 def set_night_deadline(vault: Path, value: str) -> None:
     """Set the morning deadline for reruns: a 24-hour time such as 07:00 (7:00 is fine), or off."""
-    text = value.strip().lower()
+    text = normalise_deadline(value)
     if text != "off":
-        m = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
-        if not m or int(m[1]) > 23 or int(m[2]) > 59:
+        try:
+            parse_time(text)
+        except ValueError as exc:
             raise ValueError(
                 f"{value!r} is not a time: give HH:MM in 24-hour form (for example 07:00), or off"
-            )
-        text = f"{int(m[1]):02d}:{m[2]}"
+            ) from exc
 
     def change(data) -> bool:
-        # Quoted: unquoted 7:00-style times are read by YAML as a number of minutes.
+        # Quoted, so plain YAML readers see a string, not a number of minutes.
         data["night_deadline"] = DoubleQuotedScalarString(text)
         return True
 

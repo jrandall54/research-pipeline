@@ -198,11 +198,13 @@ The full loop:
 ```
 rpipe gold add ...   (x10)   build the answer key
 rpipe eval run               summarize every gold paper, write the report
+                             (--mode auto|whole|split for this eval only)
 rpipe eval grade             for each paper: is the summary accurate? y/n + note
 rpipe eval report            counts, PASS or FAIL, and which papers failed and why
 ```
 
 1. **`rpipe eval run`** refuses if the gold set is empty (and tells you to use `rpipe gold add`), warns if it has fewer than 10 papers, then for each gold paper fetches the full text (the same fetcher as the nightly run), writes a summary and critique with the same code as the nightly run, and records the result. A paper with no HTML version is summarized from its abstract (looked up on arXiv by id) and labelled `ABSTRACT ONLY`. A paper that fails (model error, no text and no abstract) gets an error entry and the others carry on.
+   Papers are read in the **reading mode** (whole or in parts; see "Choosing the mode" in `summaries.md`) given by `--mode auto|whole|split`, or by your `summarize_mode` setting when you leave it out. `auto` is resolved exactly as in `rpipe run` (a `reading mode` progress stage first). `--mode` applies to this eval only and is never saved. Unlike a nightly run, eval never waits for a rerun: a paper that would be cut in whole mode is read in parts at once (`fallback_above = 0`).
    Progress goes to stderr (stdout is unchanged): a live bar on a terminal, plain lines otherwise, one step per gold paper (`ok` or `failed`, the same outcome the report records), and a `still waiting: ...` line after 30 s of silence:
 
    ```
@@ -292,7 +294,7 @@ Without `--judge`, `rpipe eval run` works as before and needs no Claude; it ends
    - **missed**: the summary does not mention it;
    - **contradicted**: the summary says something that conflicts with it (the worst case);
    - **not judged**: the judge gave no ruling for that fact. This is counted separately and never as covered.
-4. The file also records a **setup** (backend, model, context size, prompt version, judge model), so you can tell later which configuration produced a result.
+4. The file also records a **setup** (backend, model, context size, prompt version, judge model, and the reading mode actually used: `whole` or `split`, never `auto`), so you can tell later which configuration produced a result. Eval files from before reading modes existed show `mode whole`, which is how they were read.
 5. If the judge is the same backend and model as the summarizer, the run is marked **self-graded** and the report says so. It is allowed, but remember the judge then shares the summarizer's blind spots.
 6. If Claude's usage limit is reached, judging stops for the rest of the run but summaries carry on; the remaining papers get the note "usage limit reached". Any other judge error skips only that paper. The report shows `Judged: N of M papers`.
 
@@ -302,7 +304,7 @@ Sample (illustrative output):
 Judged: 9 of 10 papers
 Facts covered: 31 of 38 (missed 4, contradicted 1, not judged 2)
 Unreviewed answer key: 10 of 10 papers use facts Claude drafted and no person checked. Read the scores as a comparison between runs, not as proof of accuracy.
-Setup: ollama/some-model, context 32768, prompts 2026-11-p4
+Setup: ollama/some-model, context 32768, prompts 2026-11-p4, mode whole
 ```
 
 ### Why it's built this way
@@ -320,7 +322,7 @@ After a judged run, `rpipe eval report` compares it with a baseline: the earlier
 
 ### How it works
 
-The block first shows both setups (`Earlier:` and `Now:`: backend, model, context, prompts and judge model), so you can see what changed. Only papers judged in both runs count, and for each paper only the facts judged in both. Facts are matched by their **text** (whitespace and case ignored), not by position, because each run stores a snapshot of the key facts it used (`key_facts` on the entry). If you edited, added or removed a fact between the runs, the report says `facts changed for ID since the earlier run; compared only the unchanged ones` and compares just the facts present in both. Eval files from before the snapshot existed fall back to matching by position. The change passes when all three hold:
+The block first shows both setups (`Earlier:` and `Now:`: backend, model, context, prompts, reading mode and judge model), so you can see what changed. When the reading mode differs, an extra line says so: `Reading mode changed: mode whole → split`. Only papers judged in both runs count, and for each paper only the facts judged in both. Facts are matched by their **text** (whitespace and case ignored), not by position, because each run stores a snapshot of the key facts it used (`key_facts` on the entry). If you edited, added or removed a fact between the runs, the report says `facts changed for ID since the earlier run; compared only the unchanged ones` and compares just the facts present in both. Eval files from before the snapshot existed fall back to matching by position. The change passes when all three hold:
 
 - facts covered dropped by **at most 1**;
 - contradicted facts did **not rise**;
@@ -334,9 +336,40 @@ With no paper in common, or no earlier judged run, the report says "No earlier j
 
 One run is enough because the summaries are made at temperature 0 (the model always picks its most likely word, so the same input gives nearly the same output); a difference between two runs is then mostly your change, not luck. The allowed drop of 1 absorbs the small wobble that remains and the judge's own noise. Contradictions and bad citations get no allowance because they are the failures that mislead a reader.
 
+### Comparing reading modes
+
+**What it does.** Tells you whether reading papers in parts (`split`) is as accurate as reading each one in a single call (`whole`) on your machine, using the same answer key and the same pass rule as any other change.
+
+**How it works.** Run the eval twice on the same day, once per mode, both with the judge:
+
+```
+rpipe eval run --judge --mode whole
+rpipe eval run --judge --mode split
+rpipe eval report
+```
+
+The second run keeps the first as its baseline (see "Same-day re-runs"), so the report compares whole against split. Sample (illustrative output):
+
+```
+Compared with the earlier run today (2026-11-24) over 10 paper(s) judged in both:
+  Earlier: ollama/some-model, context 32768, prompts 2026-11-p7, mode whole, judge some-judge-model
+  Now: ollama/some-model, context 32768, prompts 2026-11-p7, mode split, judge some-judge-model
+  Reading mode changed: mode whole → split
+  Facts covered: 31 -> 30
+  Contradicted: 1 -> 1
+  Unverified citations: 0 -> 0
+Change: PASS
+```
+
+Split mode is good enough when the change passes: facts covered drop by **no more than 1** across the whole set, contradictions do **not rise**, and unverified citations do **not rise**. Here split lost one fact and nothing else, so it passes. If it fails, keep `whole` (`rpipe model set-mode whole`); if it passes and split is faster on your machine (or `auto` picks it), the setting can stay as it is.
+
+**Why it's built this way.** The mode is a flag rather than a setting change so a comparison never leaves your configuration changed. The mode stored is the one actually used (`auto` resolved to `whole` or `split`), because "auto" alone would not say how the papers were read. Both runs use `fallback_above = 0`, so a paper too long for the context is read in parts in either mode and the two runs differ only in the mode. Rejected: a dedicated `rpipe eval modes` command that runs both (it would double a long wait inside one command and hide the two runs behind one result; two plain runs reuse the existing baseline and report).
+
+**How to check it.** `tests/test_eval.py` checks that the mode is recorded and shown (`mode split`), that eval always passes `fallback_above = 0`, that an old eval file reads as `whole`, that the compare block shows `mode whole → split` only when the mode changed, and that `--mode` overrides the setting without saving it (a bad value is refused with the choices).
+
 ### Where the code is
 
-`run_eval`, `judged_counts`, `compare` and `report` in `src/research_pipeline/evaluate.py`, the `--judge` option of `eval_run` in `src/research_pipeline/cli.py`, tests in `tests/test_eval.py`.
+`run_eval`, `judged_counts`, `compare` and `report` in `src/research_pipeline/evaluate.py`, the `--judge` and `--mode` options of `eval_run` (and `_read_mode`, shared with `rpipe run`) in `src/research_pipeline/cli.py`, tests in `tests/test_eval.py`.
 
 ## The judge
 

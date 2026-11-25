@@ -12,6 +12,7 @@ from research_pipeline import cli, profile_edit, registry
 from research_pipeline.backends import claude_code
 from research_pipeline.cli import Pipeline
 from research_pipeline.llm import NO_MODEL, LlmError, LlmLimitReached
+from research_pipeline.parts import SPLIT_BELOW_CTX
 from research_pipeline.vault import init_vault, load_config
 
 runner = CliRunner()
@@ -427,7 +428,9 @@ def test_set_mode_works_for_claude_code(vault):
 
 def test_model_show_prints_summarize_mode(vault):
     out = run(vault, "model", "show").output
-    assert "summarize mode: auto" in out and "split" in out
+    assert "summarize mode: auto" in out
+    assert ("auto: split when the model is not fully in GPU memory or the context is below "
+            f"{SPLIT_BELOW_CTX} tokens (Ollama); whole otherwise") in out
     set_config(vault, llm_backend="claude-code")
     run(vault, "model", "set-mode", "whole")
     out = run(vault, "model", "show").output

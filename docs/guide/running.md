@@ -158,7 +158,7 @@ $ uv run rpipe gold remove 2307.15043
 
 Illustrative commands; see `evaluation.md` for sample output.
 
-Evaluation commands (`rpipe eval run`, `rpipe eval grade`, `rpipe eval report`) check summary accuracy against your gold set; see `evaluation.md`. `eval run` exits 1 if the gold set is empty or the model is unavailable.
+Evaluation commands (`rpipe eval run`, `rpipe eval grade`, `rpipe eval report`) check summary accuracy against your gold set; see `evaluation.md`. `eval run` exits 1 if the gold set is empty or the model is unavailable; `eval run --mode auto|whole|split` picks the reading mode for that eval only.
 
 ```
 $ uv run rpipe eval run      # summarize every gold paper, write eval/<date>.md

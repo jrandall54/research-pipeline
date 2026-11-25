@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal, cast
 from urllib.parse import urlparse
 
 import typer
@@ -419,29 +419,41 @@ def _ready_llm(pipeline: Pipeline) -> LLM | None:
     return llm
 
 
-def _summarize_plan(
-    llm: LLM, config: Config, reruns_possible: bool, reporter: Reporter | None
-) -> tuple[str, int]:
-    """How this command reads papers: the mode and `fallback_above` for run_summarize.
+def _read_mode(llm: LLM, setting: str, reporter: Reporter | None) -> Literal["whole", "split"]:
+    """Resolve a summarize_mode setting (auto/whole/split) to whole or split, in a "reading mode" stage.
 
-    Mode: the summarize_mode setting; for `auto` on Ollama the model is loaded and its GPU
-    share read (parts.resolve_mode). Any failure there reads whole, as before split mode
-    existed. fallback_above (Decision 2): with Ollama and reruns possible, only papers no
-    rerun could read whole (needing more than the model's cap) go to parts; otherwise every
-    cut paper does (0). See "Choosing the mode" in docs/guide/summaries.md.
+    For `auto` on Ollama the model is loaded and its GPU share read (parts.resolve_mode). Any
+    failure there reads whole, as before split mode existed. Shared by `rpipe run`,
+    `rpipe summarize` and `rpipe eval run` so all three decide the same way.
     """
     backend = getattr(llm, "name", "")
     with stage(reporter, "reading mode") as handle:
         share: float | None = None
         problem = ""
-        if config.summarize_mode == "auto" and backend == "ollama":
+        if setting == "auto" and backend == "ollama":
             try:
-                llm.load()
-                share = llm.gpu_share()
+                ollama = cast(OllamaClient, llm)  # backend "ollama" is an OllamaClient
+                ollama.load()
+                share = ollama.gpu_share()
             except Exception as exc:  # noqa: BLE001 - an unknown share reads whole
                 problem = " ".join(str(exc).split()) or type(exc).__name__
-        mode, reason = resolve_mode(config.summarize_mode, backend, share, llm.num_ctx)
+        mode, reason = resolve_mode(setting, backend, share, llm.num_ctx)
         handle.note(f"{reason} ({problem})" if problem else reason)
+    return mode
+
+
+def _summarize_plan(
+    llm: LLM, config: Config, reruns_possible: bool, reporter: Reporter | None
+) -> tuple[Literal["whole", "split"], int]:
+    """How this command reads papers: the mode and `fallback_above` for run_summarize.
+
+    Mode: the summarize_mode setting, resolved by `_read_mode`. fallback_above (Decision 2):
+    with Ollama and reruns possible, only papers no rerun could read whole (needing more than
+    the model's cap) go to parts; otherwise every cut paper does (0). See "Choosing the mode"
+    in docs/guide/summaries.md.
+    """
+    backend = getattr(llm, "name", "")
+    mode = _read_mode(llm, config.summarize_mode, reporter)
     fallback_above = 0
     if backend == "ollama" and reruns_possible:
         fallback_above = model_cap(getattr(llm, "url", ""), llm.model_name)
@@ -1542,10 +1554,16 @@ def _latest_eval(vault: Path) -> date:
 def eval_run(
     vault: VaultOption = None,
     use_judge: Annotated[bool, typer.Option("--judge", help="Also grade every key fact with the Claude judge.")] = False,
+    mode: Annotated[str | None, typer.Option(
+        "--mode", help="How to read papers for this eval only: auto, whole or split (default: your summarize mode).",
+    )] = None,
 ) -> None:
     """Summarize every gold-set paper with the local model and write a report to grade."""
     ctx = _open(vault)
     _require_model(ctx.config)
+    setting = ctx.config.summarize_mode if mode is None else mode.strip().lower()
+    if setting not in profile_edit.SUMMARIZE_MODES:
+        raise _fail(f"unknown mode {mode!r}: choose one of {', '.join(profile_edit.SUMMARIZE_MODES)}")
     with _clean_errors():
         papers = load_gold(ctx.vault)
     if not papers:
@@ -1579,8 +1597,9 @@ def eval_run(
     typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
     with _clean_errors():
         with _reporter() as reporter:
+            read_mode = _read_mode(llm, setting, reporter)
             md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
-                          reporter=reporter, judge=eval_judge)
+                          reporter=reporter, judge=eval_judge, mode=read_mode)
     typer.echo(f"Report written: {md}")
     if eval_judge:
         typer.echo("Next: rpipe eval report")

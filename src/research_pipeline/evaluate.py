@@ -9,6 +9,7 @@ import tempfile
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -46,6 +47,7 @@ class EvalSetup(BaseModel):
     judge_model: str | None = None
     self_graded: bool = False
     unreviewed_papers: int = 0  # gold papers whose facts were auto-drafted and never checked by a person
+    read_mode: str = "whole"  # the resolved reading mode, whole or split (old files were all whole)
 
 
 class Grade(BaseModel):
@@ -192,6 +194,7 @@ def run_eval(
     *,
     reporter: Reporter | None = None,
     judge: LLM | None = None,
+    mode: Literal["whole", "split"] = "whole",
 ) -> Path:
     """Summarize every gold paper and write `eval/<today>.json` and `.md`; return the .md path.
 
@@ -201,6 +204,9 @@ def run_eval(
     replaced has verdicts it is first kept as `YYYY-MM-DD.previous.json`, the baseline for `compare`.
     With ``judge``, each summary is also graded fact by fact; the usage limit stops judging
     (summaries carry on), any other judge error skips that one paper.
+    ``mode`` is the resolved reading mode (whole or split). Eval never uses the rerun-aware
+    fallback of nightly runs: a paper cut in whole mode goes straight to parts (fallback_above=0),
+    so one eval measures one reading of every paper.
     """
     entries: list[EvalEntry] = []
     sections_by_id: dict[str, list[Section]] = {}
@@ -222,7 +228,7 @@ def run_eval(
                     sections_by_id[g.paper_id] = [Section(title="Abstract", text=abstract)]
                 else:
                     sections_by_id[g.paper_id] = sections
-                result = summarize_paper(llm, g.title, abstract, sections, num_ctx)
+                result = summarize_paper(llm, g.title, abstract, sections, num_ctx, mode=mode, fallback_above=0)
                 entry = EvalEntry(
                     paper_id=g.paper_id,
                     title=g.title,
@@ -266,6 +272,7 @@ def run_eval(
         judge_model=getattr(judge, "model_name", "?") if judging else None,
         self_graded=self_graded,
         unreviewed_papers=sum(g.unreviewed for g in gold),
+        read_mode=mode,
     )
     if has_judged_run(vault, today):
         _atomic_write(_previous_path(vault, today), (_dir(vault) / f"{today.isoformat()}.json").read_text(encoding="utf-8"))
@@ -331,7 +338,15 @@ def _setup_line(label: str, setup: EvalSetup | None) -> str:
     if setup is None:
         return f"  {label}: setup not recorded"
     judge = f", judge {setup.judge_model}" if setup.judge_model else ""
-    return f"  {label}: {setup.backend}/{setup.model}, context {setup.num_ctx}, prompts {setup.prompt_version}{judge}"
+    return (f"  {label}: {setup.backend}/{setup.model}, context {setup.num_ctx}, prompts {setup.prompt_version}, "
+            f"mode {setup.read_mode}{judge}")
+
+
+def _mode_change(previous: EvalSetup | None, current: EvalSetup | None) -> list[str]:
+    """One line when the reading mode differs between the two runs (a missing setup reads as whole)."""
+    before = previous.read_mode if previous else "whole"
+    now = current.read_mode if current else "whole"
+    return [f"  Reading mode changed: mode {before} → {now}"] if before != now else []
 
 
 def compare(previous: EvalFile, current: EvalFile) -> str:
@@ -370,6 +385,7 @@ def compare(previous: EvalFile, current: EvalFile) -> str:
         f"Compared with {earlier} over {len(common)} paper(s) judged in both:",
         _setup_line("Earlier", previous.setup),
         _setup_line("Now", current.setup),
+        *_mode_change(previous.setup, current.setup),
         *[f"  facts changed for {pid} since the earlier run; compared only the unchanged ones" for pid in changed],
         f"  Facts covered: {p['covered']} -> {c['covered']}",
         f"  Contradicted: {p['contradicted']} -> {c['contradicted']}",
@@ -462,5 +478,5 @@ def report(vault: Path, day: date) -> str:
         lines += ["", compare(previous, data) if previous else "No earlier judged run to compare."]
     if data.setup:
         s = data.setup
-        lines += ["", f"Setup: {s.backend}/{s.model}, context {s.num_ctx}, prompts {s.prompt_version}"]
+        lines += ["", f"Setup: {s.backend}/{s.model}, context {s.num_ctx}, prompts {s.prompt_version}, mode {s.read_mode}"]
     return "\n".join(lines)

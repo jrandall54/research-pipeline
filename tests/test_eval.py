@@ -450,3 +450,94 @@ def test_eval_markdown_lists_what_was_left_out_and_cleans_titles(vault):
     md = run(vault, fetcher=lambda pid: secs).read_text()
     left = next(line for line in md.splitlines() if line.startswith("Left out:"))
     assert "References (" in left and "Funding" in left and "\x1b" not in left
+
+
+# ---- reading modes (B.6)
+
+def record_modes(monkeypatch):
+    """Wrap summarize_paper in evaluate: record mode and fallback_above, then read whole."""
+    from research_pipeline import evaluate
+    from research_pipeline.summarize import summarize_paper as real
+
+    seen: list[tuple[str, int | None]] = []
+
+    def wrapped(*args, mode="whole", fallback_above=None, **kw):
+        seen.append((mode, fallback_above))
+        return real(*args, **kw)
+
+    monkeypatch.setattr(evaluate, "summarize_paper", wrapped)
+    return seen
+
+
+def test_eval_records_mode(vault, monkeypatch):
+    from research_pipeline.evaluate import _setup_line
+
+    seen = record_modes(monkeypatch)
+    add_papers(vault, 1)
+    run_eval(vault, AlwaysSummary([]), fetch, 32768, DAY, mode="split")
+    assert seen == [("split", 0)]
+    setup = load_eval(vault, DAY).setup
+    assert setup.read_mode == "split"
+    assert "mode split" in _setup_line("Now", setup)
+    assert "mode split" in report(vault, DAY)
+
+
+def test_eval_whole_mode_never_falls_back(vault, monkeypatch):
+    seen = record_modes(monkeypatch)
+    add_papers(vault, 1)
+    run(vault)
+    assert seen == [("whole", 0)]
+    assert load_eval(vault, DAY).setup.read_mode == "whole"
+
+
+def test_old_eval_file_reads_as_whole(vault):
+    import json
+
+    add_papers(vault, 1)
+    run(vault)
+    path = vault / "eval" / "2026-11-21.json"
+    d = json.loads(path.read_text())
+    d["setup"].pop("read_mode")
+    path.write_text(json.dumps(d))
+    assert load_eval(vault, DAY).setup.read_mode == "whole"
+
+
+def test_compare_shows_mode_change():
+    from research_pipeline.evaluate import EvalSetup
+
+    def su(mode):
+        return EvalSetup(backend="ollama", model="m", num_ctx=8192, prompt_version="v1", read_mode=mode)
+
+    a = facts_file(DAY, ["f1"], [covered(1)], setup=su("whole"))
+    b = facts_file(date(2026, 11, 22), ["f1"], [covered(1)], setup=su("split"))
+    out = compare(a, b)
+    assert "mode whole → split" in out
+    assert "mode whole → split" not in compare(a, facts_file(date(2026, 11, 22), ["f1"], [covered(1)], setup=su("whole")))
+
+
+def test_eval_mode_flag_overrides_config(vault, monkeypatch):
+    from research_pipeline import profile_edit
+
+    profile_edit.set_summarize_mode(vault, "whole")
+    before = (vault / "config.yaml").read_text()
+    seen = record_modes(monkeypatch)
+    install(monkeypatch)
+    add_papers(vault, 1)
+    res = erun(vault, "run", "--mode", "split")
+    assert res.exit_code == 0, res.output
+    assert seen == [("split", 0)]
+    assert load_eval(vault, latest_day(vault)).setup.read_mode == "split"
+    assert (vault / "config.yaml").read_text() == before
+    res = erun(vault, "run")
+    assert seen[-1] == ("whole", 0)
+    bad = erun(vault, "run", "--mode", "fast")
+    assert bad.exit_code == 1 and "auto, whole, split" in bad.output
+
+
+def test_eval_mode_auto_resolves_like_runs(vault, monkeypatch):
+    seen = record_modes(monkeypatch)
+    install(monkeypatch)
+    add_papers(vault, 1)
+    res = erun(vault, "run", "--mode", "auto")
+    assert res.exit_code == 0, res.output
+    assert seen == [("whole", 0)]  # the stand-in model is not Ollama: auto reads whole

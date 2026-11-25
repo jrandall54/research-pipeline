@@ -2,7 +2,7 @@
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
 
-## B.6 built (2026-11-25, branch `part-b6-split-map-reduce`, not merged)
+## B.6 built (2026-11-25, merged and pushed)
 
 Plan `plans/2026-11-24-part-b6-split-map-reduce.md`. `uv run pytest -q`: 1404 passing, ruff clean. Per-task spec+quality reviews, whole-branch review (opus), one fix wave + scoped re-review, two follow-up fixes reviewed.
 

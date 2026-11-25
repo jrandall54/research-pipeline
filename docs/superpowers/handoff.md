@@ -2,7 +2,7 @@
 
 Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
 
-## B.5 built (2026-11-24, branch `part-b5-spill-reruns`, not merged)
+## B.5 built (2026-11-24, merged and pushed)
 
 Plan `plans/2026-11-24-part-b5-spill-reruns.md`. `uv run pytest -q`: 1310 passing, ruff clean. Every task had a spec+quality review; whole-branch review (opus) + one fix wave.
 
@@ -15,7 +15,7 @@ Plan `plans/2026-11-24-part-b5-spill-reruns.md`. `uv run pytest -q`: 1310 passin
 - **Owner model names scrubbed** from the working tree (guide, handoff, plans, phase-6 spec); still in older git history.
 - **Not run on the real machine.** First real-night checks: `rpipe runs` / digest health line shows `rerun` / `rerun waiting` only if some paper was cut (nights so far had `body cut 0`, so likely nothing happens); `rpipe show ID` on a summary shows provenance `gpu_share` 1.0.
 - **Deferred minors:** DST edge in `deadline_at` near the 12 h limit; duplicate `/api/tags` probes in scan; recommend note sizes the raised limit by the bench's context; time estimate omits bucket load time; rerun load cap stays 600 s; no cache of the per-token memory measurement (~1 min on nights with candidates).
-- **Next:** owner decides merge; then B.6 (task splitting / map-reduce, measured with `rpipe eval`), refresh the Phase 7 plan.
+- **Next:** reinstall the tool (`uv tool install --editable '.[embed,serve]' --force`); then B.6 (task splitting / map-reduce, measured with `rpipe eval`), refresh the Phase 7 plan.
 
 ## B.4 built (2026-11-24, merged)
 

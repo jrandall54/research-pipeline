@@ -127,7 +127,7 @@ def test_small_gpu_with_shipped_catalog_offers_a_cpu_model():
     assert any(c.entry.pull == "qwen3:8b" for c in ranked)
     rec = recommend(info, shipped)
     assert rec.backend == "ollama" and rec.pull is not None
-    assert rec.reasons == ["the GPU's 4.0 GB is too little for a model; a small model runs on the CPU overnight (slow)"]
+    assert rec.reasons == ["no catalog model fits in the GPU memory free now; a small model runs on the CPU overnight (slow)"]
 
 
 def test_none_reason_does_not_blame_ram_it_did_not_check():

@@ -292,3 +292,15 @@ def test_wizard_cpu_only_declined_download_says_how_to_pick(vault, monkeypatch):
     result, pulled = setup_run(vault, monkeypatch, [m], "1\nn\n", check=LlmError("model not installed"))
     assert pulled == [] and cfg(vault).llm_model == "auto"
     assert "run `rpipe model recommend` to pick and pin a model that runs on this computer" in result.output
+
+
+def test_busy_mid_band_card_pins_the_freshly_pulled_cpu_model(vault, monkeypatch):
+    """An 8 GB card with 5 GB free fits nothing on the GPU, so rank falls back to the CPU; the model
+    setup just downloaded must then be pinned (model and context), not reported as missing."""
+    busy = Gpu("RTX 4060 Ti", 8.0, "nvidia", 5.0)
+    m = machine(gpu=busy, gpus=[busy], ram_gb=16.0, ram_free_gb=12.0, ollama_installed=True, ollama_running=True)
+    result, pulled = setup_run(vault, monkeypatch, [m], "1\ny\n")
+    assert result.exit_code == 0, result.output
+    c = cfg(vault)
+    assert pulled == ["qwen3:4b"] and (c.llm_backend, c.llm_model, c.llm_num_ctx) == ("ollama", "qwen3:4b", 32768)
+    assert "pinned" in result.output and "No model that runs on this computer" not in result.output

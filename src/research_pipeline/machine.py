@@ -163,14 +163,14 @@ def recommend(info: MachineInfo, catalog: Catalog) -> Recommendation:
         reasons = [f"{who} {vram:.1f} GB of GPU memory, enough to run a model locally"]
         return Recommendation("ollama", pull, install, _others("ollama"), reasons)
     gpu = info.gpu
-    vram = total_vram(info)
+    # "free now", not the card's size: a big card that is busy (a game, a loaded model) also lands here
+    no_fit = "no catalog model fits in the GPU memory free now"
     if info.claude_logged_in:
-        why = ("no GPU was found" if gpu is None
-               else f"no catalog model fits the GPU's {vram:.1f} GB")
+        why = "no GPU was found" if gpu is None else no_fit
         return Recommendation("claude-code", None, False, _others("claude-code"),
                               [f"{why}, but you are logged in to Claude Code"])
     if ranked:
-        where = "no GPU found" if gpu is None else f"the GPU's {vram:.1f} GB is too little for a model"
+        where = "no GPU found" if gpu is None else no_fit
         return Recommendation("ollama", pull, install, _others("ollama"),
                               [f"{where}; a small model runs on the CPU overnight (slow)"])
     return Recommendation("none", None, False, _others("none"), [

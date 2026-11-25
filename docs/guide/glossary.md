@@ -299,3 +299,7 @@
 **`needed_ctx`** — on a summary whose core text was cut (`body_cut`), the context window in tokens that would have fit that core text whole: its characters divided by 3, plus the 4,000 reserved, rounded up to a multiple of 1024. 300,000 characters of core text gives 104,448. Empty when nothing was cut. Used to find papers worth reading again at a bigger context. See `summaries.md`.
 
 **GPU share (`gpu_share`)** — how much of the model sat in GPU memory while it wrote a summary, from 0 to 1 (`1.0` = all of it; `0.93` = 7% spilled to ordinary RAM). Read from Ollama's list of loaded models and stored in the summary's provenance; empty when unknown or for a cloud backend. See `summaries.md`.
+
+**Rerun (of a cut paper)** — reading a paper whose core text was cut (`body_cut`) a second time, at a context big enough for all of it, with part of the model spilled to RAM. Slow, so it happens after the normal work and must finish by the morning deadline. Not the same as a same-day re-run of the whole pipeline. See "The morning deadline" in `scheduling.md`.
+
+**Morning deadline (`night_deadline`)** — the clock time (default 07:00) by which reruns of cut papers must finish, or `off`. It never stops normal papers. If the next such time is more than 12 hours away there is no deadline and reruns are skipped. Set with `rpipe schedule set-deadline`. See `scheduling.md`.

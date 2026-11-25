@@ -79,6 +79,9 @@ class Config(BaseModel):
     llm_cli_path: str | None = None
     # Enabled paper sources, in collection order (see `rpipe sources list`).
     sources: list[str] = Field(default_factory=lambda: ["arxiv", "hf_daily"])
+    # Morning deadline (24-hour HH:MM, local time) by which reruns of cut papers must finish,
+    # or "off" for no reruns. Normal papers always run. See docs/guide/scheduling.md.
+    night_deadline: str = Field(default="07:00", pattern=r"^(off|([01]\d|2[0-3]):[0-5]\d)$")
 
     @field_validator("sources")
     @classmethod

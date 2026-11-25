@@ -2770,6 +2770,27 @@ def schedule_show(
         raise _fail(str(exc)) from exc
     typer.echo(f"# {schedule.SERVICE_NAME}\n{service}")
     typer.echo(f"# {schedule.TIMER_NAME}\n{timer}")
+    try:
+        deadline = load_config(path / "config.yaml").night_deadline
+    except ConfigError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"# Reruns of cut papers: deadline {deadline} (change with `rpipe schedule set-deadline`)")
+
+
+@schedule_app.command("set-deadline")
+def schedule_set_deadline(
+    value: Annotated[str, typer.Argument(help="24-hour time such as 07:00, or off for no reruns.")],
+    vault: VaultOption = None,
+) -> None:
+    """Set the morning time by which reruns of cut papers must finish (normal papers always run)."""
+    path = _schedule_vault(vault)
+    with _clean_errors():
+        profile_edit.set_night_deadline(path, value)
+    stored = load_config(path / "config.yaml").night_deadline
+    if stored == "off":
+        typer.echo("Reruns of cut papers are off.")
+    else:
+        typer.echo(f"Reruns of cut papers must finish by {stored}.")
 
 
 @schedule_app.command("install")

@@ -4,12 +4,16 @@ import os
 import re
 import subprocess
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 
 SERVICE_NAME = "research-pipeline.service"
 TIMER_NAME = "research-pipeline.timer"
 
 Runner = Callable[[list[str]], int]
+
+# A deadline further away than this is not "tonight's" (for example 07:00 seen at 10:00).
+MAX_NIGHT_HOURS = 12
 
 
 class ScheduleError(Exception):
@@ -140,3 +144,19 @@ def status(runner: Runner) -> bool:
     if runner(["systemctl", "--user", "list-timers", TIMER_NAME, "--all"]) != 0:
         raise ScheduleError("systemctl could not list the timer.")
     return True
+
+
+def deadline_at(now: datetime, value: str) -> datetime | None:
+    """The next `value` (HH:MM, local) strictly after `now`; None if "off" or over 12 h away.
+
+    `now` is a naive local time. Only reruns of cut papers obey this deadline.
+    """
+    if value == "off":
+        return None
+    hour, minute = _parse_time(value)
+    at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if at <= now:
+        at += timedelta(days=1)
+    if at - now > timedelta(hours=MAX_NIGHT_HOURS):
+        return None
+    return at

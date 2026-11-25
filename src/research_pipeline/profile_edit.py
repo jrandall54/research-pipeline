@@ -394,6 +394,25 @@ def set_llm_num_ctx(vault: Path, n: int | str) -> None:
     _edit(_config_path(vault), Config, change)
 
 
+def set_night_deadline(vault: Path, value: str) -> None:
+    """Set the morning deadline for reruns: a 24-hour time such as 07:00 (7:00 is fine), or off."""
+    text = value.strip().lower()
+    if text != "off":
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+        if not m or int(m[1]) > 23 or int(m[2]) > 59:
+            raise ValueError(
+                f"{value!r} is not a time: give HH:MM in 24-hour form (for example 07:00), or off"
+            )
+        text = f"{int(m[1]):02d}:{m[2]}"
+
+    def change(data) -> bool:
+        # Quoted: unquoted 7:00-style times are read by YAML as a number of minutes.
+        data["night_deadline"] = DoubleQuotedScalarString(text)
+        return True
+
+    _edit(_config_path(vault), Config, change)
+
+
 def enable_source(vault: Path, name: str, known: set[str]) -> bool:
     """Turn a source on (appended to the end of the order). False if it was already on."""
     name = name.strip()

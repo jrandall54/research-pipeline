@@ -41,3 +41,7 @@ llm_cli_path: null
 # Paper sources to collect from, in this order. List what exists with `rpipe sources list`;
 # turn one on or off with `rpipe sources enable NAME` / `rpipe sources disable NAME`.
 sources: [arxiv, hf_daily]
+
+# Morning deadline (24-hour, local time) by which reruns of cut papers must finish, or off for
+# no reruns. Normal papers always run. Keep the quotes. Change with `rpipe schedule set-deadline`.
+night_deadline: "07:00"

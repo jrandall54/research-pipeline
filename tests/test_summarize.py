@@ -954,6 +954,23 @@ def test_diagram_call_failure_keeps_summary(conn):
     assert get_diagram(conn, "2501.00001") is None
 
 
+@pytest.mark.parametrize("exc", [LlmError("boom"), LlmLimitReached("limit")])
+def test_failed_diagram_call_deletes_stale_diagram(conn, exc):
+    from research_pipeline.db import save_diagram
+
+    add_triaged(conn, "2501.00001")
+    save_diagram(conn, "2501.00001", a_diagram(), "old")
+    llm = FakeLLM([summary(), critique(), exc])
+    run_summarize(conn, llm, lambda pid: SECTIONS, 32768, diagrams=True)
+    assert get_diagram(conn, "2501.00001") is None
+
+
+def test_phase_note_diagram_retry():
+    from research_pipeline.summarize import phase_note
+
+    assert phase_note("diagram_retry", "p1") == "retrying the diagram for p1"
+
+
 @pytest.mark.parametrize("exc,stopped", [(LlmLimitReached("limit"), LIMIT_STOPPED),
                                          (LlmTimeout("slow"), TIMEOUT_STOPPED)])
 def test_diagram_limit_or_timeout_keeps_summary_then_stops(conn, exc, stopped):

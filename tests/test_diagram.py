@@ -78,7 +78,7 @@ def test_make_diagram_retry_then_drop():
     d, probs = make_diagram(llm, "T", SECS, "We study X.", 32768, phases.append)
     assert d is None and len(probs) == 1 and probs[0].startswith("diagram: ")
     assert "Coordinator" in probs[0]
-    assert phases == ["diagram", "retry"] and len(llm.calls) == 2
+    assert phases == ["diagram", "diagram_retry"] and len(llm.calls) == 2
     assert "Coordinator" in llm.calls[1][1].split("</paper>", 1)[1]
 
 
@@ -106,3 +106,13 @@ def test_check_diagram_es_plurals_match():
     d2 = Diagram(shape="steps", nodes=[node("a", "Process class"), node("b", "Box match")],
                  edges=[DiagramEdge(source="a", target="b")], caption="c")
     assert check_diagram(d2, secs2, "") == []
+
+
+def test_stem_silent_e_meets_inflections():
+    from research_pipeline.diagram import _stem
+
+    for a, b in (("caches", "cache"), ("niches", "niche"), ("encoding", "encode"),
+                 ("retrieved", "retrieve"), ("agents", "agent"), ("planning", "plan"),
+                 ("processes", "process"), ("classes", "class"), ("boxes", "box"),
+                 ("matches", "match")):
+        assert _stem(a) == _stem(b), (a, b)

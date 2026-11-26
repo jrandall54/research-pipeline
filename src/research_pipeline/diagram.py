@@ -25,7 +25,7 @@ _WORD = re.compile(r"[a-z]{3,}")
 
 
 def _stem(word: str) -> str:
-    """Drop a trailing `s`/`es`, `ing` or `ed` (and a doubled last letter: planning -> plan)."""
+    """Drop a trailing `s`/`es`, `ing`, `ed` or silent `e` (and a doubled last letter: planning -> plan)."""
     if word.endswith(("sses", "xes", "ches", "shes")):
         word = word[:-2]  # processes -> process, boxes -> box, matches -> match
     elif word.endswith("s") and not word.endswith("ss") and len(word) > 3:
@@ -34,6 +34,8 @@ def _stem(word: str) -> str:
         if word.endswith(ending) and len(word) - len(ending) >= 3:
             word = word[: -len(ending)]
             break
+    if len(word) > 4 and word.endswith("e"):
+        word = word[:-1]  # cache/caches, encode/encoding, retrieve/retrieved meet at one stem
     if len(word) > 3 and word[-1] == word[-2]:
         word = word[:-1]
     return word
@@ -76,7 +78,7 @@ def make_diagram(
 
     Returns ``(diagram, [])``; ``(None, [])`` when the model says the paper has no clear shape;
     ``(None, ["diagram: <problems>"])`` when it is dropped. ``sections=None`` means abstract only.
-    ``on_phase`` is told ``diagram``, then ``retry`` before the second call. A model failure
+    ``on_phase`` is told ``diagram``, then ``diagram_retry`` before the second call. A model failure
     raises `LlmError` (the caller decides what that means).
     """
     basis = "full_text"
@@ -93,7 +95,7 @@ def make_diagram(
     if not problems:
         return answer.diagram, []
     if on_phase is not None:
-        on_phase("retry")
+        on_phase("diagram_retry")
     answer = llm.generate(system, user + diagram_feedback(problems, [s.title for s in shown]), DiagramAnswer)
     if answer.diagram is None:
         return None, []

@@ -191,4 +191,4 @@ Worked example: a CPU-only laptop with the default settings. `rpipe run` loads t
 
 **How to check it.** `rpipe model show` prints the setting; the `reading mode` stage shows the reason during a run. `tests/test_parts.py` checks `resolve_diagrams` for each case, `tests/test_profile_edit.py` and `tests/test_cli_model.py` check the command and the `show` line.
 
-**Where the code.** `src/research_pipeline/parts.py` (`resolve_diagrams`), `src/research_pipeline/cli.py` (`_read_mode`, `_summarize_plan`, `rpipe model set-diagrams`), `src/research_pipeline/profile_edit.py` (`set_diagrams`), `src/research_pipeline/models.py` (`Config.diagrams`).
+**Where the code.** `src/research_pipeline/parts.py` (`resolve_diagrams`), `src/research_pipeline/cli.py` (`_read_plan`, `_summarize_plan`, `rpipe model set-diagrams`), `src/research_pipeline/profile_edit.py` (`set_diagrams`), `src/research_pipeline/models.py` (`Config.diagrams`).

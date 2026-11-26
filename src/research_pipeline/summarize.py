@@ -65,6 +65,8 @@ def phase_note(name: str, pid: str) -> str:
         return f"notes unusable for {pid}; reading it whole"
     if name == "diagram":
         return f"drawing a diagram for {pid}"
+    if name == "diagram_retry":
+        return f"retrying the diagram for {pid}"
     label = {"summary": "writing the summary for", "critique": "writing the critique for",
              "condense": "condensing notes for"}
     return f"{label.get(name, 'retrying citations for')} {pid}"
@@ -298,7 +300,6 @@ def run_summarize(
                     mode=mode, fallback_above=fallback_above,
                 )
                 drawn = None
-                failed_call = False
                 stop_after = ""
                 if diagrams:
                     try:
@@ -306,7 +307,7 @@ def run_summarize(
                                                   num_ctx, on_phase=on_phase)
                         result = result.model_copy(update={"checks": [*result.checks, *why]})
                     except LlmError as exc:
-                        failed_call = True
+                        drawn = None
                         result = result.model_copy(
                             update={"checks": [*result.checks, "diagram: the model call failed"]})
                         # The summary is kept; a limit or a hung model still stops the stage after it.
@@ -317,8 +318,9 @@ def run_summarize(
                     prompt_version=PROMPT_VERSION, paper_version=paper["version"], num_ctx=llm.num_ctx,
                     backend=getattr(llm, "name", None), gpu_share=_gpu_share(llm),
                 )
-                if diagrams and not failed_call:
-                    save_diagram(conn, pid, drawn, llm.model_name)  # None: no diagram, drop an old one
+                if diagrams:
+                    # None (no diagram, or the call failed): drop an old one, the summary was replaced
+                    save_diagram(conn, pid, drawn, llm.model_name)
                 clear_error(conn, pid)
                 if listed:
                     conn.commit()  # keep `in_digest`; the digest rewrite picks the summary up

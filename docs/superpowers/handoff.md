@@ -4,7 +4,7 @@ Current state and next steps only. Read `ROADMAP.md` for the full list of phases
 
 ## State (2026-11-26)
 
-- Phases 1 to 10.1 merged to `main` and pushed (Phase 10 = sharing; 10.1 = every `rpipe init` step explained, categories as a numbered menu; both 2026-11-26). `uv run pytest -q`: 1948 passing, ruff clean.
+- Phases 1 to 10.2 merged to `main` and pushed (Phase 10 = sharing; 10.1 = every `rpipe init` step explained, categories as a numbered menu; 10.2 = one terminal look for every command via `term.py`; all 2026-11-26). `uv run pytest -q`: 1963 passing, ruff clean.
 - Phase 10 lets the owner publish their picked papers and summaries as a public feed (`rpipe share setup`), browse and follow other people's feeds (`rpipe share browse`, `follow`, or the People page in the app), and see Mine, Following and Mix in the feed. Nothing leaves the machine until sharing is turned on; with no follows the feed looks as before apart from a People link.
 - Diagrams are off (Phase 9.3 owner ruling: `rpipe model set-diagrams off`). Summaries and the app's look stay as they are (owner ruling 2026-11-26); don't bring the old redesign back unless asked.
 

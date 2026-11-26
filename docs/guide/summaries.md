@@ -313,6 +313,45 @@ Worked example (the ACAP paper). Section 5.1 says "ACAP cut latency by 28%".
 
 **Where the code is.** `src/research_pipeline/extras.py` (`check_extras`), `citations.py` (`section_texts`, `extra_claims`), `numbers.py`, wired in `summarize.summarize_paper`.
 
+### The diagram
+
+**What it does.** One more model call per paper (when the `diagrams` setting says so, see "The diagrams setting" in [llm.md](llm.md)) asks for a small diagram of how the method works. The model does not draw anything: it answers with data, a list of boxes (nodes) and arrows (edges), and the app turns that into a picture. The diagram shows on the card in Read mode and on the paper screen. A paper with no clear shape (a survey, a theory paper) gets no diagram, and that is a normal answer, not a failure.
+
+**How it works.**
+
+1. After the summary and critique, `make_diagram` (`diagram.py`) sends the paper again with a diagram task (`build_diagram_prompt`). The progress note says `drawing a diagram for <id>`. The paper is cut to the same context budget as the other calls (`fit_to_budget`); an abstract-only paper sends just its abstract.
+2. The model answers `{"diagram": ...}` or `{"diagram": null}`. A diagram has a `shape` (`parts`: one thing coordinating several parts; `steps`: A, then B, then C; `loop`: steps that repeat), 2 to 8 `nodes` (each with an `id`, a `label` of at most 4 words, optional `detail` and the `sections` it comes from), `edges` (arrows between node ids, with an optional label) and a one-sentence `caption`.
+3. Code checks it (`check_diagram`):
+   - 2 to 8 nodes, and unique ids;
+   - every arrow starts and ends at a real node;
+   - every label has at most 4 words;
+   - every node cites a section the paper has (the same lookup the hook check uses, `citations.section_texts`; "Abstract" always counts);
+   - every content word of every label appears somewhere in the paper's text. Case is ignored; words under 3 letters and small words (the, and, with, ...) are skipped; a trailing `s`, `ing` or `ed` is stripped on both sides, so "agents" matches "agent" and "planning" matches "plan".
+4. If a check fails, the model gets one more try (progress note `retrying citations for <id>`) with the problems listed and the real section titles. If it fails again, the diagram is dropped and one line goes into the summary's `checks`, for example `diagram: label 'Coordinator' uses words the paper never uses: coordinator`. If the model call itself fails, the summary is still saved and `checks` says `diagram: the model call failed`.
+5. A kept diagram is saved as a `summaries` row with `kind = 'diagram'` (no schema change, see [data-model.md](data-model.md)), so it can be added or dropped without touching the summary. With `diagrams` off, no call is made and any stored diagram is left alone. `rpipe summarize` and the nightly run count the drawn ones as `diagrams=N` (shown only when diagrams are on).
+
+Worked example (the ACAP robot-agents paper). The paper calls its coordinator a "hyper-agent" and says it hands tasks to an arm agent, a torso agent and a chassis agent. The model answers:
+
+```
+shape: parts
+nodes: h "Hyper-agent"   (the coordinator)
+       a "Arm agent"     t "Torso agent"     c "Chassis agent"      (each cites "2 Method")
+edges: h -> a, h -> t, h -> c  (label "tasks")
+caption: One hyper-agent hands tasks to an agent for each part of the robot.
+```
+
+All checks pass: 4 nodes, edges point at real ids, labels are short, every label word is in the paper. Had the model written "Coordinator" because that is the usual word, the check would find that the paper never says it and drop that attempt; the retry tells the model to use the paper's own names.
+
+**Why it is built this way.**
+- Data, not Mermaid or SVG from the model. Data can be checked by code (the checks above) and drawn the same way on every screen, in the light and dark themes, with no JavaScript and no third-party request. Free-form drawing code cannot be checked for invented components.
+- Labels must use words from the paper so the model cannot invent a component. The cost is a false drop when the paper uses a word only in a different form; the eval report (see [evaluation.md](evaluation.md)) shows how many are dropped, so the owner can see whether the rule is too strict.
+- One retry, not more. A second chance fixes most slips (a made-up name, a wrong section title) for the price of one call; a third would cost a slow call per paper for a nicety. This matches the citation check.
+- A dropped diagram never fails the paper: the summary is the product, the diagram is an extra.
+
+**How to check it.** `uv run pytest -q tests/test_diagram.py tests/test_citations.py tests/test_summarize.py`. To see the real thing, `rpipe eval run` writes one line per paper (drawn, none, or dropped and why).
+
+**Where the code is.** `src/research_pipeline/diagram.py` (`check_diagram`, `make_diagram`), `prompts.py` (`build_diagram_prompt`, `diagram_feedback`), `summarize.py` (`run_summarize(diagrams=)`, `phase_note`), `requests_queue.py` and `cli.py` (pass the decision on), `db.save_diagram` / `get_diagram`.
+
 ### Provenance: which model and prompt wrote this
 
 Every summary saved by `rpipe summarize` / `rpipe run` also records where it came from: `{"backend", "model", "prompt_version", "paper_version", "num_ctx", "gpu_share", "created_at"}`. Worked example: `{"backend": "ollama", "model": "qwen3:14b", "prompt_version": "2026-11-p3", "paper_version": 2, "num_ctx": 32768, "gpu_share": 1.0, "created_at": "2026-11-21T03:00:00+00:00"}` means the `ollama` backend ran qwen3:14b and it wrote it from version 2 of the paper, with prompt wording `2026-11-p3`, a 32768-token context window, and the whole model on the GPU. It is stored as an extra `provenance` key in the summary row's JSON (like `basis`) and read with `db.get_provenance()`; `get_summary()` removes it before building `PaperSummary`. The digest footer shows the backend first, e.g. `_ollama · qwen3:14b · prompt 2026-11-p3_`. Summaries saved before this feature have no such key (and those saved before backends existed have no `backend`, so their footer is unchanged): they load and render exactly as before, and `get_provenance()` returns `None`.
@@ -357,6 +396,7 @@ The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They ch
 
 - `src/research_pipeline/summary_models.py`: `Claim`, `Notes`, `Summary`, `Critique`, `PaperSummary` (with `read_mode`, `parts`)
 - `src/research_pipeline/summarize.py`: `summarize_paper` (modes `whole` / `split`, the map-reduce fallback rule), `phase_note` (progress text for each phase), `run_summarize` (counts `in_parts`); also re-exports `claims` and `unknown_citations`
+- `src/research_pipeline/diagram.py`: the diagram call, `check_diagram`, `make_diagram` (see "The diagram")
 - `src/research_pipeline/citations.py`: the citation check, `claims`, `unknown_citations`, `generate_checked` (generate, check, retry once); shared by whole reads and reading in parts
 - `src/research_pipeline/parts.py`: reading in parts, `split_groups`, `chunk_to_budget`, `read_in_parts`, `FRONT_WORDS`, `MAX_CONDENSE_ROUNDS`, `MIN_PARTS_CTX`; choosing the mode, `resolve_mode`, `SPLIT_BELOW_CTX`
 - `src/research_pipeline/cli.py`: `_read_mode` (the `reading mode` stage, shared by `rpipe run`, `rpipe summarize` and `rpipe eval run`), `_summarize_plan` (mode, `fallback_above` and the diagrams yes/no for `rpipe run` and `rpipe summarize`), `rpipe model set-mode`

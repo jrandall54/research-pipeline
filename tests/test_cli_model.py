@@ -307,7 +307,7 @@ def test_ollama_backend_ignores_effort(vault, monkeypatch):
 
 def test_summarize_command_prints_one_line_per_paper(vault, monkeypatch):
     def fake(conn, llm, fetch, num_ctx, today=None, backlog_limit=None, paper_ids=None, *, reporter=None, refetch=False,
-             mode="whole", fallback_above=None):
+             mode="whole", fallback_above=None, diagrams=False):
         from research_pipeline.progress import ProgressEvent
         for pid, n, outcome, detail in (("2611.26408", 1, "done", "41s"), ("2611.26409", 2, "failed", "bad json"),
                                         ("2611.26410", 2, "stopped", "")):
@@ -356,6 +356,10 @@ def test_summarize_refetch_is_passed_through(vault, monkeypatch):
     conn.close()
     assert run(vault, "summarize", "2611.26408", "--refetch").exit_code == 0
     assert seen["refetch"] is True and seen["paper_ids"] == ["2611.26408"]
+    assert seen["diagrams"] is True  # the default `auto` draws on a non-Ollama backend
+    run(vault, "model", "set-diagrams", "off")
+    assert run(vault, "summarize", "2611.26408", "--refetch").exit_code == 0
+    assert seen["diagrams"] is False
 
 
 def test_set_backend_message_says_reset_only_when_backend_changes(vault):

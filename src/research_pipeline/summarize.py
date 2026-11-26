@@ -12,6 +12,7 @@ from typing import Literal
 
 # `claims` and `unknown_citations` are re-exported: callers and tests import them from here.
 from research_pipeline.citations import claims, generate_checked, unknown_citations  # noqa: F401
+from research_pipeline.diagram import make_diagram
 from research_pipeline.extras import check_extras
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.llm import LLM, LlmError, LlmLimitReached, LlmTimeout
@@ -62,6 +63,8 @@ def phase_note(name: str, pid: str) -> str:
         return f"reading part {part} of {of} of {pid}"
     if name == "notes_unusable":
         return f"notes unusable for {pid}; reading it whole"
+    if name == "diagram":
+        return f"drawing a diagram for {pid}"
     label = {"summary": "writing the summary for", "critique": "writing the critique for",
              "condense": "condensing notes for"}
     return f"{label.get(name, 'retrying citations for')} {pid}"
@@ -186,6 +189,7 @@ def run_summarize(
     refetch: bool = False,
     mode: Literal["whole", "split"] = "whole",
     fallback_above: int | None = None,
+    diagrams: bool = False,
 ) -> tuple[dict[str, int], list[str]]:
     """Summarise the papers that need it: full text (stored, else fetched), then the model.
 
@@ -208,6 +212,11 @@ def run_summarize(
     is kept (else the abstract is used) and a note is added to the errors.
     ``mode`` and ``fallback_above`` are passed to `summarize_paper` for every paper; counts
     ``in_parts`` the papers that fell back to map-reduce (cut papers read in parts).
+    ``diagrams=True`` makes one more call per paper for a diagram (diagram.py): it is saved
+    beside the summary (replacing an earlier one; none when the model says there is no clear
+    shape) and counts ``diagrams`` (drawn; the key exists only when diagrams are on). A diagram that is dropped, or whose call fails,
+    never fails the paper: the reason goes into the summary's ``checks``. ``diagrams=False``
+    makes no call and leaves any stored diagram alone.
     See docs/guide/running.md.
     """
     if refetch and paper_ids is None:
@@ -221,6 +230,7 @@ def run_summarize(
         papers_missing_summary,
         papers_to_summarize,
         record_failure,
+        save_diagram,
         save_fulltext,
         save_summary,
         set_status,
@@ -228,6 +238,8 @@ def run_summarize(
 
     counts = {"fetched": 0, "summarized": 0, "abstract_only": 0, "body_cut": 0, "summary_failed": 0,
               "in_parts": 0}
+    if diagrams:
+        counts["diagrams"] = 0  # only counted (and shown) when diagrams are on
     errors: list[str] = []
     today = today or date.today()
     if paper_ids is not None:
@@ -285,11 +297,28 @@ def run_summarize(
                     llm, paper["title"], paper["abstract"], sections, num_ctx, on_phase=on_phase,
                     mode=mode, fallback_above=fallback_above,
                 )
+                drawn = None
+                failed_call = False
+                stop_after = ""
+                if diagrams:
+                    try:
+                        drawn, why = make_diagram(llm, paper["title"], sections, paper["abstract"],
+                                                  num_ctx, on_phase=on_phase)
+                        result = result.model_copy(update={"checks": [*result.checks, *why]})
+                    except LlmError as exc:
+                        failed_call = True
+                        result = result.model_copy(
+                            update={"checks": [*result.checks, "diagram: the model call failed"]})
+                        # The summary is kept; a limit or a hung model still stops the stage after it.
+                        stop_after = (LIMIT_STOPPED if isinstance(exc, LlmLimitReached)
+                                      else TIMEOUT_STOPPED if isinstance(exc, LlmTimeout) else "")
                 save_summary(
                     conn, pid, result, llm.model_name,
                     prompt_version=PROMPT_VERSION, paper_version=paper["version"], num_ctx=llm.num_ctx,
                     backend=getattr(llm, "name", None), gpu_share=_gpu_share(llm),
                 )
+                if diagrams and not failed_call:
+                    save_diagram(conn, pid, drawn, llm.model_name)  # None: no diagram, drop an old one
                 clear_error(conn, pid)
                 if listed:
                     conn.commit()  # keep `in_digest`; the digest rewrite picks the summary up
@@ -298,7 +327,12 @@ def run_summarize(
                 counts["summarized"] += 1
                 counts["body_cut"] += int(result.body_cut)
                 counts["in_parts"] += int(result.read_mode == "map_reduce")
+                if diagrams:
+                    counts["diagrams"] += int(drawn is not None)
                 report("done")
+                if stop_after:
+                    errors.append(stop_after)
+                    break
             except LlmLimitReached:
                 # Not the paper's fault: no retry is burned, it stays queued for the next run.
                 if paper["status"] == Status.triaged.value:

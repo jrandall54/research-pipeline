@@ -239,3 +239,28 @@ def test_drain_without_a_deadline_never_reads_the_clock(conn):
 
     counts, _ = _drain(conn, AlwaysSummary([]), now=clock)
     assert counts["requests_done"] == 1
+
+
+def test_drain_requests_passes_diagrams(conn):
+    from research_pipeline.db import get_diagram
+    from research_pipeline.summary_models import Diagram, DiagramAnswer, DiagramEdge, DiagramNode
+
+    d = Diagram(shape="steps",
+                nodes=[DiagramNode(id="a", label="Classifier", sections=["2 Method"]),
+                       DiagramNode(id="b", label="Accuracy", sections=["3 Results"])],
+                edges=[DiagramEdge(source="a", target="b")], caption="c")
+
+    class WithDiagram(AlwaysSummary):
+        def generate(self, system, user, schema):
+            if schema.__name__ == "DiagramAnswer":
+                self.calls.append((system, user))
+                return DiagramAnswer(diagram=d)
+            return super().generate(system, user, schema)
+
+    insert_request(conn, "summarize", {"paper_id": A})
+    _drain(conn, WithDiagram([]), diagrams=True)
+    assert get_diagram(conn, A) == d
+    insert_request(conn, "summarize", {"paper_id": B})
+    llm = WithDiagram([])
+    _drain(conn, llm)
+    assert len(llm.calls) == 2 and get_diagram(conn, B) is None

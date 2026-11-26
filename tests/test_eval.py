@@ -614,3 +614,35 @@ def test_eval_notes_each_phase_with_the_paper_id(vault):
         "writing the summary for 2401.00000",
         "writing the critique for 2401.00000",
     ]
+
+
+def test_run_eval_records_diagram(vault):
+    from research_pipeline.summary_models import Diagram, DiagramAnswer, DiagramEdge, DiagramNode
+
+    d = Diagram(shape="steps",
+                nodes=[DiagramNode(id="a", label="Classifier", sections=["2 Method"]),
+                       DiagramNode(id="b", label="Accuracy", sections=["3 Results"])],
+                edges=[DiagramEdge(source="a", target="b")], caption="c")
+
+    class Drawing(AlwaysSummary):
+        def generate(self, system, user, schema):
+            if schema.__name__ == "DiagramAnswer":
+                self.calls.append((system, user))
+                return DiagramAnswer(diagram=d if len(self.calls) < 4 else None)
+            return super().generate(system, user, schema)
+
+    add_papers(vault, 2)
+    md = run_eval(vault, Drawing([]), fetch, 32768, DAY, diagrams=True)
+    data = load_eval(vault, DAY)
+    assert data.entries[0].diagram == d and data.entries[1].diagram is None
+    assert data.entries[1].diagram_problems == []
+    text = md.read_text()
+    assert "Diagram: drawn (steps, 2 boxes)" in text
+    assert "Diagram: none (no clear shape)" in text
+
+
+def test_run_eval_without_diagrams_makes_no_diagram_call(vault):
+    add_papers(vault, 1)
+    llm = AlwaysSummary([])
+    md = run_eval(vault, llm, fetch, 32768, DAY)
+    assert len(llm.calls) == 2 and "Diagram:" not in md.read_text()

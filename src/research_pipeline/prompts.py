@@ -142,6 +142,36 @@ def citation_feedback(bad: list[str], valid: list[str]) -> str:
     )
 
 
+DIAGRAM_TASK = f"""\
+Task: draw one small diagram of how the paper's method works, as data. Answer with
+{{"diagram": {{...}}}}, or {{"diagram": null}} when the method has no clear shape (a survey, a
+theory paper, a list of results). null is a normal answer; do not force a diagram.
+Fields of a diagram:
+- shape: "parts" (one thing coordinating several parts), "steps" (a pipeline: A, then B, then C)
+  or "loop" (steps that repeat).
+- nodes: 2 to 8 boxes, each with id (a short unique id), label (at most 4 words, using the
+  paper's own names for things, never a name you made up), optional detail (a few words) and
+  sections (the section titles it comes from, copied exactly).
+- edges: arrows, each with from and to (node ids) and an optional short label.
+- caption: one plain sentence saying what the diagram shows.
+{REMINDER}"""
+
+
+def build_diagram_prompt(title: str, sections: list[Section], basis: str) -> tuple[str, str]:
+    """(system, user) asking for a `DiagramAnswer`: the paper first, the task last."""
+    return SHARED_SYSTEM, _user(DIAGRAM_TASK, title, sections, basis)
+
+
+def diagram_feedback(problems: list[str], valid: list[str]) -> str:
+    """Retry note listing what was wrong with a diagram and the section titles that exist."""
+    return (
+        "\n\nYour previous diagram had these problems: "
+        f"{defuse(json.dumps(problems))}. Fix them, use only the paper's own names for labels, and "
+        f"cite only these section titles, copied exactly: {defuse(json.dumps(valid))}. "
+        "Answer again with the full JSON."
+    )
+
+
 # --- Reading a paper in parts -------------------------------------------------------------
 # A paper that does not fit is read in parts. Each part gets a notes call (a list of claims
 # with citations); too many notes are condensed; the notes are then combined into the usual

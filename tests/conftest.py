@@ -86,6 +86,8 @@ class AlwaysSummary(FakeLLM):
 
     def generate(self, system, user, schema):
         self.calls.append((system, user))
+        if schema.__name__ == "DiagramAnswer":
+            return schema(diagram=None)  # no clear shape
         return summary() if schema.__name__ == "Summary" else critique()
 
 

@@ -13,15 +13,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
+from research_pipeline.diagram import make_diagram
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.gold import GoldPaper, load_gold
 from research_pipeline.judge import FactVerdict, is_self_graded, judge_summary
-from research_pipeline.llm import LLM, LlmLimitReached
+from research_pipeline.llm import LLM, LlmError, LlmLimitReached
 from research_pipeline.models import Section
 from research_pipeline.profile_edit import normalise_text
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import PROMPT_VERSION
 from research_pipeline.summarize import Claim, PaperSummary, phase_note, summarize_paper
+from research_pipeline.summary_models import Diagram
 from research_pipeline.vault import ConfigError
 
 PASS_MARK = 0.9
@@ -37,6 +39,9 @@ class EvalEntry(BaseModel):
     verdicts: list[FactVerdict | None] | None = None  # one slot per key fact; None = not judged
     judge_error: str | None = None
     key_facts: list[str] = []  # the key facts used for this run (old files have none)
+    diagram: Diagram | None = None  # the drawn diagram (eval never writes it to the vault database)
+    diagram_problems: list[str] = []  # why the diagram was dropped, or that the call failed
+    diagram_asked: bool = False  # the diagram call was made (to tell "no clear shape" from "off")
 
 
 class EvalSetup(BaseModel):
@@ -164,6 +169,13 @@ def _entry_md(entry: EvalEntry, gold: GoldPaper | None, sections: list[Section])
         how = f" (read in parts: {mode}, {s.parts} notes call{'s' if s.parts != 1 else ''})"
     cut = " (body cut to fit the context)" if s.body_cut else ""
     lines += [f"Basis: {basis}{how}{cut}", ""]
+    if entry.diagram_asked:
+        if entry.diagram is not None:
+            lines += [f"Diagram: drawn ({entry.diagram.shape}, {len(entry.diagram.nodes)} boxes)", ""]
+        elif entry.diagram_problems:
+            lines += [f"Diagram: dropped ({'; '.join(entry.diagram_problems)})", ""]
+        else:
+            lines += ["Diagram: none (no clear shape)", ""]
     if s.dropped:
         left_out = ", ".join(f"{normalise_text(d.title)} ({d.chars:,} chars)" for d in s.dropped)
         lines += [f"Left out: {left_out}", ""]
@@ -203,6 +215,7 @@ def run_eval(
     reporter: Reporter | None = None,
     judge: LLM | None = None,
     mode: Literal["whole", "split"] = "whole",
+    diagrams: bool = False,
 ) -> Path:
     """Summarize every gold paper and write `eval/<today>.json` and `.md`; return the .md path.
 
@@ -215,6 +228,8 @@ def run_eval(
     ``mode`` is the resolved reading mode (whole or split). Eval never uses the rerun-aware
     fallback of nightly runs: a paper cut in whole mode goes straight to parts (fallback_above=0),
     so one eval measures one reading of every paper.
+    ``diagrams=True`` also makes the diagram call for each paper and records the diagram, or why
+    it was dropped, on the entry and in the report (nothing goes to the vault database).
     """
     entries: list[EvalEntry] = []
     sections_by_id: dict[str, list[Section]] = {}
@@ -249,6 +264,13 @@ def run_eval(
                     key_facts=list(g.key_facts),
                 )
                 entries.append(entry)
+                if diagrams:
+                    entry.diagram_asked = True
+                    try:
+                        entry.diagram, entry.diagram_problems = make_diagram(
+                            llm, g.title, sections, abstract, num_ctx, on_phase=on_phase)
+                    except LlmError:  # a failed diagram never loses the summary
+                        entry.diagram_problems = ["diagram: the model call failed"]
                 if judge is not None:
                     if limit_hit:
                         entry.judge_error = "usage limit reached"

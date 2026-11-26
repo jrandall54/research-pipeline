@@ -645,12 +645,13 @@ def _run_locked(ctx: _Context) -> None:
                             # Nothing queued: no reason to load the model just to pick a mode.
                             has_work = bool(papers_to_summarize(ctx.conn, date.today())) or bool(
                                 runnable_requests(ctx.conn))
-                            mode, fallback_above, _diagrams = _summarize_plan(
+                            mode, fallback_above, diagrams = _summarize_plan(
                                 llm, ctx.config, ctx.config.night_deadline != "off", reporter,
                                 has_work=has_work)
                             sum_counts, sum_errors = run_summarize(
                                 ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
                                 reporter=reporter, mode=mode, fallback_above=fallback_above,
+                                diagrams=diagrams,
                             )
                         counts |= sum_counts
                         errors += sum_errors
@@ -665,7 +666,7 @@ def _run_locked(ctx: _Context) -> None:
                                     req_counts, req_errors = drain_requests(
                                         ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
                                         reporter=reporter, mode=mode, fallback_above=fallback_above,
-                                        deadline=deadline,
+                                        diagrams=diagrams, deadline=deadline,
                                     )
                                 counts |= req_counts
                                 errors += req_errors
@@ -847,13 +848,13 @@ def summarize(
         done = ListReporter()
         with _reporter() as live:
             # Reruns follow tonight unless the deadline is off, so the same fallback rule as `run`.
-            mode, fallback_above, _diagrams = _summarize_plan(
+            mode, fallback_above, diagrams = _summarize_plan(
                 llm, ctx.config, ctx.config.night_deadline != "off", live)
             counts, errors = run_summarize(
                 ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
                 today=today, backlog_limit=cap, paper_ids=paper_ids or None,
                 reporter=_Tee(live, done), refetch=refetch,
-                mode=mode, fallback_above=fallback_above,
+                mode=mode, fallback_above=fallback_above, diagrams=diagrams,
             )
         typer.echo("Summarized:")
         _report(counts, errors)
@@ -948,11 +949,11 @@ def requests_run(vault: VaultOption = None) -> None:
         if llm is None:
             raise _fail(NO_MODEL)
         with _reporter() as reporter:
-            mode, fallback_above, _diagrams = _summarize_plan(
+            mode, fallback_above, diagrams = _summarize_plan(
                 llm, ctx.config, ctx.config.night_deadline != "off", reporter, has_work=bool(pending))
             counts, errors = drain_requests(
                 ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
-                reporter=reporter, mode=mode, fallback_above=fallback_above,
+                reporter=reporter, mode=mode, fallback_above=fallback_above, diagrams=diagrams,
             )
         typer.echo("Requests:")
         _report(counts, errors)
@@ -1806,11 +1807,11 @@ def eval_run(
         typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
         with _clean_errors():
             with _reporter() as reporter:
-                read_mode, _share = _read_mode(
+                read_mode, _share, diagrams = _read_plan(
                     llm, setting, reporter, set_with=None if mode is None else "--mode for this eval",
                     diagrams=ctx.config.diagrams)
                 md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
-                              reporter=reporter, judge=eval_judge, mode=read_mode)
+                              reporter=reporter, judge=eval_judge, mode=read_mode, diagrams=diagrams)
         typer.echo(f"Report written: {md}")
         if eval_judge:
             typer.echo("Next: rpipe eval report")

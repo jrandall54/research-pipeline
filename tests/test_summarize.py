@@ -893,3 +893,56 @@ def test_bad_hook_citation_triggers_the_one_retry():
     result = summarize_paper(llm, "Paper T", "We study X.", SECTIONS, 32768)
     assert len(llm.calls) == 3
     assert result.summary.hook is not None and result.checks == []
+
+
+# ---- the diagram call (Phase 9, Task 6) ----
+from research_pipeline.db import get_diagram  # noqa: E402
+from research_pipeline.summary_models import Diagram, DiagramAnswer, DiagramEdge, DiagramNode  # noqa: E402
+
+
+def a_diagram():
+    return Diagram(
+        shape="steps",
+        nodes=[DiagramNode(id="a", label="Classifier", sections=["2 Method"]),
+               DiagramNode(id="b", label="Accuracy", sections=["3 Results"])],
+        edges=[DiagramEdge(source="a", target="b")],
+        caption="Train, then measure.",
+    )
+
+
+def test_run_summarize_draws_diagram_when_on(conn):
+    add_triaged(conn, "2501.00001")
+    llm = FakeLLM([summary(), critique(), DiagramAnswer(diagram=a_diagram())])
+    rep = ListReporter()
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, diagrams=True, reporter=rep)
+    assert errors == [] and counts["diagrams"] == 1 and counts["summarized"] == 1
+    assert get_diagram(conn, "2501.00001") == a_diagram()
+    assert any(e.kind == "note" and e.label == "drawing a diagram for 2501.00001" for e in rep.events)
+
+
+def test_run_summarize_no_diagram_call_when_off(conn):
+    add_triaged(conn, "2501.00001")
+    llm = FakeLLM([summary(), critique()])
+    counts, _ = run_summarize(conn, llm, lambda pid: SECTIONS, 32768)
+    assert len(llm.calls) == 2 and "diagrams" not in counts
+    assert get_diagram(conn, "2501.00001") is None
+
+
+def test_dropped_diagram_reason_goes_to_checks(conn):
+    add_triaged(conn, "2501.00001")
+    bad = a_diagram().model_copy(update={"nodes": [DiagramNode(id="a", label="Orchestrator", sections=["2 Method"]),
+                                                   DiagramNode(id="b", label="Accuracy", sections=["3 Results"])]})
+    llm = FakeLLM([summary(), critique(), DiagramAnswer(diagram=bad), DiagramAnswer(diagram=bad)])
+    counts, _ = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, diagrams=True)
+    assert counts["diagrams"] == 0 and counts["summarized"] == 1
+    assert get_diagram(conn, "2501.00001") is None
+    assert any(c.startswith("diagram: ") and "Orchestrator" in c for c in get_summary(conn, "2501.00001").checks)
+
+
+def test_diagram_call_failure_keeps_summary(conn):
+    add_triaged(conn, "2501.00001")
+    llm = FakeLLM([summary(), critique(), LlmError("boom")])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, diagrams=True)
+    assert counts["summarized"] == 1 and counts["summary_failed"] == 0 and errors == []
+    assert "diagram: the model call failed" in get_summary(conn, "2501.00001").checks
+    assert get_diagram(conn, "2501.00001") is None

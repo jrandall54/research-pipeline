@@ -136,6 +136,13 @@ rpipe has two kinds of commands. The **pipeline** gets material on its own, usua
 
 The changes it makes: `vote(conn, id, "up" | "down" | "clear")`, `save(conn, id, True | False)`, `skip` and `unskip` (the review-later list), `shelf_add`, `shelf_remove`, `shelf_sync`, and `request` (ask the pipeline to do work later; see "The request list" in [data-model.md](data-model.md); the pipeline side, `requests_queue.drain_requests`, does the work in the nightly `rpipe run` or `rpipe requests run`, see "The request list" in [running.md](running.md)). Each change is one short transaction and commits. A paper id that is not in the database raises `UnknownPaperError`. One plain read goes with `request`: `open_request_ids(conn)` returns the ids (a set of numbers) of requests still waiting or being worked on, so `rpipe requests add` can tell "queued now" from "already waiting" (a repeat `request` returns the existing id).
 
+Added for the web app's feed page (all plain reads, no writes):
+
+- `plain_reasons(reasons)` turns the stored triage strings (`topic: agentic workflow (0.80)`, `liked similar: 2611.25905`, `HF upvotes: 56`, `followed author: ...`, `keyword: ...`, `near your shelf: ...`) into `ReasonView` objects (`kind`, `label`, `paper_id`) the page can word in plain language. It keeps the order and drops `disliked similar: ...` and anything it does not recognise.
+- `digest_dates(conn, limit=60)` lists the distinct digest dates, newest first, for the "Earlier days" list.
+- `summarize_states(conn, paper_ids)` gives the status (`pending`, `running`, `done`, `failed`) of the newest `summarize` request for each paper; a paper nobody asked about is absent.
+- `summary_provenance(conn, paper_id)` returns a `ProvenanceView` (`model`, `created_at`) saying which model wrote the stored summary and when, or none when there is no summary or it predates provenance. The page shows it under "About this summary".
+
 `library_api` does not hold rules of its own about votes or the shelf. It passes each change on to the module that already owns it: `library.py` for votes, saves and skips, `shelf.py` for the shelf, `review.py` for the queue queries, `db.py` for papers and summaries.
 
 Worked example, `rpipe show 2611.25005`:

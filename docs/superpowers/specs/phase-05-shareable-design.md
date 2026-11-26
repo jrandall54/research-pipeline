@@ -1,5 +1,7 @@
 # Phase 5 — Shareable: design
 
+> **Phase 5** · Status: approved, built · Plan: [phase-05-shareable.md](../plans/phase-05-shareable.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 Date: 2026-11-21. Status: draft for owner approval.
 
 ## Intent
@@ -55,7 +57,7 @@ The owner's setup (a GPU with Ollama and local models) is the ideal and stays th
 
 ## Research basis: subscription CLIs (2026-11-21)
 
-Full report: `docs/superpowers/specs/2026-11-21-cli-backends-research.md` (committed with this design).
+Full report: `docs/superpowers/specs/phase-05-cli-backends-research.md` (committed with this design).
 
 | Tool | Status |
 |---|---|

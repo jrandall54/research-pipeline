@@ -1,6 +1,12 @@
 # Research Pipeline
 
-Nightly pipeline that collects CS/security/AI papers, ranks them against the user's profile and writes a digest. The master plan is the Claude Docs doc "Research Pipeline — Master Implementation Plan" (https://claude.ai/artifact/Ajw2s52HwWuZfrYZXsZjfa). Phase plans live in `docs/superpowers/plans/`.
+Nightly pipeline that collects CS/security/AI papers, ranks them against the user's profile and writes a digest. The single list of all work is `docs/superpowers/ROADMAP.md`; the current state and next steps are in `docs/superpowers/handoff.md`.
+
+## Plans and phases
+
+- Every piece of work is a phase, `Phase N` or `Phase N.M` for work that grew out of phase N. No other labels ("part", "project").
+- Each phase has `docs/superpowers/specs/phase-NN[.M]-<slug>-design.md` and `docs/superpowers/plans/phase-NN[.M]-<slug>.md`, each opening with the standard header line (phase, status, partner file, roadmap).
+- `ROADMAP.md` is the source of truth: update its row (status, links) in the same commit as the work. `handoff.md` holds only the current state and next steps; replace, don't append. The old Claude Docs master plan is retired.
 
 ## Documentation is part of every change
 

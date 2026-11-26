@@ -1,5 +1,7 @@
 # Phase 6 — Pipeline hardening: design
 
+> **Phase 6** · Status: approved, built · Plan: [phase-06-hardening.md](../plans/phase-06-hardening.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 Date: 2026-11-22. Status: draft for owner approval. Master plan: "Phase 6 — Pipeline hardening".
 
 ## Intent

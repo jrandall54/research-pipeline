@@ -1,5 +1,7 @@
 # Phase 6 Pipeline Hardening (Parts A and C) Implementation Plan
 
+> **Phase 6** · Status: merged · Design: [phase-06-hardening-design.md](../specs/phase-06-hardening-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Every waiting step in `rpipe` shows visible progress (Part A), and the audit's small gaps are closed (Part C).
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3.12, typer (brings `rich`), sqlite3, pytest (offline: fake embedder, fake LLM), ruff.
 
-**Spec:** `docs/superpowers/specs/2026-11-22-phase6-pipeline-hardening-design.md` (approved 2026-11-22). Part B (long papers) is planned separately after the owner's model verdict; Part D is a decision recorded in the master plan, no code.
+**Spec:** `docs/superpowers/specs/phase-06-hardening-design.md` (approved 2026-11-22). Part B (long papers) is planned separately after the owner's model verdict; Part D is a decision recorded in the master plan, no code.
 
 ## Global Constraints
 
@@ -346,7 +348,7 @@ def test_stored_unknown_category_still_runs(tmp_vault_with_cs_ML, cli_runner):
 ### Task 11: Close-out
 
 **Files:**
-- Modify: `docs/superpowers/handoff.md`, `docs/guide/README.md` (reading order if pages were added)
+- Modify: `docs/superpowers/archive/handoff-log-to-2026-11-25.md`, `docs/guide/README.md` (reading order if pages were added)
 
 - [ ] **Step 1:** Run the whole suite and lint; run `rpipe run --vault <a copy of a test vault>` piped through `cat` and confirm plain lines with no escape codes (paste the output into the review notes).
 - [ ] **Step 2:** Update `handoff.md`: Parts A and C done; Part B waits on the owner's model verdict (comparison file `~/research-vault/model-comparison-2026-11-22.md`); Part D recorded in the master plan; the Phase 7 plan now needs its refresh (progress module classified *shared*; `on_progress` is gone).

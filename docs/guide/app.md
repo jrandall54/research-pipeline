@@ -4,7 +4,7 @@
 
 A private web app over your paper library: your feed of recent picks, saved papers and search, laid out for a phone (one column, bottom navigation) and for a desktop (sidebar). You open it from the home-screen icon on your phone or at an address in any browser on your tailnet. It reads and writes the same vault database the nightly pipeline uses, so a vote you tap in the morning shapes tonight's ranking.
 
-This page covers the server itself: how it is put together and how it protects itself. The screens (feed, paper, saved, search) and the buttons are described in the sections below; the design is in `docs/superpowers/specs/2026-11-25-app-project1-my-feed-design.md`.
+This page covers the server itself: how it is put together and how it protects itself. The screens (feed, paper, saved, search) and the buttons are described in the sections below; the design is in `docs/superpowers/specs/phase-08-your-feed-design.md`.
 
 ## How it works
 

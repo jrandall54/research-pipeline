@@ -1,5 +1,7 @@
 # Part B.1 — Answer key (gold set) drafted and graded by the cloud model — Implementation Plan
 
+> **Phase 6.1** · Status: merged · Design: [phase-06.1-06.6-hardware-adaptive-design.md](../specs/phase-06.1-06.6-hardware-adaptive-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let the cloud backend draft the key facts of gold-set papers for the owner to review, suggest which papers to use, and grade every eval run fact by fact, so every later Part B change is measured for quality without the owner grading by hand.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3, typer, pydantic v2, sqlite3, pytest (offline: `FakeLLM`, `AlwaysSummary`, `CliRunner`, monkeypatched `cli.build_pipeline`).
 
-**Spec:** `docs/superpowers/specs/2026-11-22-part-b-hardware-adaptive-design.md` — part 1, and Settled items 1–2.
+**Spec:** `docs/superpowers/specs/phase-06.1-06.6-hardware-adaptive-design.md` — part 1, and Settled items 1–2.
 
 ## Global Constraints
 
@@ -175,4 +177,4 @@ Behaviour, per id, in order: skip with a message if already in gold; look up tit
 
 ### Task 5: Owner run-through (real, not a test)
 
-- [ ] Reinstall the tool (`uv tool install --editable '.[embed,serve]' --force`); `rpipe gold suggest`; `rpipe gold draft` the suggested ids (the owner reviews); `rpipe eval run --judge`; `rpipe eval report`. Record in `docs/superpowers/handoff.md` the baseline numbers (facts covered, contradictions, unverified, time) — this is the baseline Parts B.2 and B.3 are compared against.
+- [ ] Reinstall the tool (`uv tool install --editable '.[embed,serve]' --force`); `rpipe gold suggest`; `rpipe gold draft` the suggested ids (the owner reviews); `rpipe eval run --judge`; `rpipe eval report`. Record in `docs/superpowers/archive/handoff-log-to-2026-11-25.md` the baseline numbers (facts covered, contradictions, unverified, time) — this is the baseline Parts B.2 and B.3 are compared against.

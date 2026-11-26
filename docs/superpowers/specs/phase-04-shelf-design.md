@@ -1,5 +1,7 @@
 # The shelf (Phase 4, slice 1): design
 
+> **Phase 4** · Status: approved, built · Plan: [phase-04-shelf.md](../plans/phase-04-shelf.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 Status: written 2026-11-22 after a conversation with the owner. Covers the shelf and the similarity boost. The "judge" (local model confirms overlaps and writes a callout) is slice 2 and gets its own design; this slice must not block it.
 
 ## Intent and why
@@ -72,7 +74,7 @@ In `rank.py`, replace the `MY_WORK_WEIGHT = 0.0` stub with a real term modelled 
 `run_triage` takes shelf vectors alongside `FeedbackVectors` (built from the DB for the current embedder). `rpipe run` and `rpipe triage` call sync first.
 
 ### Docs
-New `docs/guide/shelf.md` (page shape from CLAUDE.md, with a worked example and why-decisions above). Update `triage.md` (stub row becomes real), `data-model.md` (new tables, `links` still unused), `vault-and-config.md` (`my_work/` is now written and read, `.removed/`), `glossary.md` (chunk, shelf, nearest-neighbour), `README.md`, and `docs/superpowers/handoff.md`.
+New `docs/guide/shelf.md` (page shape from CLAUDE.md, with a worked example and why-decisions above). Update `triage.md` (stub row becomes real), `data-model.md` (new tables, `links` still unused), `vault-and-config.md` (`my_work/` is now written and read, `.removed/`), `glossary.md` (chunk, shelf, nearest-neighbour), `README.md`, and `docs/superpowers/archive/handoff-log-to-2026-11-25.md`.
 
 ## Left to the builder
 Exact chunk-size constants, slug rules, wording of messages, test layout, how sync reports its counts, whether `list` shows a preview.

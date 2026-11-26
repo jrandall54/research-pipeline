@@ -1,5 +1,7 @@
 # Phase 1 — Abstract Digest Implementation Plan
 
+> **Phase 1** · Status: merged · Design: the master plan (archived, see ../ROADMAP.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A nightly-runnable CLI that collects arXiv + Hugging Face Daily papers, ranks them against `profile.yaml` with local embeddings, and writes a Markdown digest of titles, abstracts and match reasons. No PDFs, no LLM summaries.

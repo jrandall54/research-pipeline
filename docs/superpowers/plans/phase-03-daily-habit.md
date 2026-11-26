@@ -1,5 +1,7 @@
 # Phase 3 — Daily Habit Implementation Plan
 
+> **Phase 3** · Status: merged · Design: the master plan (archived, see ../ROADMAP.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the pipeline a daily habit: vote/save feedback that shapes ranking, an unattended nightly timer, a browsable vault, provenance on summaries, and LLM-guided onboarding.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python, Typer, SQLite (WAL, FTS5), pydantic, Ollama client (`llm.py`), systemd user units, optional `datasette` extra.
 
-**Spec:** Claude Docs "Research Pipeline — Master Implementation Plan" (https://claude.ai/artifact/Ajw2s52HwWuZfrYZXsZjfa), section "Phase 3 — Daily habit", plus Stage 6 (Feedback), Scheduling, Reliability, "Your own research" (implicit layer). Handoff: `docs/superpowers/handoff.md`.
+**Spec:** Claude Docs "Research Pipeline — Master Implementation Plan" (https://claude.ai/artifact/Ajw2s52HwWuZfrYZXsZjfa), section "Phase 3 — Daily habit", plus Stage 6 (Feedback), Scheduling, Reliability, "Your own research" (implicit layer). Handoff: `docs/superpowers/archive/handoff-log-to-2026-11-25.md`.
 
 ## Global Constraints
 
@@ -196,7 +198,7 @@
 ### Task 9: Handoff, README and index
 
 **Files:**
-- Modify: `README.md`, `docs/guide/README.md` (stages, index of new pages), `docs/superpowers/handoff.md` (rewrite for state after Phase 3: done, owner actions — run `rpipe schedule install`, `loginctl enable-linger`, `rpipe serve`, start voting; parked items carried over; new parked items from reviews), `docs/guide/glossary.md` (check all new terms present)
+- Modify: `README.md`, `docs/guide/README.md` (stages, index of new pages), `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (rewrite for state after Phase 3: done, owner actions — run `rpipe schedule install`, `loginctl enable-linger`, `rpipe serve`, start voting; parked items carried over; new parked items from reviews), `docs/guide/glossary.md` (check all new terms present)
 - Verify: `uv run pytest -q` green; every new `rpipe` command appears in `docs/guide/running.md` table or its own page.
 
 - [ ] **Step 1:** Grep the guide for stale claims ("Phase 3", "later phase", `VOTE_PENALTY`, "no migration") and fix each.

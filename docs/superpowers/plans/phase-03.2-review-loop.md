@@ -1,5 +1,7 @@
 # `rpipe review` Implementation Plan
 
+> **Phase 3.2** · Status: merged · Design: [phase-03.2-review-loop-design.md](../specs/phase-03.2-review-loop-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A terminal loop (`rpipe review`, `rpipe review --later`) that shows each unreviewed digest paper and records up / down / skip, with skips tracked as their own "review later" list.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python, sqlite3, typer (CliRunner for CLI tests). Tests offline: `uv run pytest -q`.
 
-**Spec:** `docs/superpowers/specs/2026-11-22-review-loop-design.md`
+**Spec:** `docs/superpowers/specs/phase-03.2-review-loop-design.md`
 
 ## Global Constraints
 
@@ -61,7 +63,7 @@
 **Files:**
 - Modify: `src/research_pipeline/cli.py` (new `review` command; `feedback` prints a review-later count), `src/research_pipeline/digest.py` (rename `_render_summary` to public `render_summary`, update its callers; no behaviour change)
 - Create: `docs/guide/review.md`, `tests/test_cli_review.py`
-- Modify docs: `docs/guide/README.md` (index), `docs/guide/running.md` (command list and a short example), `docs/guide/digest.md` (point the voting section at `rpipe review`), `docs/superpowers/handoff.md` (Done section; mention the reader-page idea for `rpipe serve` as the next UI item)
+- Modify docs: `docs/guide/README.md` (index), `docs/guide/running.md` (command list and a short example), `docs/guide/digest.md` (point the voting section at `rpipe review`), `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (Done section; mention the reader-page idea for `rpipe serve` as the next UI item)
 
 **Interfaces:**
 - Consumes: `review.review_queue`, `review.later_queue`, `review.queue_progress`, `db.record_vote(conn, paper_id, vote)`, `db.record_skip`, `db.clear_skip`, `db.get_summary`, `digest.render_summary(ps) -> list[str]`, `cli._is_tty()`, `cli._open(vault)`, `cli._fail(msg)`.

@@ -1,5 +1,7 @@
 # `rpipe review`: a terminal loop for reading and voting (design)
 
+> **Phase 3.2** · Status: approved, built · Plan: [phase-03.2-review-loop.md](../plans/phase-03.2-review-loop.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 Status: approved by the owner on 2026-11-22. Size: small change (one task plus review).
 
 ## Intent and why
@@ -32,7 +34,7 @@ The owner reads the pipeline's output on a headless server over SSH. Today the o
 - **`rpipe feedback`:** also shows how many papers wait in "review later".
 - **No terminal:** if stdin is not a TTY, refuse with a message pointing at `rpipe vote ID up|down`.
 - **Storage:** new table `skips(paper_id TEXT PRIMARY KEY REFERENCES papers(id), skipped_at TEXT)`, added with the existing `user_version` migration ladder in `db.py` (bump `SCHEMA_VERSION`). Skipping an unknown paper id raises the same `UnknownPaperError` pattern votes use. Timestamps use `db.py`'s format.
-- **Docs (same commit as code):** new `docs/guide/review.md` (What it does / How it works / Why / How to run / Where the code is), plus updates to `data-model.md`, `running.md`, `glossary.md` (skip, review queue), `digest.md` where it points at voting, `docs/guide/README.md` index, and `docs/superpowers/handoff.md`.
+- **Docs (same commit as code):** new `docs/guide/review.md` (What it does / How it works / Why / How to run / Where the code is), plus updates to `data-model.md`, `running.md`, `glossary.md` (skip, review queue), `digest.md` where it points at voting, `docs/guide/README.md` index, and `docs/superpowers/archive/handoff-log-to-2026-11-25.md`.
 
 ## Constraints
 `CLAUDE.md` rules: docs in the same commit, every setting settable through `rpipe` (this feature adds none), offline tests (`uv run pytest -q`), `rpipe` naming, nothing personal in the repo.

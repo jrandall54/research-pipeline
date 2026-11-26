@@ -1,5 +1,7 @@
 # Part B.4: Machine Scan, Model Catalog, Recommender and Guided Settings (Implementation Plan)
 
+> **Phase 6.4** · Status: merged · Design: [phase-06.1-06.6-hardware-adaptive-design.md](../specs/phase-06.1-06.6-hardware-adaptive-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `rpipe` looks at the machine, recommends models that suit it (installed or not) and the Ollama server settings they need, applies those settings with consent and undo, and measures speed, so every hardware tier from CPU only to a large GPU gets a working, explained setup.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3.12, typer, pydantic v2, PyYAML, httpx + respx (tests), pytest. `uv run pytest -q`, `uv run ruff check .`.
 
-**Spec:** `docs/superpowers/specs/2026-11-22-part-b-hardware-adaptive-design.md`, section "4. Machine scan, recommender, and guided settings", plus "Settled" items 6, 7, 8. Read both.
+**Spec:** `docs/superpowers/specs/phase-06.1-06.6-hardware-adaptive-design.md`, section "4. Machine scan, recommender, and guided settings", plus "Settled" items 6, 7, 8. Read both.
 
 ## Global Constraints
 
@@ -360,4 +362,4 @@ def cached_fit(..., machine: Callable[[str], dict] = machine_key) -> Fit | None
 - [ ] Reinstall the tool: `uv tool install --editable '.[embed,serve]' --force`.
 - [ ] On the owner's machine (read-only for config): `rpipe model scan`, `rpipe model catalog show`, `rpipe model recommend < /dev/null` (prints only). Check: the host-port note appears (service on 11436, rpipe on 11434); flash attention/KV shown as already set; the 27B-class catalog entry estimates ~55-58K context. Run `rpipe model bench --vault COPY` against a throwaway copy of the vault (copy `config.yaml`, `profile.yaml`, `cache/`) so the owner's cache is untouched; record the numbers. Do **not** run `rpipe model tune` (it would restart the owner's Ollama).
 - [ ] Read `docs/guide/hardware.md` top to bottom as a newcomer; fix gaps. Every new term is in the glossary.
-- [ ] Update `docs/superpowers/handoff.md` (B.4 state, real-machine numbers, what's next: B.5) and commit.
+- [ ] Update `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (B.4 state, real-machine numbers, what's next: B.5) and commit.

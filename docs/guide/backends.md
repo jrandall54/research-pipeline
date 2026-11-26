@@ -122,7 +122,7 @@ Anything printed before the JSON (an update notice) is ignored: the adapter take
 
 ### Risk: billing policy
 
-Using `claude -p` on a Pro/Max plan is within Anthropic's consumer terms when you run your own login. In June 2026 Anthropic announced, then paused, moving `claude -p` and Agent SDK usage off subscription limits onto separate credits. It may return; if so the adapter reports it as a limit error and stops cleanly. Details: `docs/superpowers/specs/2026-11-21-cli-backends-research.md`.
+Using `claude -p` on a Pro/Max plan is within Anthropic's consumer terms when you run your own login. In June 2026 Anthropic announced, then paused, moving `claude -p` and Agent SDK usage off subscription limits onto separate credits. It may return; if so the adapter reports it as a limit error and stops cleanly. Details: `docs/superpowers/specs/phase-05-cli-backends-research.md`.
 
 ## Adding a backend of your own
 

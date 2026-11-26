@@ -1,4 +1,6 @@
-# App Project 1 (Your Own Feed) Implementation Plan
+# Phase 8 — Your Own Feed: Implementation Plan
+
+> **Phase 8** · Status: merged · Design: [phase-08-your-feed-design.md](../specs/phase-08-your-feed-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3.12, FastAPI + Starlette TestClient, Jinja2, uvicorn, plain CSS and a small vanilla JS file, self-hosted woff2 fonts.
 
-**Spec:** `docs/superpowers/specs/2026-11-25-app-project1-my-feed-design.md` (read it first; mockups: https://claude.ai/artifact/JnycnAXpyjtqyybVmv9xMK, look A screens, look C colours for dark).
+**Spec:** `docs/superpowers/specs/phase-08-your-feed-design.md` (read it first; mockups: https://claude.ai/artifact/JnycnAXpyjtqyybVmv9xMK, look A screens, look C colours for dark).
 
 ## Global Constraints
 
@@ -245,7 +247,7 @@ and feed tests: `test_feed_lists_latest_digest_in_score_order`, `test_feed_shows
 ### Task 8: End-to-end check and handoff
 
 **Files:**
-- Modify: `docs/superpowers/handoff.md`, `docs/guide/app.md` (screenshots not needed; a short "What to check after installing" list)
+- Modify: `docs/superpowers/archive/handoff-log-to-2026-11-25.md`, `docs/guide/app.md` (screenshots not needed; a short "What to check after installing" list)
 
 - [ ] **Step 1:** `uv sync --extra embed --extra serve --extra app`; `uv run rpipe app run --host 127.0.0.1 --port 8099` against a copy of a fixture vault (never the owner's vault); with `curl -s http://127.0.0.1:8099/` confirm 200 and the feed heading; `curl -s -X POST http://127.0.0.1:8099/api/paper/X/save` without Origin → 403. Stop the server.
 - [ ] **Step 2:** Full `uv run pytest -q` and `uv run ruff check .` → pass, counts recorded in the handoff.

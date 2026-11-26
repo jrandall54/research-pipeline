@@ -1,8 +1,10 @@
 # Parked-list fixes (before Phase 4)
 
-**Goal:** clear every item on the "Parked" list in `docs/superpowers/handoff.md` (Phase 3 and Phase 2/auto-model sections) before Phase 4 starts.
+> **Phase 3.1** · Status: merged · Design: the master plan (archived, see ../ROADMAP.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
-**Spec:** `docs/superpowers/handoff.md` (Parked section) and `CLAUDE.md`. No separate design spec.
+**Goal:** clear every item on the "Parked" list in `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (Phase 3 and Phase 2/auto-model sections) before Phase 4 starts.
+
+**Spec:** `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (Parked section) and `CLAUDE.md`. No separate design spec.
 
 ## Global Constraints
 
@@ -12,7 +14,7 @@
 - Docs are part of every change: update the relevant page in `docs/guide/` in the same commit, in the page shape What it does / How it works / Why it's built this way / How to run / Where the code is. Fix any doc describing old behaviour. Add new terms to `docs/guide/glossary.md`.
 - Any new user-facing setting needs an `rpipe` command that sets it (no hand-editing of `profile.yaml`/`config.yaml`).
 - Use `rpipe` (not `research-pipeline`) in docs and messages. Nothing personal goes in the repo. Never call the user's `o` script from the program.
-- Remove the fixed item from the Parked list in `docs/superpowers/handoff.md` in the same commit (the controller does the final handoff rewrite; just delete the line you fixed).
+- Remove the fixed item from the Parked list in `docs/superpowers/archive/handoff-log-to-2026-11-25.md` in the same commit (the controller does the final handoff rewrite; just delete the line you fixed).
 - Tasks run sequentially because several touch the same files.
 
 ### Task 1: Database hardening (`db.py`)

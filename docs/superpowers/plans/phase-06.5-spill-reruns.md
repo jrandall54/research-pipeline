@@ -1,5 +1,7 @@
 # Part B.5: Proxy Detection, B.4 Fixes, and RAM-Spill Reruns Within a Night Deadline (Implementation Plan)
 
+> **Phase 6.5** · Status: merged · Design: [phase-06.1-06.6-hardware-adaptive-design.md](../specs/phase-06.1-06.6-hardware-adaptive-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A paper whose body had to be cut to fit the GPU is read again whole the same night, with part of the model in RAM, as long as RAM and a morning deadline allow; plus the B.4 fixes parked in the handoff (proxy seen as the same server, `[N/A]` GPU memory, CPU fallback on small cards, the 600 s call limit on slow machines).
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3.12, typer, pydantic v2, httpx + respx (tests), pytest. `uv run pytest -q`, `uv run ruff check .`.
 
-**Spec:** `docs/superpowers/specs/2026-11-22-part-b-hardware-adaptive-design.md`, section "5. Using the whole machine overnight", "Settled" items 5 and 10, plus the "B.4 built" section of `docs/superpowers/handoff.md` (proxy item and "Parked for B.5"). Read both.
+**Spec:** `docs/superpowers/specs/phase-06.1-06.6-hardware-adaptive-design.md`, section "5. Using the whole machine overnight", "Settled" items 5 and 10, plus the "B.4 built" section of `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (proxy item and "Parked for B.5"). Read both.
 
 ## Global Constraints
 
@@ -242,7 +244,7 @@ def run_reruns(conn, llm: OllamaClient, vault: Path, deadline: datetime | None, 
 
 ### Task 7: Handoff and master plan
 
-**Files:** `docs/superpowers/handoff.md` (B.5 section: what was built, owner run-through steps, what was not run on the real machine), Claude Docs master plan status line (via the docs tools, by the coordinating session, not a subagent).
+**Files:** `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (B.5 section: what was built, owner run-through steps, what was not run on the real machine), Claude Docs master plan status line (via the docs tools, by the coordinating session, not a subagent).
 
 - [ ] **Step 1:** Write the B.5 section; list `rpipe schedule set-deadline`, the new health-line fields, and the first real-night check: `rpipe runs` shows `rerun N` and summaries' provenance `num_ctx` / `gpu_share` (`rpipe show ID`).
 - [ ] **Step 2: Commit** `docs: handoff after B.5`.

@@ -1,5 +1,7 @@
 # Subscription-login CLI backends for rpipe (research, 2026-11-21)
 
+> **Phase 5** · Status: research note · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 Legend: [OFFICIAL] = official docs fetched; [SECONDARY] = forum/blog/search snippet; [VERIFIED] = run on this machine.
 
 ## 1. Comparison table

@@ -1,5 +1,7 @@
 # Automatic Model and Context Selection: Implementation Plan
 
+> **Phase 2.1** · Status: merged · Design: the master plan (archived, see ../ROADMAP.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** With no setup, the pipeline asks Ollama which models are installed, picks the largest suitable one that fits fully in GPU memory, and finds the largest context window that still fits, with no user interaction. Users can still pin a model or a context with `rpipe model set` and `rpipe model set-context`.

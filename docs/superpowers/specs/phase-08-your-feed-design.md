@@ -1,7 +1,9 @@
-# App project 1: your own feed
+# Phase 8 — Your own feed (design)
+
+> **Phase 8** · Status: approved, built · Plan: [phase-08-your-feed.md](../plans/phase-08-your-feed.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 Date: 2026-11-25. Status: for owner approval (builder check done).
-Roadmap: `2026-11-25-app-roadmap-design.md` (project 1 of 8). Mockups: the "Research Feed — App Design" canvas (https://claude.ai/artifact/JnycnAXpyjtqyybVmv9xMK), look A screens.
+Roadmap: `phase-08-15-app-roadmap-design.md` (project 1 of 8). Mockups: the "Research Feed — App Design" canvas (https://claude.ai/artifact/JnycnAXpyjtqyybVmv9xMK), look A screens.
 
 ## Intent
 

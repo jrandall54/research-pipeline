@@ -1,5 +1,7 @@
 # The app: roadmap and long-horizon goals
 
+> **Phase 8–15** · Status: agreed; each phase gets its own design · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 Date: 2026-11-25. Status: agreed with the owner in conversation; each project below gets its own design before it is built.
 
 ## What the app is for
@@ -33,6 +35,8 @@ The owner's own use comes first ("build it right for me, then go from there"), b
 | Videos | Narrated explainers: script from the summary, local text-to-speech voice, clips move through diagrams and key points. Not AI-generated film. | Claude's proposal, owner agreed |
 
 ## The projects, in order
+
+Renumbered 2026-11-25 as phases, continuing the pipeline's numbering: project 1 = Phase 8, 2 = 9, 3 = 10, 4 = 11, 5 = 12, 6 = 13, 7 = 14, 8 = 15. `../ROADMAP.md` is the live list.
 
 Each is its own design → plan → build cycle.
 

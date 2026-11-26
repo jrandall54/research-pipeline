@@ -1,5 +1,7 @@
 # Phase 5 — Shareable Implementation Plan
 
+> **Phase 5** · Status: merged · Design: [phase-05-shareable-design.md](../specs/phase-05-shareable-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Anyone can install `rpipe`, run a hardware-aware walkthrough, and get a working nightly digest on a local Ollama model, their Claude Code subscription, or in abstracts-only mode.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3.12, typer, pydantic v2, httpx/respx, ruamel.yaml, subprocess, `importlib.metadata.entry_points`.
 
-**Spec:** `docs/superpowers/specs/2026-11-21-phase5-shareable-design.md` (read its "Builder-check resolutions" section: it overrides the body where they conflict). Research: `docs/superpowers/specs/2026-11-21-cli-backends-research.md`.
+**Spec:** `docs/superpowers/specs/phase-05-shareable-design.md` (read its "Builder-check resolutions" section: it overrides the body where they conflict). Research: `docs/superpowers/specs/phase-05-cli-backends-research.md`.
 
 ## Global Constraints
 
@@ -445,5 +447,5 @@ def test_schedule_install_warns_when_backend_not_ready(vault, monkeypatch): ... 
   - add the `agy` investigation side project, with the student-free-Gemini motivation;
   - mark Docker and API-key backends as not planned;
   - note that Phase 4 slices 2–4 remain.
-- [ ] Rewrite `docs/superpowers/handoff.md` for the post-Phase-5 state, including owner actions (verify Claude Code adapter flags on a real run; reinstall the tool; push CI if wanted).
+- [ ] Rewrite `docs/superpowers/archive/handoff-log-to-2026-11-25.md` for the post-Phase-5 state, including owner actions (verify Claude Code adapter flags on a real run; reinstall the tool; push CI if wanted).
 - [ ] Final whole-branch review, then hand the merge decision to the owner.

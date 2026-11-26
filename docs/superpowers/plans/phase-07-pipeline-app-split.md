@@ -1,5 +1,7 @@
 # Pipeline and App Split Implementation Plan (Phase 7)
 
+> **Phase 7** · Status: merged · Design: [phase-07-pipeline-app-split-design.md](../specs/phase-07-pipeline-app-split-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Organize the code into a pipeline group and an app group over one database, give the app one door (`library_api`) that returns data objects, let the app ask the pipeline for work through a request list, and put every pipeline command under one lock.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3.12, SQLite (WAL), Pydantic v2, Typer, pytest. `uv run pytest -q`.
 
-**Spec:** `docs/superpowers/specs/2026-11-22-backend-frontend-split-design.md`
+**Spec:** `docs/superpowers/specs/phase-07-pipeline-app-split-design.md`
 
 **Starts from:** `main` at `8fde6d4` (1404 tests passing, ruff clean). Work on a new branch `pipeline-app-split`.
 
@@ -405,5 +407,5 @@ Architecture page shape (CLAUDE.md): What it does → How it works (the spec's d
 ## After the plan
 
 - Real check on the owner's machine, in a throwaway copy of the vault (never the real config): `rpipe requests list` empty; queue one request through `library_api.request` from `uv run python -c ...`; `rpipe run --vault COPY` drains it and the digest health line shows `requests done 1`; a second `rpipe summarize --vault COPY` started during that run exits 75 naming `rpipe run`.
-- Update `docs/superpowers/handoff.md` and the master plan (Claude Docs): Phase 7 done, next the app designs.
+- Update `docs/superpowers/archive/handoff-log-to-2026-11-25.md` and the master plan (Claude Docs): Phase 7 done, next the app designs.
 - Whole-branch review before the owner merges.

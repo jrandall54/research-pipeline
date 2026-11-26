@@ -1,5 +1,7 @@
 # Pipeline and app: one database, split by function
 
+> **Phase 7** · Status: approved, built · Plan: [phase-07-pipeline-app-split.md](../plans/phase-07-pipeline-app-split.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 Date: 2026-11-22. Status: draft for owner approval.
 
 ## Intent and why

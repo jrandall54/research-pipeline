@@ -1,5 +1,7 @@
 # Phase 6 Part B.3 — One prompt layout for caching and attention — Implementation Plan
 
+> **Phase 6.3** · Status: merged · Design: [phase-06.1-06.6-hardware-adaptive-design.md](../specs/phase-06.1-06.6-hardware-adaptive-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the summary call and the critique call share one long prefix (so Ollama reads the paper once), put each task's instructions after the paper, and cap output length, without lowering answer quality.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3, httpx, pydantic, pytest (offline, `FakeLLM`, mocked HTTP).
 
-**Spec:** `docs/superpowers/specs/2026-11-22-part-b-hardware-adaptive-design.md`, part 3 and Settled items 2 and 9. Do this after B.2 is merged (`docs/superpowers/plans/2026-11-22-part-b2-strict-pruning.md`) so the comparison baseline is the B.2 run.
+**Spec:** `docs/superpowers/specs/phase-06.1-06.6-hardware-adaptive-design.md`, part 3 and Settled items 2 and 9. Do this after B.2 is merged (`docs/superpowers/plans/phase-06.2-strict-pruning.md`) so the comparison baseline is the B.2 run.
 
 ## Global Constraints
 
@@ -93,7 +95,7 @@
 
 **Files:** none changed unless a regression is found.
 
-- [ ] **Step 1: Reading time.** On one median-length paper with the real Ollama backend, run the snippet from Task 3 on `main` before this plan (second-call `prompt_eval_count` should be roughly equal to the first) and on this branch (expected: the second call's `prompt_eval_duration` is a small fraction of the first (only the task text is read)). Record both numbers and the per-paper time in `docs/superpowers/handoff.md`. If the second call does not read less, caching is not working on this machine: record that, check that both calls use the same model, `num_ctx` and options and that Ollama was not restarted between them, and do not claim a speed-up.
+- [ ] **Step 1: Reading time.** On one median-length paper with the real Ollama backend, run the snippet from Task 3 on `main` before this plan (second-call `prompt_eval_count` should be roughly equal to the first) and on this branch (expected: the second call's `prompt_eval_duration` is a small fraction of the first (only the task text is read)). Record both numbers and the per-paper time in `docs/superpowers/archive/handoff-log-to-2026-11-25.md`. If the second call does not read less, caching is not working on this machine: record that, check that both calls use the same model, `num_ctx` and options and that Ollama was not restarted between them, and do not claim a speed-up.
 - [ ] **Step 2: Quality.** `uv tool install --editable '.[embed,serve]' --force`, then `uv run rpipe eval run --judge` and `uv run rpipe eval report`. Pass means `Change: PASS` against the run recorded after B.2 (facts covered does not drop by more than 1, contradictions and unverified citations do not rise; Settled item 2).
 - [ ] **Step 3:** On `FAIL`, compare per-paper reports to see whether the missed facts follow the moved task text; do not merge on a FAIL without the owner's call. A task-first fallback layout is the first thing to try.
 - [ ] **Step 4: Commit** `docs: record B.3 measurement in the handoff`.

@@ -1,5 +1,7 @@
 # Phase 6 Part B.2 — Strict pruning of non-paper text — Implementation Plan
 
+> **Phase 6.2** · Status: merged · Design: [phase-06.1-06.6-hardware-adaptive-design.md](../specs/phase-06.1-06.6-hardware-adaptive-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Send the model only the paper: non-paper text is always dropped, appendices are dropped first when space is short, core text is trimmed only as a last resort and in a priority order, and every summary records what was dropped and whether the body was really cut.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3, pydantic, BeautifulSoup, pytest (offline, fixtures, `FakeLLM`).
 
-**Spec:** `docs/superpowers/specs/2026-11-22-part-b-hardware-adaptive-design.md`, part 2 and Settled items 4, 9, 10 (item 10 supersedes part 2's "dropping `ltx_appendix` at DOM level": appendices are kept when the paper fits).
+**Spec:** `docs/superpowers/specs/phase-06.1-06.6-hardware-adaptive-design.md`, part 2 and Settled items 4, 9, 10 (item 10 supersedes part 2's "dropping `ltx_appendix` at DOM level": appendices are kept when the paper fits).
 
 ## Global Constraints
 
@@ -34,7 +36,7 @@
 
 ## Before Task 1: record the baseline (owner or session, no code)
 
-- [ ] Run `uv run rpipe eval run --judge` on the current `main` and keep the file `<vault>/eval/DATE.json`. Note in `docs/superpowers/handoff.md` the lines `Facts covered`, `Judged`, `Unreviewed answer key`, and time per paper. Task 6 compares against it. (An unreviewed auto-drafted key is fine: it measures change between runs.)
+- [ ] Run `uv run rpipe eval run --judge` on the current `main` and keep the file `<vault>/eval/DATE.json`. Note in `docs/superpowers/archive/handoff-log-to-2026-11-25.md` the lines `Facts covered`, `Judged`, `Unreviewed answer key`, and time per paper. Task 6 compares against it. (An unreviewed auto-drafted key is fine: it measures change between runs.)
 
 ### Task 1: Classifier and `fit_to_budget` in `pruning.py`
 
@@ -157,6 +159,6 @@ A section is a **child** of an earlier dropped section when its title's numberin
 **Files:** none changed unless a regression is found.
 
 - [ ] **Step 1:** `uv tool install --editable '.[embed,serve]' --force`, then `uv run rpipe eval run --judge` and `uv run rpipe eval report`.
-- [ ] **Step 2:** Pass means the report's `Change:` line is `PASS` against the baseline recorded before Task 1 (facts covered does not drop by more than 1, contradictions and unverified citations do not rise; Settled item 2). Paste the two result blocks, the number of papers that show `Left out:`, and any change in time per paper into `docs/superpowers/handoff.md`.
+- [ ] **Step 2:** Pass means the report's `Change:` line is `PASS` against the baseline recorded before Task 1 (facts covered does not drop by more than 1, contradictions and unverified citations do not rise; Settled item 2). Paste the two result blocks, the number of papers that show `Left out:`, and any change in time per paper into `docs/superpowers/archive/handoff-log-to-2026-11-25.md`.
 - [ ] **Step 3:** If `FAIL`, open the `.md` report, find which dropped section a missed fact lived in, and decide with the owner whether a classification rule is too wide. Do not merge on a FAIL without the owner's call.
 - [ ] **Step 4: Commit** `docs: record B.2 measurement in the handoff`.

@@ -1,5 +1,7 @@
 # Phase 2 — Summaries You Can Trust: Implementation Plan
 
+> **Phase 2** · Status: merged · Design: the master plan (archived, see ../ROADMAP.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Each night's top papers get a summary and a critique, written by a local model from the paper's full text. Every claim cites the paper section it came from, and a 10-paper gold set with a guided `rpipe eval` lets the owner check that the summaries are accurate.

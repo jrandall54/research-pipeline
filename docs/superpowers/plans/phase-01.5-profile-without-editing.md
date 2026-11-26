@@ -1,5 +1,7 @@
 # Phase 1.5 — Your Profile Without Editing Files: Implementation Plan
 
+> **Phase 1.5** · Status: merged · Design: the master plan (archived, see ../ROADMAP.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A new user, with the owner as the first, goes from nothing to a first digest that matches their interests without opening a YAML file. They do this through `rpipe profile …` commands and a guided `rpipe init`.

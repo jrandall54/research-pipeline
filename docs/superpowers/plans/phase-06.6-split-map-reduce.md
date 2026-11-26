@@ -1,5 +1,7 @@
 # Part B.6: Task Splitting and Map-Reduce Implementation Plan
 
+> **Phase 6.6** · Status: merged · Design: [phase-06.1-06.6-hardware-adaptive-design.md](../specs/phase-06.1-06.6-hardware-adaptive-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let the summarizer read a paper in parts — a fixed two-part split (front matter / body) on slow machines, and size-based map-reduce for papers that would otherwise be cut and can never be rerun whole — with the mode chosen per machine (`auto`), settable with an `rpipe` command, and measured with `rpipe eval`.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3, pydantic, typer, httpx/respx, pytest (offline: fake LLM).
 
-**Spec:** `docs/superpowers/specs/2026-11-22-part-b-hardware-adaptive-design.md`, section 6, approach C (C3), settled rulings 3, 9 and 10.
+**Spec:** `docs/superpowers/specs/phase-06.1-06.6-hardware-adaptive-design.md`, section 6, approach C (C3), settled rulings 3, 9 and 10.
 
 ## Global Constraints
 
@@ -243,7 +245,7 @@ Not code unless the numbers say so. Runs against the real vault's gold set (10 p
 - [ ] **Step 1:** `rpipe eval run --judge --mode whole` then `rpipe eval run --judge --mode split` (about 10–20 min each). Record facts covered, contradictions, unverified, time per paper.
 - [ ] **Step 2:** CPU reading of split vs whole on 2–3 gold papers in a throwaway vault (copy `config.yaml`, `profile.yaml`, `gold/gold.json`; set a CPU-fitting model via `llm_model`/`llm_num_ctx` there; `num_gpu 0` is not a setting, so use the model the recommender gives a CPU-only machine and accept partial GPU use as an approximation, noted as such). Time only; quality from Step 1.
 - [ ] **Step 3: Decide the shipped `auto` rule from the numbers** (spec: "by measurement and the answer key"): if split passes ruling 2's bar against whole on GPU, keep Decision 6; if it fails on quality, keep `auto` → split only where the whole mode is predicted to exceed the night (no GPU share) and say so in the docs. Any change to `SPLIT_BELOW_CTX` or the rule goes in one commit with tests and docs.
-- [ ] **Step 4:** Results table in `docs/superpowers/handoff.md` (B.6 section) and `docs/guide/summaries.md` ("Why": measured numbers); commit `docs: B.6 measurements and the auto rule they set`.
+- [ ] **Step 4:** Results table in `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (B.6 section) and `docs/guide/summaries.md` ("Why": measured numbers); commit `docs: B.6 measurements and the auto rule they set`.
 
 ## Parallelism and file ownership
 

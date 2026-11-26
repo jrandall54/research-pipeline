@@ -1,5 +1,7 @@
 # Phase 6 Part B — Hardware-adaptive summarizing (design)
 
+> **Phase 6.1–6.6** · Status: approved, built · Plans: phase-06.1 to phase-06.6 in ../plans/ · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 Status: draft for owner approval, 2026-11-22. Replaces the old Part B ("long papers") in the master plan.
 
 ## Intent

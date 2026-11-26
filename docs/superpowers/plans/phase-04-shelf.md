@@ -1,5 +1,7 @@
 # Shelf Implementation Plan
 
+> **Phase 4** · Status: merged (shelf slice; the rest moved to later phases) · Design: [phase-04-shelf-design.md](../specs/phase-04-shelf-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A shelf of user materials (`my_work/`) that can be added and removed, whose nearest chunk to each new paper boosts its triage score.
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python, sqlite3, numpy, typer, pytest with `FakeEmbedder` (tests/conftest.py).
 
-**Spec:** `docs/superpowers/specs/2026-11-22-shelf-design.md`
+**Spec:** `docs/superpowers/specs/phase-04-shelf-design.md`
 
 ## Global Constraints
 
@@ -103,7 +105,7 @@
 **Files:**
 - Modify: `src/research_pipeline/cli.py` (new `shelf_app` Typer group registered as `shelf`, same pattern as `gold_app`)
 - Test: `tests/test_cli_shelf.py` (follow `tests/test_cli_review.py` for how the CLI and the embedder are faked)
-- Docs: `docs/guide/shelf.md` (command section with real example output), `docs/guide/README.md` (pipeline overview and page index), `docs/superpowers/handoff.md` (new state; judge is next slice; `TODO(phase4)` stub gone)
+- Docs: `docs/guide/shelf.md` (command section with real example output), `docs/guide/README.md` (pipeline overview and page index), `docs/superpowers/archive/handoff-log-to-2026-11-25.md` (new state; judge is next slice; `TODO(phase4)` stub gone)
 
 **Interfaces:**
 - Consumes: `add_to_shelf`, `remove_from_shelf`, `sync_shelf`, `list_shelf_items`.

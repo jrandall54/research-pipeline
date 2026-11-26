@@ -1,6 +1,7 @@
 {% from "_field.html" import field, headline %}
 <article class="card" id="paper-{{ c.id }}" data-paper-id="{{ c.id }}">
-  {% if c.topic %}<div class="topic" style="color: var(--topic-{{ c.topic_color }})">{{ c.topic }}</div>{% endif %}
+  {% if c.sources %}<div class="topic"{% if c.topic %} style="color: var(--topic-{{ c.topic_color }})"{% endif %}>{{ c.sources | join(" · ") }}{% if c.topic %} · {{ c.topic }}{% endif %}</div>
+  {% elif c.topic %}<div class="topic" style="color: var(--topic-{{ c.topic_color }})">{{ c.topic }}</div>{% endif %}
   <h2 class="card-title"><a href="/paper/{{ c.id }}">{{ c.title }}</a></h2>
   {% if c.one_line %}
     {{ headline(c, "one-line") }}
@@ -13,7 +14,7 @@
     {# No summary yet: there is no problem/approach/results, so the abstract excerpt serves both depths. #}
     <p class="one-line abstract">{{ c.abstract }}</p>
     <div class="read-more"></div>
-    <div class="summarize" data-state="{{ c.summarize_state }}">
+    {% if not c.followed %}<div class="summarize" data-state="{{ c.summarize_state }}">
       {% if c.summarize_state in ("pending", "running") %}
         <span class="muted">Summary coming tonight</span>
       {% elif c.summarize_state == "failed" %}
@@ -22,8 +23,8 @@
       {% else %}
         <button type="button" class="btn" data-action="summarize" data-paper-id="{{ c.id }}">Summarize this</button>
       {% endif %}
-    </div>
+    </div>{% endif %}
   {% endif %}
-  {% if c.why %}<p class="why muted">Why you're seeing this: {{ c.why }}</p>{% endif %}
+  {% if c.why %}<p class="why muted">{% if c.followed %}{{ c.why }}{% else %}Why you're seeing this: {{ c.why }}{% endif %}</p>{% endif %}
   {% include "_actions.html" %}
 </article>

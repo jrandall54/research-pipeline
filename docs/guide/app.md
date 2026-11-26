@@ -71,6 +71,25 @@ Every card always contains the Skim fields (topic, title, hook or one line, key 
 
 Why this way: the choice lives in the browser, not the database, because it is a per-device taste (a phone may want Skim, a desktop Read), and a CSS switch means no reload and no server round trip. Rejected: two separate pages (loses your place) and fetching the Read text on demand (needless delay for text already on the page).
 
+## Mine, Following and Mix (Phase 10)
+
+**What it does.** Once you follow someone's feed (`rpipe share follow`, see the sharing guide), a three-way switch appears at the top of the feed: **Mine** (your own digest, exactly as before), **Following** (only the posts of the feeds you follow) and **Mix** (your papers plus the feeds you have in your mix, one card per paper). With no follows the switch is not drawn and every page is identical to before. A card from a followed feed has one label line above the title: the names of whose pick it is, then the topic, for example `Alex M. · Robotics`. In Mix, your own paper reads `You · Security`, or `You · Alex M. · Security` when Alex posted it too. Mine never has the label line. On a followed card the "why" reads `Alex M.'s pipeline picked it because they follow robotics.` (their reasons, worded about them, not "you follow"), and it shows the publisher's summary and no "Summarize this" button, because only the night run summarizes and a followed paper already arrives summarized.
+
+**How it works.**
+
+1. `GET /?view=following` (or `mix`; `/day/{day}?view=...` for an older day). `routes_feed._view_of` accepts `mine`, `following` or `mix`; anything else, or any choice while you follow nobody, means `mine`.
+2. The day list and the cards come from `library_api.following_days` / `following_posts` or `mix_days` / `mix_posts`; `present.followed_card` turns each post into the same `CardData` as a normal card and adds `sources` (the names) and `followed`.
+3. `_card.html` prints the label line from `sources` and the topic, and skips the Summarize control when `followed` is true. "Earlier days" and the paper page's Back link carry the `?view=` choice (Mine keeps the plain addresses).
+4. `app.js` remembers the choice in `localStorage["view"]` (this device only) and, when you open `/` with no `?view=`, jumps once to the remembered view.
+5. `/paper/{id}` shows your own paper when it has your own summary. Otherwise, if a followed feed posted it (`library_api.followed_post`), it shows the publisher's summary under the label line with the publisher wording. A paper you have never copied in can still be opened this way.
+6. The vote and save buttons on a followed card use the same `/api/paper/{id}/vote` and `save` routes; `library_api` copies the paper into your library on first use (a `source='feed'` row), so the vote counts for your own ranking. Such papers then appear in Saved with the publisher's summary.
+
+**Why it's built this way.** The switch is links (`?view=`), so it works without JavaScript and each view has an address you can bookmark; the remembered choice is only a convenience. Followed posts reuse the card template instead of a second one so the look stays the same. Rejected: a separate Following screen (two look-alike pages to keep in step) and a Summarize button on followed posts (it would queue work for a paper that is not in your library yet).
+
+**How to check it.** `uv run pytest tests/test_webapp_share.py -q` (switch hidden without follows, labels, escaping of titles, unsafe links, paper page, no Summarize button, voting on a followed post).
+
+**Where the code is.** `webapp/routes_feed.py` (`_view_of`, `_page`), `webapp/present.py` (`followed_card`, `why_sentence(..., you=False)`), `webapp/routes_pages.py` (`paper`, `_with_publisher_summary`), `templates/_view_switch.html`, `_card.html`, `paper.html`, `static/app.js`.
+
 ## Why you're seeing this
 
 Built from the stored reasons; unknown reason formats are skipped, never shown raw, and "disliked similar" is not shown at all (it lowered the score, and showing it would confuse).
@@ -220,9 +239,9 @@ Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static fi
 - `src/research_pipeline/webapp/static/`: `app.css` (palette, type, layout), `app.js`, `icon.svg` and its PNG copies `icon-180.png` (iPhone home screen), `icon-192.png` and `icon-512.png` (Android, listed in the manifest) rendered from the SVG, `manifest.webmanifest`, `fonts/`.
 - `src/research_pipeline/webapp/present.py`: `why_sentence`, `topic_of`, `topic_color`, `section_tag`, `day_heading`, `card`/`CardData` (pure shaping).
 - `src/research_pipeline/webapp/diagram_svg.py`: draws a stored diagram as inline SVG (see "Hook, key numbers and the diagram").
-- `src/research_pipeline/webapp/routes_feed.py`: the `/` and `/day/{date}` routes.
+- `src/research_pipeline/webapp/routes_feed.py`: the `/` and `/day/{date}` routes (with the `?view=` choice, see "Mine, Following and Mix").
 - `src/research_pipeline/webapp/routes_actions.py`: the `/api/paper/{id}/vote`, `save` and `summarize` endpoints; `templates/_actions.html` is the button row; the click handling is the second block of `static/app.js`.
 - `src/research_pipeline/webapp/routes_pages.py`: `/paper/{id}`, `/saved`, `/search`; `present.paper_detail` shapes the paper page.
 - `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`, `paper.html`, `list.html` (Saved and Search), `404.html`.
 - `src/research_pipeline/webapp/service.py`: the always-on service (see Setting it up).
-- Tests: `tests/test_webapp_server.py` (guard, static files, error pages), `tests/test_webapp_feed.py` (feed and Skim/Read), `tests/test_webapp_pages.py` (paper, Saved, Search), `tests/test_webapp_actions.py` (vote, save, summarize), `tests/test_webapp_present.py` (card shaping, safe links), `tests/test_webapp_diagram_svg.py` (the drawing), `tests/test_webapp_service.py` (the systemd unit), `tests/test_cli_app.py` (the `rpipe app` commands, port range, allowed hosts).
+- Tests: `tests/test_webapp_server.py` (guard, static files, error pages), `tests/test_webapp_feed.py` (feed and Skim/Read), `tests/test_webapp_pages.py` (paper, Saved, Search), `tests/test_webapp_actions.py` (vote, save, summarize), `tests/test_webapp_share.py` (Mine / Following / Mix), `tests/test_webapp_present.py` (card shaping, safe links), `tests/test_webapp_diagram_svg.py` (the drawing), `tests/test_webapp_service.py` (the systemd unit), `tests/test_cli_app.py` (the `rpipe app` commands, port range, allowed hosts).

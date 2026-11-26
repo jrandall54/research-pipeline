@@ -15,8 +15,9 @@
   </aside>
   {% endif %}
   <article class="reader" data-paper-id="{{ c.id }}">
-    <p class="back"><a href="{% if day_date %}/day/{{ day_date }}{% else %}/{% endif %}">&larr; Back</a></p>
-    {% if c.topic %}<div class="topic" style="color: var(--topic-{{ c.topic_color }})">{{ c.topic }}</div>{% endif %}
+    <p class="back"><a href="{% if day_date %}/day/{{ day_date }}{% else %}/{% endif %}{{ vq }}">&larr; Back</a></p>
+    {% if c.sources %}<div class="topic"{% if c.topic %} style="color: var(--topic-{{ c.topic_color }})"{% endif %}>{{ c.sources | join(" · ") }}{% if c.topic %} · {{ c.topic }}{% endif %}</div>
+    {% elif c.topic %}<div class="topic" style="color: var(--topic-{{ c.topic_color }})">{{ c.topic }}</div>{% endif %}
     <h1 class="paper-title">{{ c.title }}</h1>
     {% if d.authors_short %}<p class="authors muted">{{ d.authors_short }}</p>{% endif %}
     {% if c.safe_url %}<p><a class="btn" href="{{ c.safe_url }}" rel="noopener noreferrer" target="_blank">Read the paper</a></p>{% endif %}
@@ -43,7 +44,7 @@
     {% else %}
       <p class="field-label">Abstract</p>
       <p>{{ d.abstract }}</p>
-      <div class="summarize" data-state="{{ c.summarize_state }}">
+      {% if not c.followed %}<div class="summarize" data-state="{{ c.summarize_state }}">
         {% if c.summarize_state in ("pending", "running") %}
           <span class="muted">Summary coming tonight</span>
         {% elif c.summarize_state == "failed" %}
@@ -52,10 +53,10 @@
         {% else %}
           <button type="button" class="btn" data-action="summarize" data-paper-id="{{ c.id }}">Summarize this</button>
         {% endif %}
-      </div>
+      </div>{% endif %}
     {% endif %}
 
-    {% if c.why %}<p class="why muted">Why you're seeing this: {{ c.why }}</p>{% endif %}
+    {% if c.why %}<p class="why muted">{% if c.followed %}{{ c.why }}{% else %}Why you're seeing this: {{ c.why }}{% endif %}</p>{% endif %}
     {% include "_actions.html" %}
 
     {% if d.about %}

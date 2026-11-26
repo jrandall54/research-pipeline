@@ -2,10 +2,17 @@
 {% block title %}{{ heading or "Feed" }} - Research Feed{% endblock %}
 {% block content %}
 {% if not day %}
-  {% include "_empty.html" %}
+  {% if switch %}
+  <header class="feed-head">
+    <h1>Feed</h1>
+    {% include "_view_switch.html" %}
+  </header>
+  {% endif %}
+  {% if view == "mine" %}{% include "_empty.html" %}{% else %}<p class="empty muted">Nothing here yet. Posts arrive after the next nightly run.</p>{% endif %}
 {% else %}
   <header class="feed-head">
     <h1>{{ heading }}</h1>
+    {% if switch %}{% include "_view_switch.html" %}{% endif %}
     <div class="depth" role="group" aria-label="Detail">
       <button type="button" data-depth-set="skim" aria-pressed="true">Skim</button>
       <button type="button" data-depth-set="read" aria-pressed="false">Read</button>
@@ -14,6 +21,6 @@
   <div class="cards">
     {% for c in cards %}{% include "_card.html" %}{% endfor %}
   </div>
-  {% if earlier %}<p class="earlier"><a href="/day/{{ earlier }}">Earlier days</a></p>{% endif %}
+  {% if earlier %}<p class="earlier"><a href="/day/{{ earlier }}{{ vq }}">Earlier days</a></p>{% endif %}
 {% endif %}
 {% endblock %}

@@ -24,6 +24,27 @@
   });
 })();
 
+// Mine / Following / Mix: shown only when you follow someone. The choice is remembered on this
+// device, and opening the feed with no choice in the address goes to the remembered one.
+(function () {
+  var VIEWS = ["mine", "following", "mix"];
+  document.addEventListener("DOMContentLoaded", function () {
+    var links = document.querySelectorAll("[data-view-set]");
+    if (!links.length) return;
+    var saved = null;
+    try { saved = localStorage.getItem("view"); } catch (e) { /* private mode: no memory */ }
+    if (location.pathname === "/" && !location.search && VIEWS.indexOf(saved) > 0) {
+      location.replace("/?view=" + saved);
+      return;
+    }
+    links.forEach(function (a) {
+      a.addEventListener("click", function () {
+        try { localStorage.setItem("view", a.getAttribute("data-view-set")); } catch (e) { /* ignore */ }
+      });
+    });
+  });
+})();
+
 // Vote, save and summarize: each button posts to /api/paper/<id>/... and updates itself from the answer.
 (function () {
   function post(id, action, body) {

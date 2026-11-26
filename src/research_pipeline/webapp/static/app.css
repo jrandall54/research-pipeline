@@ -160,14 +160,15 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 600; line-height: 1.25
 }
 
 /* ---- Feed ---- */
-.feed-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.feed-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .feed-head h1 { margin: 0; font-size: 24px; }
 .depth { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--surface); }
-.depth button {
+.depth button, .depth a {
   font: inherit; font-size: 14px; font-weight: 500; color: var(--muted); background: transparent;
   border: 0; padding: 8px 16px; min-height: 40px; cursor: pointer;
 }
-.depth button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.depth button[aria-pressed="true"], .depth a[aria-current="true"] { background: var(--accent-soft); color: var(--accent); }
+.depth a { display: inline-flex; align-items: center; text-decoration: none; }
 .cards { display: flex; flex-direction: column; gap: 12px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
 .topic { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 4px; }

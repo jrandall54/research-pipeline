@@ -4,7 +4,7 @@
 
 From Phase 2 the pipeline asks a language model to read papers and write summaries. The model runs on your own computer, served by **Ollama** (a program that downloads open models and answers requests on `http://localhost:11434`). `src/research_pipeline/llm.py` is the small client that talks to it. Its one job is `generate(system, user, schema)`: send instructions and text, get back an object that has already been checked against a schema. If anything goes wrong it raises `LlmError` with a hint on how to fix it.
 
-Ollama is one of three backends (`ollama`, `claude-code`, `none`); how to choose between them, and which commands apply to which, is in `backends.md`. The rest of this page is about the `ollama` backend. You manage it with six commands (plus `rpipe model set-backend` to switch backend, and `rpipe model set-effort low|medium|high`, which only matters for the `claude-code` backend: see `backends.md`): `rpipe model show`, `rpipe model set NAME`, `rpipe model set-url URL`, `rpipe model set-context N`, `rpipe model check` and `rpipe model fit`. `rpipe model set-mode auto|whole|split` (every backend) chooses whether papers are read in one go or in parts; `auto` reads in parts when the model does not sit fully in GPU memory or the context is small (see "Choosing the mode" in `summaries.md`). By default the model and the context window are both `auto`: the pipeline picks them for you (see "Choosing the model and context automatically" below). You never have to edit a file to change any of this. (The owner's `o` script is an optional convenience for managing models by hand; the pipeline does not need it and never calls it.)
+Ollama is one of three backends (`ollama`, `claude-code`, `none`); how to choose between them, and which commands apply to which, is in `backends.md`. The rest of this page is about the `ollama` backend. You manage it with six commands (plus `rpipe model set-backend` to switch backend, and `rpipe model set-effort low|medium|high`, which only matters for the `claude-code` backend: see `backends.md`): `rpipe model show`, `rpipe model set NAME`, `rpipe model set-url URL`, `rpipe model set-context N`, `rpipe model check` and `rpipe model fit`. `rpipe model set-mode auto|whole|split` (every backend) chooses whether papers are read in one go or in parts; `auto` reads in parts when the model does not sit fully in GPU memory or the context is small (see "Choosing the mode" in `summaries.md`). `rpipe model set-diagrams auto|on|off` (every backend) chooses whether each paper also gets a diagram; `auto` draws one unless the model runs on the CPU only (see "The diagrams setting" below). By default the model and the context window are both `auto`: the pipeline picks them for you (see "Choosing the model and context automatically" below). You never have to edit a file to change any of this. (The owner's `o` script is an optional convenience for managing models by hand; the pipeline does not need it and never calls it.)
 
 ## How it works
 
@@ -141,6 +141,7 @@ rpipe model set qwen3:8b   # pin a smaller model for less memory (rpipe model se
 rpipe model set-url http://gpu-box:11434   # a different Ollama server (must start with http:// or https://)
 rpipe model set-context 16384   # pin the context in tokens, at least 8192, or `auto`; invalid values are refused and the file is left alone
 rpipe model set-mode split      # read papers in parts (auto, the default, picks per machine; whole reads in one go)
+rpipe model set-diagrams off    # no diagram per paper (auto, the default, skips it only on a CPU-only model; on always draws)
 ```
 
 **Check that prefix caching works.** The summary and the critique start with identical text (see `summaries.md`), so Ollama should read the paper once. After every reply the client keeps Ollama's own timing numbers in `client.last_stats` (`prompt_eval_count`: the prompt's length in tokens, which this Ollama counts in full even when part of it came from the cache; `prompt_eval_duration` and `eval_duration` in nanoseconds, where the cache shows up; `eval_count`: tokens written; `None` when Ollama sends none). To see it on one paper:
@@ -173,3 +174,21 @@ Working caching shows the second time far smaller than the first (only the task 
 - `src/research_pipeline/cli.py`: the `model` commands, `build_llm`.
 - `src/research_pipeline/onboarding.py`: `propose` (the onboarding model call).
 - `tests/test_llm.py`, and `FakeLLM` in `tests/conftest.py`.
+
+## The diagrams setting
+
+**What it does.** Each paper can get a small diagram of its approach, which is one more model call per paper. `diagrams` in `config.yaml` says whether to make it: `on`, `off` or `auto` (the default). Set it with `rpipe model set-diagrams auto|on|off` (any capitals; anything else is refused with the three choices listed and the config left unchanged). `rpipe model show` prints `diagrams: auto (change with `rpipe model set-diagrams`)`.
+
+**How it works.** In the same `reading mode` stage that picks whole or split, `resolve_diagrams` (`parts.py`) turns the setting into yes or no and a one-line reason that is shown as a progress note:
+
+1. `on` or `off`: used as set, on any backend. The note says `set with `rpipe model set-diagrams on``.
+2. `auto` with a backend other than Ollama (Claude Code): on. Cloud models are fast enough for one more call.
+3. `auto` with Ollama: the GPU share already read for the summarize mode is reused. Unknown share (the model was not loaded because the summarize mode is fixed, or the read failed): on. Share 0.0, the model on the CPU only: off, with the note `diagrams off: the model runs on the CPU only (GPU share 0.0)`. Anything else: on.
+
+Worked example: a CPU-only laptop with the default settings. `rpipe run` loads the model, reads share 0.0, notes `split: the model runs on the CPU only (GPU share 0.0)` and `diagrams off: the model runs on the CPU only (GPU share 0.0)`, and papers get no diagram. `rpipe model set-diagrams on` forces them back, at the cost of one more slow call per paper.
+
+**Why it is built this way.** A CPU reads and writes tokens many times slower than a GPU, so for a pipeline that already struggles to finish overnight on a CPU, an optional picture is the first thing to drop (see `hardware.md`). Rejected: always on (it can push a CPU-only night past the morning deadline) and always off (it wastes capable machines). The value is stored as a quoted string, because an unquoted `off` is a boolean to YAML; a hand-edited `diagrams: off` is read as `off` all the same.
+
+**How to check it.** `rpipe model show` prints the setting; the `reading mode` stage shows the reason during a run. `tests/test_parts.py` checks `resolve_diagrams` for each case, `tests/test_profile_edit.py` and `tests/test_cli_model.py` check the command and the `show` line.
+
+**Where the code.** `src/research_pipeline/parts.py` (`resolve_diagrams`), `src/research_pipeline/cli.py` (`_read_mode`, `_summarize_plan`, `rpipe model set-diagrams`), `src/research_pipeline/profile_edit.py` (`set_diagrams`), `src/research_pipeline/models.py` (`Config.diagrams`).

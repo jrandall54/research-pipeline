@@ -435,3 +435,19 @@ def test_model_show_prints_summarize_mode(vault):
     run(vault, "model", "set-mode", "whole")
     out = run(vault, "model", "show").output
     assert "summarize mode: whole" in out
+
+
+def test_model_set_diagrams_command(vault):
+    result = run(vault, "model", "set-diagrams", "OFF")
+    assert result.exit_code == 0, result.output
+    assert "diagrams is now off." in result.output
+    assert load_config(vault / "config.yaml").diagrams == "off"
+    before = (vault / "config.yaml").read_text()
+    bad = run(vault, "model", "set-diagrams", "maybe")
+    assert bad.exit_code == 1
+    assert "auto, on, off" in bad.output
+    assert (vault / "config.yaml").read_text() == before
+
+
+def test_model_show_prints_diagrams_line(vault):
+    assert "diagrams: auto (change with `rpipe model set-diagrams`)" in run(vault, "model", "show").output

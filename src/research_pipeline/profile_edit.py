@@ -425,6 +425,24 @@ def set_summarize_mode(vault: Path, value: str) -> None:
     _edit(_config_path(vault), Config, change)
 
 
+DIAGRAMS_SETTINGS = ("auto", "on", "off")
+
+
+def set_diagrams(vault: Path, value: str) -> None:
+    """Whether papers get a diagram: auto, on or off (any capitals; surrounding spaces ignored)."""
+    setting = value.strip().lower()
+    if setting not in DIAGRAMS_SETTINGS:
+        raise ValueError(
+            f"unknown diagrams setting {value.strip()!r}: choose one of {', '.join(DIAGRAMS_SETTINGS)}")
+
+    def change(data) -> bool:
+        # Quoted: unquoted on/off are booleans to YAML readers.
+        data["diagrams"] = DoubleQuotedScalarString(setting)
+        return True
+
+    _edit(_config_path(vault), Config, change)
+
+
 def enable_source(vault: Path, name: str, known: set[str]) -> bool:
     """Turn a source on (appended to the end of the order). False if it was already on."""
     name = name.strip()

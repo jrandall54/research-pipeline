@@ -326,3 +326,23 @@ def resolve_mode(
         return "split", (f"split: the context ({num_ctx} tokens) is below {SPLIT_BELOW_CTX},"
                          " too small for a typical paper")
     return "whole", f"whole: the model is fully in GPU memory with a {num_ctx}-token context"
+
+
+def resolve_diagrams(setting: str, backend: str, gpu_share: float | None) -> tuple[bool, str]:
+    """Whether to draw a diagram per paper, and a one-line plain reason for the progress note.
+
+    ``on`` and ``off`` are kept as set. ``auto``: a backend other than Ollama draws (cloud
+    models are fast); on Ollama an unknown GPU share draws, a CPU-only model (share 0.0) does
+    not (one more model call per paper, slow on a CPU), anything else draws.
+    """
+    if setting == "on":
+        return True, "diagrams on: set with `rpipe model set-diagrams on`"
+    if setting == "off":
+        return False, "diagrams off: set with `rpipe model set-diagrams off`"
+    if backend != "ollama":
+        return True, f"diagrams on: the {backend} backend is fast enough for one more call per paper"
+    if gpu_share is None:
+        return True, "diagrams on: GPU share not read, so the model is assumed fast enough"
+    if gpu_share <= 0.0:
+        return False, "diagrams off: the model runs on the CPU only (GPU share 0.0)"
+    return True, f"diagrams on: the model uses the GPU (GPU share {gpu_share:.2f})"

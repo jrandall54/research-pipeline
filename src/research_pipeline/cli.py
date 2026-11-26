@@ -94,7 +94,7 @@ from research_pipeline.llm import (
 )
 from research_pipeline.machine import OLLAMA_INSTALL, _generation_models, detect_machine, recommend
 from research_pipeline.models import Config, PaperMeta, Profile, Section
-from research_pipeline.parts import SPLIT_BELOW_CTX, resolve_mode
+from research_pipeline.parts import SPLIT_BELOW_CTX, resolve_diagrams, resolve_mode
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
 from research_pipeline.registry import make_arxiv  # tests replace cli.make_arxiv with a stub
@@ -431,14 +431,18 @@ def _ready_llm(pipeline: Pipeline) -> LLM | None:
 
 
 def _read_mode(
-    llm: LLM, setting: str, reporter: Reporter | None, set_with: str | None = None
-) -> Literal["whole", "split"]:
+    llm: LLM, setting: str, reporter: Reporter | None, set_with: str | None = None,
+    diagrams: str = "auto",
+) -> tuple[Literal["whole", "split"], float | None]:
     """Resolve a summarize_mode setting (auto/whole/split) to whole or split, in a "reading mode" stage.
 
     For `auto` on Ollama the model is loaded (a note says so first) and its GPU share read
     (parts.resolve_mode). Any failure there reads whole, as before split mode existed. Shared
     by `rpipe run`, `rpipe summarize` and `rpipe eval run` so all three decide the same way.
     ``set_with`` names where a fixed mode came from (eval's `--mode`); default the setting.
+    Returns the mode and the GPU share it read (None when not read). The diagrams setting
+    (parts.resolve_diagrams) is noted in the same stage and uses the same share; a fixed
+    summarize mode does not load the model, so the share is unknown and `auto` draws.
     """
     backend = getattr(llm, "name", "")
     with stage(reporter, "reading mode") as handle:
@@ -454,13 +458,14 @@ def _read_mode(
                 problem = " ".join(str(exc).split()) or type(exc).__name__
         mode, reason = resolve_mode(setting, backend, share, llm.num_ctx, set_with=set_with)
         handle.note(f"{reason} ({problem})" if problem else reason)
-    return mode
+        handle.note(resolve_diagrams(diagrams, backend, share)[1])
+    return mode, share
 
 
 def _summarize_plan(
     llm: LLM, config: Config, reruns_possible: bool, reporter: Reporter | None, *, has_work: bool = True
-) -> tuple[Literal["whole", "split"], int]:
-    """How this command reads papers: the mode and `fallback_above` for run_summarize.
+) -> tuple[Literal["whole", "split"], int, bool]:
+    """How this command reads papers: the mode, `fallback_above` and whether to draw diagrams.
 
     Mode: the summarize_mode setting, resolved by `_read_mode`; with nothing queued
     (``has_work=False``) there is no "reading mode" stage and no model load, just whole.
@@ -470,12 +475,15 @@ def _summarize_plan(
     in docs/guide/summaries.md.
     """
     backend = getattr(llm, "name", "")
-    mode: Literal["whole", "split"] = (
-        _read_mode(llm, config.summarize_mode, reporter) if has_work else "whole")
+    mode: Literal["whole", "split"] = "whole"
+    share: float | None = None
+    if has_work:
+        mode, share = _read_mode(llm, config.summarize_mode, reporter, diagrams=config.diagrams)
+    diagrams, _ = resolve_diagrams(config.diagrams, backend, share)
     fallback_above = 0
     if backend == "ollama" and reruns_possible:
         fallback_above = model_cap(getattr(llm, "url", ""), llm.model_name)
-    return mode, fallback_above
+    return mode, fallback_above, diagrams
 
 
 def _require_model(config: Config) -> None:
@@ -628,7 +636,7 @@ def _run_locked(ctx: _Context) -> None:
                             # Nothing queued: no reason to load the model just to pick a mode.
                             has_work = bool(papers_to_summarize(ctx.conn, date.today())) or bool(
                                 runnable_requests(ctx.conn))
-                            mode, fallback_above = _summarize_plan(
+                            mode, fallback_above, _diagrams = _summarize_plan(
                                 llm, ctx.config, ctx.config.night_deadline != "off", reporter,
                                 has_work=has_work)
                             sum_counts, sum_errors = run_summarize(
@@ -830,7 +838,7 @@ def summarize(
         done = ListReporter()
         with _reporter() as live:
             # Reruns follow tonight unless the deadline is off, so the same fallback rule as `run`.
-            mode, fallback_above = _summarize_plan(
+            mode, fallback_above, _diagrams = _summarize_plan(
                 llm, ctx.config, ctx.config.night_deadline != "off", live)
             counts, errors = run_summarize(
                 ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
@@ -931,7 +939,7 @@ def requests_run(vault: VaultOption = None) -> None:
         if llm is None:
             raise _fail(NO_MODEL)
         with _reporter() as reporter:
-            mode, fallback_above = _summarize_plan(
+            mode, fallback_above, _diagrams = _summarize_plan(
                 llm, ctx.config, ctx.config.night_deadline != "off", reporter, has_work=bool(pending))
             counts, errors = drain_requests(
                 ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
@@ -1789,8 +1797,9 @@ def eval_run(
         typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
         with _clean_errors():
             with _reporter() as reporter:
-                read_mode = _read_mode(llm, setting, reporter,
-                                       set_with=None if mode is None else "--mode for this eval")
+                read_mode, _share = _read_mode(
+                    llm, setting, reporter, set_with=None if mode is None else "--mode for this eval",
+                    diagrams=ctx.config.diagrams)
                 md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
                               reporter=reporter, judge=eval_judge, mode=read_mode)
         typer.echo(f"Report written: {md}")
@@ -1869,6 +1878,7 @@ def model_show(vault: VaultOption = None) -> None:
         return
     typer.echo(f"model: {cfg.llm_model}")
     typer.echo(f"summarize mode: {cfg.summarize_mode} (change with `rpipe model set-mode`)")
+    typer.echo(f"diagrams: {cfg.diagrams} (change with `rpipe model set-diagrams`)")
     if cfg.summarize_mode == "auto":
         typer.echo(f"  auto: split when the model is not fully in GPU memory or the context is "
                    f"below {SPLIT_BELOW_CTX} tokens (Ollama); whole otherwise")
@@ -2014,6 +2024,22 @@ def model_set_mode(
         typer.echo("summarize mode is now auto: each run picks split or whole (see `rpipe model show`).")
     else:
         typer.echo(f"summarize mode is now {stored}.")
+
+
+@model_app.command("set-diagrams")
+def model_set_diagrams(
+    setting: Annotated[str, typer.Argument(help="auto (off on a CPU-only model), on or off.")],
+    vault: VaultOption = None,
+) -> None:
+    """Choose whether each paper also gets a diagram (one more model call): auto, on or off."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_diagrams(ctx.vault, setting)
+    stored = load_config(ctx.vault / "config.yaml").diagrams
+    if stored == "auto":
+        typer.echo("diagrams is now auto: drawn unless the model runs on the CPU only (see `rpipe model show`).")
+    else:
+        typer.echo(f"diagrams is now {stored}.")
 
 
 @model_app.command("fit")

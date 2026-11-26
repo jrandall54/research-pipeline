@@ -45,6 +45,7 @@ Defines the small set of typed objects every stage passes around, and the lifecy
 | `llm_effort` | Claude Code thinking effort: `low` (default), `medium` or `high`; set with `rpipe model set-effort`. Missing in an older vault means `low`. |
 | `llm_backend`, `llm_cli_path` | Which backend writes summaries (default `ollama`; see `backends.md`) and the full path of a subscription CLI. Missing keys in an older vault mean Ollama. |
 | `summarize_mode` | How papers are read: `auto` (default), `whole` or `split`; set with `rpipe model set-mode` (see "Choosing the mode" in `summaries.md`). Missing in an older vault means `auto`. |
+| `diagrams` | Whether each paper also gets a diagram: `auto` (default; off on a CPU-only Ollama model), `on` or `off`; set with `rpipe model set-diagrams` (see "The diagrams setting" in `llm.md`). Missing in an older vault means `auto`. |
 | `sources` | Enabled paper sources in collection order, default `[arxiv, hf_daily]`; non-empty, no repeats. Change with `rpipe sources enable NAME` / `disable NAME` (see `sources.md`, `plugins.md`). |
 
 `Profile` and `Config` reject unknown keys (`extra="forbid"`).

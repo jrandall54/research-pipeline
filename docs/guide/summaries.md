@@ -359,7 +359,7 @@ The tests use a scripted fake model (`FakeLLM`), so no Ollama is needed. They ch
 - `src/research_pipeline/summarize.py`: `summarize_paper` (modes `whole` / `split`, the map-reduce fallback rule), `phase_note` (progress text for each phase), `run_summarize` (counts `in_parts`); also re-exports `claims` and `unknown_citations`
 - `src/research_pipeline/citations.py`: the citation check, `claims`, `unknown_citations`, `generate_checked` (generate, check, retry once); shared by whole reads and reading in parts
 - `src/research_pipeline/parts.py`: reading in parts, `split_groups`, `chunk_to_budget`, `read_in_parts`, `FRONT_WORDS`, `MAX_CONDENSE_ROUNDS`, `MIN_PARTS_CTX`; choosing the mode, `resolve_mode`, `SPLIT_BELOW_CTX`
-- `src/research_pipeline/cli.py`: `_read_mode` (the `reading mode` stage, shared by `rpipe run`, `rpipe summarize` and `rpipe eval run`), `_summarize_plan` (mode and `fallback_above` for `rpipe run` and `rpipe summarize`), `rpipe model set-mode`
+- `src/research_pipeline/cli.py`: `_read_mode` (the `reading mode` stage, shared by `rpipe run`, `rpipe summarize` and `rpipe eval run`), `_summarize_plan` (mode, `fallback_above` and the diagrams yes/no for `rpipe run` and `rpipe summarize`), `rpipe model set-mode`
 - `src/research_pipeline/profile_edit.py`: `set_summarize_mode`; `src/research_pipeline/models.py`: `Config.summarize_mode`
 - `src/research_pipeline/pruning.py`: `classify`, `partition`, `fit_to_budget`, `Fit` (with `needed_ctx`), `NEEDED_STEP`
 - `src/research_pipeline/llm.py`: `OllamaClient.gpu_share` (reads `/api/ps`), `OllamaClient.load` (loads the model with an empty prompt, at most `CALL_TIMEOUT`)

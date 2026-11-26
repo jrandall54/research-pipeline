@@ -140,6 +140,17 @@ The unit is small: it sets `RESEARCH_VAULT`, runs `rpipe app run --host H --port
 
 **Where the code is.** `src/research_pipeline/webapp/service.py` (`render_service`, `install`, `remove`, `address`, `is_active`, `allowed_hosts`) and the `app` commands in `src/research_pipeline/cli.py` (`app_run`, `app_install`, `app_uninstall`, `app_status`).
 
+## What to check after installing
+
+Once `rpipe app install` has printed the address and you have opened it on your phone:
+
+1. The feed shows today's date and your papers; the layout fits the phone width with no sideways scrolling.
+2. Switch the phone to dark mode; the pages follow it.
+3. Try Skim and Read, and open a paper from a card.
+4. Tap "More like this" on a paper, then run `rpipe show ID` on the computer: the vote is listed there.
+5. Save a paper; it appears under Saved.
+6. Use "Add to Home Screen" so it opens like an app.
+
 ## How to run / check it
 
 Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static files, a wrong `Host` (400), a cross-site and a header-less POST (403), a same-origin POST reaching the router (404, JSON under `/api/`), IPv6 hosts, the `Referer` fallback and template escaping. The `rpipe app` commands are covered in "Setting it up".

@@ -417,3 +417,87 @@ def test_dropped_round_trips_and_old_truncated_loads_as_body_cut(tmp_path):
     conn.execute("UPDATE summaries SET text = ? WHERE paper_id = '2401.00001' AND kind = 'summary'", (json.dumps(old),))
     got = get_summary(conn, "2401.00001")
     assert got.body_cut is True and got.dropped == []
+
+
+def _summary_row_json(**extra):
+    claim = {"text": "t", "sections": ["Intro"]}
+    return json.dumps(
+        {
+            "one_line": "o",
+            "problem": claim,
+            "approach": claim,
+            "results": claim,
+            "limitations": claim,
+            "basis": "abstract",
+            "unverified": [],
+            **extra,
+        }
+    )
+
+
+def _crit_json():
+    return json.dumps({"strengths": [], "weaknesses": [], "questions": []})
+
+
+def test_old_summary_row_loads_without_new_fields(tmp_path):
+    from research_pipeline.db import get_summary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    for kind, text in (("summary", _summary_row_json()), ("critique", _crit_json())):
+        conn.execute(
+            "INSERT INTO summaries (paper_id, kind, text, model, created_at) VALUES (?,?,?,?,?)",
+            ("2401.00001", kind, text, "m", "now"),
+        )
+    got = get_summary(conn, "2401.00001")
+    assert got.summary.hook is None
+    assert got.summary.key_numbers == []
+    assert got.checks == []
+
+
+def test_hook_key_numbers_checks_round_trip(tmp_path):
+    from research_pipeline.db import get_summary, save_summary
+    from research_pipeline.summary_models import Claim, Critique, KeyNumber, PaperSummary, Summary
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    c = Claim(text="t", sections=["Intro"])
+    ps = PaperSummary(
+        summary=Summary(
+            one_line="o",
+            problem=c,
+            approach=c,
+            results=c,
+            limitations=c,
+            hook=Claim(text="28% faster", sections=["Abstract"]),
+            key_numbers=[KeyNumber(value="28%", label="speedup", sections=["Results"])],
+        ),
+        critique=Critique(strengths=[], weaknesses=[], questions=[]),
+        basis="abstract",
+        unverified=[],
+        checks=["Left out the diagram: no clear shape."],
+    )
+    save_summary(conn, "2401.00001", ps, "m")
+    assert get_summary(conn, "2401.00001") == ps
+
+
+def test_diagram_round_trip_and_delete(tmp_path):
+    from research_pipeline.db import get_diagram, get_summary, save_diagram
+    from research_pipeline.summary_models import Diagram, DiagramEdge, DiagramNode
+
+    conn = open_db(tmp_path / "p.db")
+    upsert_paper(conn, make())
+    d = Diagram(
+        shape="steps",
+        nodes=[
+            DiagramNode(id="a", label="Read", sections=["Method"]),
+            DiagramNode(id="b", label="Write", detail="d", sections=["Method"]),
+        ],
+        edges=[DiagramEdge(source="a", target="b", label="then")],
+        caption="cap",
+    )
+    save_diagram(conn, "2401.00001", d, "m")
+    assert get_diagram(conn, "2401.00001") == d
+    assert get_summary(conn, "2401.00001") is None
+    save_diagram(conn, "2401.00001", None, "m")
+    assert get_diagram(conn, "2401.00001") is None

@@ -6,7 +6,7 @@ them), so the database layer never has to import the summarize stage.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Claim(BaseModel):
@@ -30,12 +30,22 @@ class Dropped(BaseModel):
     reason: Literal["non_paper", "appendix"]
 
 
+class KeyNumber(BaseModel):
+    """A figure worth remembering from the paper, with the sections it comes from."""
+
+    value: str
+    label: str
+    sections: list[str] = Field(min_length=1)
+
+
 class Summary(BaseModel):
     one_line: str
     problem: Claim
     approach: Claim
     results: Claim
     limitations: Claim
+    hook: Claim | None = None  # one catchy, checkable sentence; None when the model gave none
+    key_numbers: list[KeyNumber] = []
 
 
 class Critique(BaseModel):
@@ -57,6 +67,7 @@ class PaperSummary(BaseModel):
     notes_unverified: list[str] = []
     read_mode: Literal["whole", "split", "map_reduce"] = "whole"  # how the paper was read (old rows: whole)
     parts: int = 1  # how many parts it was read in (1 when read whole)
+    checks: list[str] = []  # plain reasons a hook, key number or diagram was left out
 
     @model_validator(mode="before")
     @classmethod
@@ -66,3 +77,33 @@ class PaperSummary(BaseModel):
             data = dict(data)
             data.setdefault("body_cut", data.pop("truncated"))
         return data
+
+
+class DiagramNode(BaseModel):
+    id: str
+    label: str
+    detail: str | None = None
+    sections: list[str] = Field(min_length=1)
+
+
+class DiagramEdge(BaseModel):
+    """An arrow between two nodes. In JSON the keys are `from` and `to`."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    source: str = Field(alias="from")
+    target: str = Field(alias="to")
+    label: str | None = None
+
+
+class Diagram(BaseModel):
+    shape: Literal["parts", "steps", "loop"]
+    nodes: list[DiagramNode]
+    edges: list[DiagramEdge]
+    caption: str
+
+
+class DiagramAnswer(BaseModel):
+    """The model's whole answer for a diagram; `diagram` is None when there is no clear shape."""
+
+    diagram: Diagram | None

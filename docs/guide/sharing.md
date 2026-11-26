@@ -172,7 +172,7 @@ You need `git` and the GitHub command line tool `gh` only to *publish*; followin
 | `rpipe share publish` | Rebuild and push now (the nightly run does this on its own) |
 | `rpipe share set-name NAME` | Change your display name (republishes) |
 | `rpipe share stop [--delete]` | Stop publishing and leave the directory; `--delete` also deletes the repository (asks first) |
-| `rpipe share browse [SEARCH]` | Refresh the directory and list it, optionally filtered |
+| `rpipe share browse [SEARCH]` | Refresh the directory and list it, optionally filtered. Each person is a short block: name and handle, papers a day and topics in common, then at most 3 topics (the ones you share first, the rest counted as "+N more"); SEARCH still matches every topic |
 | `rpipe share follow HANDLE` | Follow a feed (or an `https://` feed address) and fetch it now |
 | `rpipe share unfollow HANDLE` | Stop following; posts you saved or voted on are kept |
 | `rpipe share following` | List who you follow |
@@ -190,7 +190,10 @@ Publish your feed? [y/N]: y
 Your feed is live: https://alex.github.io/rpipe-feed/feed.json
 
 $ rpipe share browse robotics            # on Sam's machine
-Alex M. · @alex · robotics, reinforcement learning · about 8 papers a day · shares 1 of your topics
+Alex M.  @alex
+  about 8 papers a day · 1 topic in common
+  robotics, reinforcement learning, compilers, +4 more
+
 Follow one with `rpipe share follow HANDLE`.
 $ rpipe share follow alex
 Following alex: 212 posts downloaded.

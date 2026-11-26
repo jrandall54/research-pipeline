@@ -241,8 +241,8 @@ def test_browse_filters_and_marks_followed(vault, monkeypatch):
 
     use(monkeypatch, FakeRunner(), lambda: httpx.Client(transport=httpx.MockTransport(handler)))
     out = sh(vault, "browse").output
-    assert "Alex M. · @alex · agents" in out and "shares 1 of your topics" in out
-    assert "papers a day" in out and "you follow them" not in out
+    assert "Alex M.  @alex\n" in out and "1 topic in common" in out
+    assert "papers a day" in out and "(following)" not in out
     assert "No feeds found." in sh(vault, "browse", "zzz").output
     assert "@alex" in sh(vault, "browse", "AGENTS").output
 
@@ -371,7 +371,7 @@ def test_browse_marks_your_own_feed(vault, monkeypatch):
         return httpx.Response(200, content=feed) if url == BASE + "feed.json" else httpx.Response(404)
 
     use(monkeypatch, FakeRunner(), lambda: httpx.Client(transport=httpx.MockTransport(handler)))
-    assert "this is you" in sh(vault, "browse").output
+    assert "(you)" in sh(vault, "browse").output
 
 
 def test_terminal_output_strips_escape_sequences(vault):
@@ -383,3 +383,15 @@ def test_terminal_output_strips_escape_sequences(vault):
     out = sh(vault, "following").output
     assert "\x1b" not in out and "Bo[31m red" in out
     assert "\x1b" not in cli.health_line(date(2026, 11, 26), {}, ["fetch Bo\x1b[2J: boom"])
+
+
+def test_browse_entry_shows_three_topics_shared_first():
+    from research_pipeline import library_api
+
+    e = library_api.DirectoryEntryView(
+        feed_id="github:alex/rpipe-feed", handle="alex", display_name="Alex M.",
+        topics=["robotics", "java", "LLM", "Agents", "compilers", "vision"], posts_per_day=8.0,
+        preview=[], shared_topics=1, following=False, is_you=False)
+    out = cli._browse_entry(e, {"agents"})
+    assert out.splitlines()[2] == "  Agents, robotics, java, +3 more"
+    assert "1 topic in common" in out and len(out.splitlines()) == 3

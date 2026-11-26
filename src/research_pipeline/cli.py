@@ -3797,12 +3797,33 @@ def share_browse(
     if not entries:
         typer.echo("No feeds found." if search else "No published feeds found yet.")
         return
+    mine = {" ".join(t.lower().split()) for t in profile.topics}
     for e in entries:
-        topics = ", ".join(clean_text(t) for t in e.topics) or "no topics"
-        line = (f"{clean_text(e.display_name)} · @{clean_text(e.handle)} · {topics} · "
-                f"about {e.posts_per_day:g} papers a day · shares {e.shared_topics} of your topics")
-        typer.echo(line + (" · this is you" if e.is_you else " · you follow them" if e.following else ""))
+        typer.echo(_browse_entry(e, mine))
+        typer.echo("")
     typer.echo("Follow one with `rpipe share follow HANDLE`.")
+
+
+BROWSE_TOPICS_SHOWN = 3
+
+
+def _browse_entry(e: "library_api.DirectoryEntryView", mine: set[str]) -> str:
+    """One directory entry as a short block: name line, a stats line, at most 3 topics.
+
+    Topics you share come first; the rest are counted ("+16 more") so a long interest
+    list never turns the listing into a wall of text.
+    """
+    tag = "  (you)" if e.is_you else "  (following)" if e.following else ""
+    head = typer.style(clean_text(e.display_name), bold=True) + f"  @{clean_text(e.handle)}{tag}"
+    stats = f"about {e.posts_per_day:g} papers a day"
+    if not e.is_you:
+        stats += f" · {e.shared_topics} topic{'' if e.shared_topics == 1 else 's'} in common"
+    topics = [clean_text(t) for t in e.topics]
+    topics.sort(key=lambda t: " ".join(t.lower().split()) not in mine)  # shared first, order otherwise kept
+    shown = ", ".join(topics[:BROWSE_TOPICS_SHOWN]) or "no topics"
+    if len(topics) > BROWSE_TOPICS_SHOWN:
+        shown += f", +{len(topics) - BROWSE_TOPICS_SHOWN} more"
+    return f"{head}\n  {stats}\n  {shown}"
 
 
 @share_app.command("follow")

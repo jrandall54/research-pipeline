@@ -52,7 +52,7 @@ A trimmed example `feed.json`:
 
 What is never published: your votes, saves, skips, shelf, notes in `my_work/`, run history, config and diagrams. Of the reasons a paper was picked, only these kinds go out: topic, HF upvotes, followed author and keyword. "Liked similar", "disliked similar" and "near your shelf" are dropped, because they would reveal your votes or notes.
 
-Files from other people are never trusted. Reading a feed refuses one that is too big, not JSON, missing `_rpipe`, or marked with a newer `format` than this rpipe knows ("This feed needs a newer rpipe."). A single bad post (for example a 600-character title) is dropped and counted; the rest of the feed still loads.
+Files from other people are never trusted. Reading a feed refuses one that is too big, not JSON, missing `_rpipe`, or marked with a newer `format` (or a `format` that isn't a whole number) than this rpipe knows ("This feed needs a newer rpipe."). Text fields are length-capped (for example display name 60 characters, 30 topics). A single bad post (for example a 600-character title) is dropped and counted; the rest of the feed still loads.
 
 ## How it works
 
@@ -61,7 +61,7 @@ Files from other people are never trusted. Reading a feed refuses one that is to
 ## Why it's built this way
 
 - JSON Feed plus Atom: one open, boring format that other tools can read, with the rpipe extras tucked under `_rpipe` so readers that don't know them ignore them.
-- Files are byte-stable (sorted keys, fixed separators): a nightly run that finds nothing new produces identical bytes, so git has nothing to commit.
+- Files are byte-stable (sorted keys, fixed separators, and `generated_at` taken from the newest post rather than the clock): a night with no new posts produces identical bytes, so git has nothing to commit. The one exception is a post aging out of the 30-day window, which changes `feed.json` on purpose.
 - Month archives with fingerprints instead of one growing file: `feed.json` stays small and a follower downloads only archives that changed.
 - Rejected: publishing everything and filtering on the reader's side. Private reasons must never leave your machine in the first place.
 

@@ -116,3 +116,57 @@ def test_parse_feed_drops_bad_items():
     doc["items"][0]["title"] = "x" * 600
     feed, dropped = ff.parse_feed(json.dumps(doc).encode())
     assert dropped == 1 and len(feed.items) == 1
+
+
+def test_same_posts_next_day_same_bytes():
+    posts = [post("2611.1", "2026-11-20"), post("2611.2", "2026-11-25")]
+    assert build(posts, now="2026-11-26T03:00:00Z") == build(posts, now="2026-11-27T03:00:00Z")
+
+
+def test_parse_feed_rejects_string_format():
+    doc = json.loads(build([])["feed.json"])
+    doc["_rpipe"]["format"] = "2"
+    with pytest.raises(FeedError):
+        ff.parse_feed(json.dumps(doc).encode())
+
+
+def test_parse_feed_rejects_long_display_name_and_topics():
+    doc = json.loads(build([])["feed.json"])
+    doc["_rpipe"]["display_name"] = "n" * 61
+    with pytest.raises(FeedError):
+        ff.parse_feed(json.dumps(doc).encode())
+    doc["_rpipe"]["display_name"] = "ok"
+    doc["_rpipe"]["topics"] = ["t"] * 31
+    with pytest.raises(FeedError):
+        ff.parse_feed(json.dumps(doc).encode())
+
+
+def test_parse_feed_drops_item_with_long_author():
+    doc = json.loads(build([post("2611.1", "2026-11-20")])["feed.json"])
+    doc["items"][0]["_rpipe"]["paper"]["authors"] = ["a" * 201]
+    feed, dropped = ff.parse_feed(json.dumps(doc).encode())
+    assert dropped == 1 and feed.items == []
+
+
+def test_atom_strips_control_characters():
+    files = build([post("2611.1", "2026-11-20", title="bell\x07 ring")])
+    root = ET.fromstring(files["feed.xml"])
+    assert root.find("{http://www.w3.org/2005/Atom}entry/{http://www.w3.org/2005/Atom}title").text == "bell ring"
+
+
+def test_archive_refs_match_file_bytes_and_reject_bad_path():
+    import hashlib
+    files = build([post("2611.1", "2026-11-20")])
+    feed, _ = ff.parse_feed(files["feed.json"])
+    ref = feed.rpipe.archives[0]
+    assert ref.sha256 == hashlib.sha256(files[ref.path]).hexdigest()
+    doc = json.loads(files["feed.json"])
+    doc["_rpipe"]["archives"][0]["path"] = "../../etc/passwd"
+    with pytest.raises(FeedError):
+        ff.parse_feed(json.dumps(doc).encode())
+
+
+def test_feed_json_capped_at_max_items(monkeypatch):
+    monkeypatch.setattr(ff, "FEED_MAX_ITEMS", 3)
+    feed, _ = ff.parse_feed(build([post(f"2611.{i}", "2026-11-20", rank=i) for i in range(5)])["feed.json"])
+    assert [i.id for i in feed.items] == ["2611.0", "2611.1", "2611.2"]

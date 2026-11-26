@@ -15,9 +15,9 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, field_validator
 
 from research_pipeline.summary_models import PaperSummary
 
@@ -32,6 +32,7 @@ PUBLIC_REASON_KINDS = ("topic", "upvotes", "author", "keyword")
 JSON_FEED_VERSION = "https://jsonfeed.org/version/1.1"
 TITLE_MAX, ABSTRACT_MAX, CLAIM_MAX = 500, 10_000, 2_000
 _ATOM = "http://www.w3.org/2005/Atom"
+Short = Annotated[str, Field(max_length=200)]
 _ARCHIVE_PATH = r"^archive/\d{4}-\d{2}(-\d{1,4})?\.json$"
 
 
@@ -93,7 +94,7 @@ class PaperBlock(_Model):
     id: str = Field(max_length=200)
     title: str = Field(max_length=TITLE_MAX)
     abstract: str = Field(max_length=ABSTRACT_MAX)
-    authors: list[str] = Field(max_length=500)
+    authors: list[Short] = Field(max_length=200)
     url: str = Field(max_length=2000)
     published: str | None = None
 
@@ -103,20 +104,29 @@ def _claim_texts(summary: PaperSummary) -> list[str]:
     claims = [s.problem, s.approach, s.results, s.limitations, *c.strengths, *c.weaknesses]
     if s.hook:
         claims.append(s.hook)
-    return [cl.text for cl in claims]
+    texts = [cl.text for cl in claims]
+    texts += [kn.value + kn.label for kn in s.key_numbers]
+    return texts + list(c.questions)
 
 
 class PostMeta(_Model):
     paper: PaperBlock
     rank: int
     summary: PaperSummary | None = None
-    reasons: list[str] = []
+    reasons: list[Annotated[str, Field(max_length=300)]] = Field(default=[], max_length=50)
     provenance: dict | None = None
+
+    @field_validator("provenance")
+    @classmethod
+    def _provenance_small(cls, v: dict | None) -> dict | None:
+        if v is not None and len(json.dumps(v)) > 2000:
+            raise ValueError("provenance is too big")
+        return v
 
     @field_validator("summary")
     @classmethod
     def _claims_not_huge(cls, v: PaperSummary | None) -> PaperSummary | None:
-        if v is not None and any(len(t) > CLAIM_MAX for t in _claim_texts(v)):
+        if v is not None and any(len(t) > CLAIM_MAX for t in _claim_texts(v) + [v.summary.one_line]):
             raise ValueError("a claim is too long")
         return v
 
@@ -137,9 +147,9 @@ class ArchiveRef(_Model):
 
 
 class FeedMeta(_Model):
-    format: int
-    display_name: str = Field(max_length=100)
-    topics: list[str] = Field(default=[], max_length=200)
+    format: StrictInt = Field(ge=1)
+    display_name: str = Field(max_length=60)
+    topics: list[Annotated[str, Field(max_length=100)]] = Field(default=[], max_length=30)
     generated_at: str = Field(max_length=40)
     active: bool = True
     archives: list[ArchiveRef] = Field(default=[], max_length=500)
@@ -148,8 +158,8 @@ class FeedMeta(_Model):
 class FeedFile(_Model):
     version: str = JSON_FEED_VERSION
     title: str = Field(max_length=200)
-    home_page_url: str | None = None
-    feed_url: str | None = None
+    home_page_url: str | None = Field(default=None, max_length=2000)
+    feed_url: str | None = Field(default=None, max_length=2000)
     items: list[Item] = []
     rpipe: FeedMeta = Field(alias="_rpipe")
 
@@ -220,21 +230,29 @@ def _archive_files(posts: list[Post]) -> dict[str, tuple[bytes, int]]:
     return files
 
 
-def _atom(feed: FeedFile, now: str) -> bytes:
+_XML_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+
+
+def _xml_text(text: str) -> str:
+    """Drop characters XML 1.0 can't hold (one would make the whole feed.xml invalid)."""
+    return _XML_BAD.sub("", text)
+
+
+def _atom(feed: FeedFile, updated: str) -> bytes:
     ET.register_namespace("", _ATOM)
     root = ET.Element(f"{{{_ATOM}}}feed")
-    ET.SubElement(root, f"{{{_ATOM}}}title").text = feed.title
-    ET.SubElement(root, f"{{{_ATOM}}}id").text = feed.feed_url or "urn:rpipe:feed"
-    ET.SubElement(root, f"{{{_ATOM}}}updated").text = now
+    ET.SubElement(root, f"{{{_ATOM}}}title").text = _xml_text(feed.title)
+    ET.SubElement(root, f"{{{_ATOM}}}id").text = _xml_text(feed.feed_url or "urn:rpipe:feed")
+    ET.SubElement(root, f"{{{_ATOM}}}updated").text = updated
     if feed.feed_url:
-        ET.SubElement(root, f"{{{_ATOM}}}link", rel="self", href=feed.feed_url)
+        ET.SubElement(root, f"{{{_ATOM}}}link", rel="self", href=_xml_text(feed.feed_url))
     for item in feed.items:
         entry = ET.SubElement(root, f"{{{_ATOM}}}entry")
-        ET.SubElement(entry, f"{{{_ATOM}}}id").text = f"urn:rpipe:{item.id}"
-        ET.SubElement(entry, f"{{{_ATOM}}}title").text = item.title
-        ET.SubElement(entry, f"{{{_ATOM}}}link", href=item.url)
+        ET.SubElement(entry, f"{{{_ATOM}}}id").text = _xml_text(f"urn:rpipe:{item.id}")
+        ET.SubElement(entry, f"{{{_ATOM}}}title").text = _xml_text(item.title)
+        ET.SubElement(entry, f"{{{_ATOM}}}link", href=_xml_text(item.url))
         ET.SubElement(entry, f"{{{_ATOM}}}updated").text = item.date_published
-        ET.SubElement(entry, f"{{{_ATOM}}}summary").text = item.summary
+        ET.SubElement(entry, f"{{{_ATOM}}}summary").text = _xml_text(item.summary)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
@@ -258,20 +276,23 @@ def build_files(posts: list[Post], *, display_name: str, topics: list[str], acti
     archives = _archive_files(posts)
     cutoff = (date.fromisoformat(now[:10]) - timedelta(days=RECENT_DAYS)).isoformat()
     recent = [p for p in _newest_first(posts) if p.digest_date >= cutoff][:FEED_MAX_ITEMS]
+    # Stamped from the newest post, not from `now`, so unchanged posts give unchanged bytes
+    # (and the nightly publish has nothing to push). `now` only sets the 30-day window.
+    stamp = f"{max(p.digest_date for p in posts)}T00:00:00Z" if posts else now
     base = base_url.rstrip("/") + "/" if base_url else None
     feed = FeedFile(
         title=f"{display_name}'s research feed",
         home_page_url=base, feed_url=f"{base}feed.json" if base else None,
         items=[_item(p) for p in recent],
         rpipe=FeedMeta(
-            format=FORMAT, display_name=display_name, topics=topics, generated_at=now, active=active,
+            format=FORMAT, display_name=display_name, topics=topics, generated_at=stamp, active=active,
             archives=[ArchiveRef(path=path, count=count, sha256=hashlib.sha256(data).hexdigest())
                       for path, (data, count) in archives.items()],
         ),
     )
     out = {
         "feed.json": _dumps(feed.model_dump(by_alias=True, mode="json")),
-        "feed.xml": _atom(feed, now),
+        "feed.xml": _atom(feed, stamp),
         "README.md": _readme(display_name, feed.feed_url),
     }
     out.update({path: data for path, (data, _) in archives.items()})

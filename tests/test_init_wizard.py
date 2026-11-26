@@ -56,7 +56,7 @@ def test_wizard_saves_topics_and_seeds(tmp_path, tty, monkeypatch):
     profile = load_profile(tmp_path / "v" / "profile.yaml")
     assert profile.topics == ["prompt injection", "agent safety"]  # examples replaced
     assert profile.seeds == ["2307.15043"]
-    assert "Tip: 10-20 seeds work best; add more later with rpipe profile add-seed" in result.output
+    assert "Tip: add more any time with rpipe profile add-seed" in result.output
     assert "rpipe run" in result.output
     assert "Topics:" in result.output
 
@@ -259,9 +259,50 @@ def test_wizard_explains_categories_before_asking(tmp_path, tty, monkeypatch):
     use(monkeypatch, StubArxiv())
     result = init(tmp_path, "\n\n\n")
     out = result.output
-    assert "subject tag" in out and "cs.CR" in out and "https://arxiv.org/category_taxonomy" in out
+    assert "arxiv.org" in out and "cs.CR" in out and "https://arxiv.org/category_taxonomy" in out
     assert "rpipe profile set-categories" in out and "all" in out
-    assert out.index("subject tag") < out.index("arXiv categories (comma-separated)")
+    assert out.index("arxiv.org") < out.index("Categories")
+
+
+def test_wizard_shows_step_headers_and_explainers(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    out = init(tmp_path, "\n\n\n").output
+    assert "Setup has 5 short steps" in out
+    heads = ["Step 1 of 5: Summaries", "Step 2 of 5: Describe your research (optional)", "Step 3 of 5: Topics",
+             "Step 4 of 5: arXiv categories", "Step 5 of 5: Seed papers"]
+    positions = [out.index(h) for h in heads]
+    assert positions == sorted(positions)
+    assert "arxiv.org" in out and "A seed paper is an example" in out
+
+
+def test_wizard_category_menu_ticks_current(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    out = init(tmp_path, "\n\n\n").output
+    assert "[x]  2. cs.LG" in out
+    assert "[ ]  4. cs.CV" in out
+
+
+def test_wizard_categories_by_number(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    result = init(tmp_path, "\n3,5\n\n")
+    assert result.exit_code == 0, result.output
+    assert load_config(tmp_path / "v" / "config.yaml").arxiv_categories == ["cs.CL", "cs.CR"]
+
+
+def test_wizard_bad_category_number_keeps_current(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    result = init(tmp_path, "\n18\n\n")
+    assert "Skipped: There is no option 18" in result.output
+    kept = load_config(tmp_path / "v" / "config.yaml").arxiv_categories
+    assert kept == ["cs.LG", "cs.CL", "cs.CR", "cs.OS", "cs.SE"]  # the untouched default
+
+
+def test_wizard_ends_with_next_steps(tmp_path, tty, monkeypatch):
+    use(monkeypatch, StubArxiv())
+    out = init(tmp_path, "\n\n\n").output
+    tail = out[out.index("All set. Next:"):]
+    for cmd in ("rpipe run", "rpipe schedule install", "rpipe app install", "rpipe share setup"):
+        assert cmd in tail
 
 
 def test_wizard_all_stores_all(tmp_path, tty, monkeypatch):

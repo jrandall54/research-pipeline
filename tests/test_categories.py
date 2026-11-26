@@ -5,7 +5,7 @@ from test_e2e import install, run_cli, vault  # noqa: F401  (offline run setup)
 
 from research_pipeline import cli
 from research_pipeline import profile_edit as pe
-from research_pipeline.categories import closest, known_categories, unknown
+from research_pipeline.categories import COMMON, closest, known_categories, parse_choice, unknown
 from research_pipeline.vault import load_config
 
 
@@ -62,3 +62,19 @@ def test_no_unknown_line_when_all_known(vault):  # noqa: F811
     res = run_cli("profile", "show", "--vault", str(vault))
     assert "unknown categories" not in res.output
     assert "unknown categories" not in cli.health_line(__import__("datetime").date(2026, 1, 1), {}, [])
+
+
+def test_common_categories_are_real():
+    codes = [c for c, _ in COMMON]
+    assert len(codes) == 17 and len(set(codes)) == 17
+    assert unknown(codes) == []
+
+
+def test_parse_choice():
+    cur = ["cs.LG"]
+    assert parse_choice("", cur) == cur
+    assert parse_choice("all", cur) == ["all"] and parse_choice("ALL", cur) == ["all"]
+    assert parse_choice("1,3", cur) == ["cs.AI", "cs.CL"]
+    assert parse_choice("2, cs.CR, 2", cur) == ["cs.LG", "cs.CR"]
+    with pytest.raises(ValueError, match="There is no option 18. Pick numbers from 1 to 17, or type arXiv codes."):
+        parse_choice("18", cur)

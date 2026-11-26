@@ -274,10 +274,10 @@ def init(
     typer.echo("  vault.sqlite, raw/, markdown/, summaries/, my_work/, gold/, digests/, cache/ ready")
     if not _is_tty():
         typer.echo("\nNext steps:")
-        typer.echo("  1. Choose how summaries are written (run in a terminal): rpipe model setup")
-        typer.echo("  2. Add 10-20 papers you like: rpipe profile add-seed <arXiv link, id or title>")
-        typer.echo("  3. Check your profile: rpipe profile show")
-        typer.echo("  4. Change topics, authors, keywords, top-N or categories: rpipe profile --help")
+        typer.echo("  rpipe model setup       choose how summaries are written (run in a terminal)")
+        typer.echo("  rpipe profile add-seed <arXiv link, id or title>   add papers you like")
+        typer.echo("  rpipe profile show      check your profile (rpipe profile --help changes it)")
+        typer.echo(NEXT_COMMANDS)
         return
     try:
         _wizard(path, fresh_profile="profile.yaml" not in existed, fresh_config="config.yaml" not in existed)
@@ -1068,13 +1068,62 @@ def _categories_text(cats: list[str]) -> str:
 
 
 CATEGORY_HELP = (
-    "An arXiv category is the subject tag every paper carries (cs.CR = security). "
-    "Only papers in your categories are collected.\n"
-    "Common ones: cs.CR security, cs.LG machine learning, cs.AI AI, cs.CL language/LLMs, "
-    "cs.OS operating systems, cs.SE software engineering, cs.DC distributed computing, "
-    "cs.NI networking, stat.ML statistical ML.\n"
-    "Full list: https://arxiv.org/category_taxonomy"
+    "arXiv (arxiv.org) is the free site where most computer-science and AI research appears\n"
+    "first. Every paper is filed under subject categories, and rpipe only collects papers\n"
+    "from the categories you pick here; your topics then rank what was collected. Pick the\n"
+    "areas your topics fall in. More categories means more papers to sort (slower, a bit\n"
+    "noisier); too few means good papers are never seen."
 )
+CATEGORY_PROMPT_HELP = (
+    "Type the numbers you want, separated by commas (e.g. 1,2,5), or arXiv codes, or all\n"
+    "for every computer-science category. Press Enter to keep the ticked ones.\n"
+    "Change it any time with rpipe profile set-categories. Full list: https://arxiv.org/category_taxonomy"
+)
+OPENING = (
+    "Setup has 5 short steps. Each answer is saved as you go: Ctrl-C stops, and running\n"
+    "rpipe init again carries on. You can change anything later with rpipe profile."
+)
+SUMMARIES_HELP = (
+    "rpipe reads the papers it picks for you and writes a summary of each. That needs a\n"
+    "language model: one on this computer (Ollama: private; best with a graphics card),\n"
+    "Claude through your Claude Code login (no graphics card needed; paper text is sent\n"
+    "to Anthropic), or none (you still get ranked papers, with their abstracts).\n"
+    "I'll check this computer and recommend one."
+)
+DESCRIBE_HELP = (
+    "A shortcut: describe what you research or want to follow, in a few sentences, and the\n"
+    "model proposes topics and seed papers for you to accept or reject one by one.\n"
+    'Example: "I study security of LLM agents, especially prompt injection, and I teach an\n'
+    'intro AI course." Press Enter to skip and add them yourself.'
+)
+TOPICS_HELP = (
+    "Topics are short phrases for what you want to read about. Every new paper is compared\n"
+    "with each topic, and the closest matches rank highest. Specific phrases work better\n"
+    'than broad fields: "prompt injection attacks on LLM agents" beats "security".\n'
+    "5 to 15 topics is plenty; near-duplicates add nothing, so use one per idea."
+)
+SEEDS_HELP = (
+    "A seed paper is an example of exactly the kind of paper you want more of. You don't\n"
+    "need to have read it; it just has to be on target. New papers are compared with each\n"
+    "seed's title and abstract, which says far more than a short topic, so seeds are the\n"
+    "strongest way to sharpen your feed. Paste an arXiv link, its id (e.g. 2307.15043) or\n"
+    "its title; I look it up and you confirm. 3 to 10 is a good start."
+)
+SEEDS_TIP = (
+    'Tip: add more any time with rpipe profile add-seed. "More like this" in the app also '
+    "nudges ranking, but fades over weeks; seeds don't."
+)
+NEXT_COMMANDS = (
+    "  rpipe run               collect today's papers, rank them and summarize the top ones\n"
+    "                          (the first run can take an hour or more with a local model)\n"
+    "  rpipe schedule install  do that every night by itself\n"
+    "  rpipe app install       read your feed on your phone and desktop\n"
+    "  rpipe share setup       optional: publish your feed so others can follow it"
+)
+
+
+def _step(n: int, name: str) -> None:
+    typer.echo(f"\nStep {n} of 5: {name}")
 
 
 def _a(word: str) -> str:
@@ -2330,7 +2379,7 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
         if not _confirm("Add more topics?", default=False):
             return
     else:
-        typer.echo("Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.")
+        typer.echo(TOPICS_HELP)
     examples = list(DEFAULT_TOPICS) if is_template else []
     entered: set[str] = set()
     while text := _ask("Topic (blank to finish)"):
@@ -2357,29 +2406,31 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
 
 def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
     current = ", ".join(config.arxiv_categories)
+    ticked = set(config.arxiv_categories)
     if not fresh_config:
         typer.echo(f"arXiv categories: {_categories_text(config.arxiv_categories)}")
         if not _confirm("Change categories?", default=False):
             return
     typer.echo(CATEGORY_HELP)
-    typer.echo(
-        "Press Enter to keep the default, or type all if you are not sure (collects "
-        "every computer-science category (cs.*); more to fetch and rank). Change it any time with "
-        "rpipe profile set-categories."
-    )
-    entered = _prompt("arXiv categories (comma-separated)", default=current)
-    cats = ["all" if c.lower() == "all" else c for c in _split(entered)]
-    if cats and cats != config.arxiv_categories:
-        try:
+    typer.echo("")
+    for i, (code, text) in enumerate(categories.COMMON, 1):
+        typer.echo(f"  [{'x' if code in ticked else ' '}] {i:>2}. {code:<8} {text}")
+    extra = [c for c in config.arxiv_categories if c not in dict(categories.COMMON)]
+    if extra:
+        typer.echo(f"Also selected: {_categories_text(extra)}")
+    typer.echo("")
+    typer.echo(CATEGORY_PROMPT_HELP)
+    entered = _prompt("Categories", default=current)
+    try:
+        cats = categories.parse_choice(entered, config.arxiv_categories)
+        if cats != config.arxiv_categories:
             profile_edit.set_categories(vault, cats)
-        except (ValueError, ConfigError, OSError) as exc:
-            typer.echo(f"Skipped: {exc}")
+    except (ValueError, ConfigError, OSError) as exc:
+        typer.echo(f"Skipped: {exc}")
 
 
 def _wizard_seeds(vault: Path, config: Config) -> None:
-    typer.echo(
-        "Seed papers are papers you like; the ranker finds new papers similar to them."
-    )
+    typer.echo(SEEDS_HELP)
     arxiv = make_arxiv(config)  # one client for the whole run, so lookups stay 3 s apart
     try:
         while text := _ask("Paper link, arXiv id or title (blank to finish)"):
@@ -2389,8 +2440,8 @@ def _wizard_seeds(vault: Path, config: Config) -> None:
                 typer.echo(f"Skipped: {exc}")
     finally:
         _close(arxiv)
-    if len(load_profile(vault / "profile.yaml").seeds) < 5:
-        typer.echo("Tip: 10-20 seeds work best; add more later with rpipe profile add-seed")
+    if len(load_profile(vault / "profile.yaml").seeds) < 3:
+        typer.echo(SEEDS_TIP)
 
 
 def _describe_machine(info) -> None:
@@ -2843,9 +2894,11 @@ def model_setup(vault: VaultOption = None) -> None:
 
 def _wizard_describe(vault: Path, config: Config) -> None:
     """Optional: propose topics and seeds from a description. Any failure falls through."""
+    _step(2, "Describe your research (optional)")
     if config.llm_backend == "none":
         typer.echo(NO_MODEL)
         return
+    typer.echo(DESCRIBE_HELP)
     description = _ask("Describe your research in a few sentences (Enter to skip)")
     if not description:
         return
@@ -2858,18 +2911,25 @@ def _wizard_describe(vault: Path, config: Config) -> None:
 def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
     """Interactive setup. Every answer is saved as soon as it is confirmed."""
     try:
+        typer.echo(OPENING)
+        _step(1, "Summaries")
+        typer.echo(SUMMARIES_HELP)
         # The backend comes first: the describe step below already calls the model.
         _wizard_backend(vault, offer_keep=not fresh_config)
         config = load_config(vault / "config.yaml")
         _wizard_describe(vault, config)
+        _step(3, "Topics")
         _wizard_topics(vault, fresh_profile)
+        _step(4, "arXiv categories")
         _wizard_categories(vault, config, fresh_config)
+        _step(5, "Seed papers")
         _wizard_seeds(vault, load_config(vault / "config.yaml"))
     except ConfigError as exc:
         raise _fail(str(exc)) from exc
     typer.echo("")
     profile_show(vault)
-    typer.echo("\nNext step: rpipe run")
+    typer.echo("\nAll set. Next:")
+    typer.echo(NEXT_COMMANDS)
 
 
 # --- feedback: votes and saves -------------------------------------------------

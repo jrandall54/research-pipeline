@@ -36,3 +36,53 @@ def closest(code: str) -> str | None:
 def describe_unknown(code: str) -> str:
     hint = closest(code)
     return f"{code} is not an arXiv category" + (f" (did you mean {hint}?)" if hint else "")
+
+
+# The setup menu: (code, plain description), in menu order. Numbers are 1-based positions.
+COMMON: list[tuple[str, str]] = [
+    ("cs.AI", "Artificial intelligence (general)"),
+    ("cs.LG", "Machine learning"),
+    ("cs.CL", "Language and LLMs"),
+    ("cs.CV", "Computer vision (images, video)"),
+    ("cs.CR", "Security and cryptography"),
+    ("cs.SE", "Software engineering"),
+    ("cs.MA", "Multi-agent systems"),
+    ("cs.HC", "Human-computer interaction"),
+    ("cs.CY", "Computers and society (ethics, policy, education)"),
+    ("cs.IR", "Search and recommendation"),
+    ("cs.RO", "Robotics"),
+    ("cs.DC", "Distributed and parallel computing"),
+    ("cs.OS", "Operating systems"),
+    ("cs.NI", "Networking"),
+    ("cs.PL", "Programming languages"),
+    ("cs.DB", "Databases"),
+    ("stat.ML", "Statistical machine learning"),
+]
+
+
+def parse_choice(text: str, current: list[str]) -> list[str]:
+    """Turn what the user typed at the categories prompt into a category list.
+
+    Blank keeps `current`; `all` means every cs.* category; otherwise comma-separated menu
+    numbers and/or arXiv codes, which replace the selection (order kept, duplicates dropped)."""
+    text = text.strip()
+    if not text:
+        return list(current)
+    if text.lower() == ALL:
+        return [ALL]
+    result: list[str] = []
+    for item in (part.strip() for part in text.split(",")):
+        if not item:
+            continue
+        if item.isdigit():
+            number = int(item)
+            if not 1 <= number <= len(COMMON):
+                raise ValueError(
+                    f"There is no option {number}. Pick numbers from 1 to {len(COMMON)}, or type arXiv codes."
+                )
+            item = COMMON[number - 1][0]
+        elif item.lower() == ALL:
+            item = ALL
+        if item not in result:
+            result.append(item)
+    return result or list(current)

@@ -1,6 +1,6 @@
 # Phase 10.1 — Clearer first-time setup: Implementation Plan
 
-> **Phase 10.1** · Status: building · Design: none (small phase; owner request 2026-11-26 after the start-to-finish walkthrough) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+> **Phase 10.1** · Status: merged · Design: none (small phase; owner request 2026-11-26 after the start-to-finish walkthrough) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 **Goal:** Someone new to rpipe (and to arXiv) can get through `rpipe init` knowing, at every step, what is being asked and why. The categories step becomes a numbered menu with plain descriptions, so nobody needs to know arXiv codes.
 

@@ -129,7 +129,7 @@ rpipe has two kinds of commands. The **pipeline** gets material on its own, usua
 
 | Object | Fields | Returned by |
 | --- | --- | --- |
-| `PaperView` | `id`, `title`, `abstract`, `authors`, `url`, `published`, `status`, `digest_date`, `triage_score`, `triage_reasons` (why triage kept it), `summary` (the stored `PaperSummary`, or none), `vote` (-1, 0 or 1; 0 = none or cleared), `saved` | `get_paper`, `digest_papers`, `recent_papers`, `saved_papers`, `search_papers`, `review_queue`, `later_queue` |
+| `PaperView` | `id`, `title`, `abstract`, `authors`, `url`, `published`, `status`, `digest_date`, `triage_score`, `triage_reasons` (why triage kept it), `summary` (the stored `PaperSummary`, or none), `vote` (-1, 0 or 1; 0 = none or cleared), `saved`, `diagram` (the stored `Diagram`, or none) | `get_paper`, `digest_papers`, `recent_papers`, `saved_papers`, `search_papers`, `review_queue`, `later_queue` |
 | `VoteView` | `paper_id`, `title`, `vote` (-1 or 1), `voted_at` | `list_votes` |
 | `QueueProgress` | `handled`, `total` | `queue_progress` |
 | `ShelfItemView` | `name`, `added_at`, `chunks` | `shelf_items`, `shelf_add` |

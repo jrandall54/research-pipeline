@@ -1,6 +1,6 @@
 from research_pipeline import library_api
 from research_pipeline.library_api import PaperView
-from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
+from research_pipeline.summary_models import Claim, Critique, KeyNumber, PaperSummary, Summary
 from research_pipeline.webapp import present
 
 
@@ -89,3 +89,35 @@ def test_sentences_one_and_empty():
     assert present.sentences("Only one sentence") == ["Only one sentence"]
     assert present.sentences("   ") == []
     assert present.sentences("Spaced  out.   Next one.") == ["Spaced  out.", "Next one."]
+
+
+def _ps(**kw):
+    c = Claim(text="p", sections=["5.1 X"])
+    sm = dict(one_line="one", problem=c, approach=c, results=c, limitations=c)
+    sm.update(kw.pop("summary", {}))
+    return PaperSummary(summary=Summary(**sm), critique=Critique(strengths=[], weaknesses=[], questions=[]),
+                        basis="full_text", read_mode="whole", parts=1, **{"unverified": [], **kw})
+
+
+def test_card_has_hook_and_key_numbers():
+    ps = _ps(summary=dict(hook=Claim(text="2.5x faster", sections=["5 Eval"]),
+                          key_numbers=[KeyNumber(value="2.5x", label="speedup", sections=["5.1 X"]),
+                                       KeyNumber(value="9", label="bugs", sections=["Abstract"])]))
+    c = present.card(_view(summary=ps), None)
+    assert c.hook == ("2.5x faster", "§5")
+    assert c.key_numbers == [("2.5x", "speedup", "§5.1"), ("9", "bugs", None)]
+    assert c.one_line == "one"
+
+
+def test_card_without_hook_has_one_line_only():
+    c = present.card(_view(summary=_ps()), None)
+    assert c.hook is None and c.key_numbers == [] and c.one_line == "one"
+    c = present.card(_view(), None)
+    assert c.hook is None and c.key_numbers == []
+
+
+def test_about_lists_checks():
+    ps = _ps(unverified=["x"], checks=["hook: 2.5x not found in §5", "diagram: no clear shape"])
+    about = present.paper_detail(_view(summary=ps), None).about
+    assert about[-3:] == ['Could not check: "x"', "Left out: hook: 2.5x not found in §5",
+                          "Left out: diagram: no clear shape"]

@@ -116,6 +116,8 @@ class CardData:
     topic: str | None
     topic_color: int
     one_line: str | None
+    hook: Field | None
+    key_numbers: list[tuple[str, str, str | None]]  # (value, label, section tag)
     abstract: str
     problem: Field | None
     approach: Field | None
@@ -142,7 +144,9 @@ def card(view: PaperView, state: str | None) -> CardData:
     return CardData(
         id=view.id, title=view.title, url=view.url, safe_url=safe_url(view.url), topic=topic,
         topic_color=topic_color(topic) if topic else 0,
-        one_line=s.one_line if s else None, abstract=excerpt(view.abstract),
+        one_line=s.one_line if s else None, hook=_field(s.hook if s else None),
+        key_numbers=[(k.value, k.label, section_tag(k.sections)) for k in s.key_numbers] if s else [],
+        abstract=excerpt(view.abstract),
         problem=_field(s.problem if s else None), approach=_field(s.approach if s else None),
         results=_field(s.results if s else None), why=why_sentence(reasons),
         vote=view.vote, saved=view.saved,
@@ -190,6 +194,7 @@ def paper_detail(view: PaperView, state: str | None, provenance: ProvenanceView 
         if provenance:
             about.append(f"Summarized by {provenance.model} on {provenance.created_at[:10]}")
         about += [f'Could not check: "{t}"' for t in ps.unverified]
+        about += [f"Left out: {r}" for r in ps.checks]
     return DetailData(
         card=card(view, state),
         authors_short=authors_short(view.authors), abstract=view.abstract,

@@ -25,7 +25,7 @@ from research_pipeline.db import REQUEST_KINDS, UnknownPaperError
 from research_pipeline.embed import Embedder
 from research_pipeline.progress import Reporter
 from research_pipeline.shelf import SyncResult
-from research_pipeline.summary_models import PaperSummary
+from research_pipeline.summary_models import Diagram, PaperSummary
 
 __all__ = [
     "PaperView", "ShelfItemView", "QueueProgress", "VoteView", "SyncResult", "UnknownPaperError",
@@ -54,6 +54,7 @@ class PaperView(BaseModel):
     summary: PaperSummary | None  # None until the paper has been summarized
     vote: Literal[-1, 0, 1]  # your current vote; 0 = none or cleared
     saved: bool
+    diagram: Diagram | None = None  # the stored diagram, if the paper has one
 
 
 class ShelfItemView(BaseModel):
@@ -130,6 +131,7 @@ def _view(conn: sqlite3.Connection, row: sqlite3.Row) -> PaperView:
         summary=db.get_summary(conn, pid),
         vote=_current_vote(conn, pid),
         saved=library.is_saved(conn, pid),
+        diagram=db.get_diagram(conn, pid),
     )
 
 

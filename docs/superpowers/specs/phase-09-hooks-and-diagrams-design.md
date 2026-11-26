@@ -1,6 +1,6 @@
 # Phase 9 — Hooks, key numbers, plain words and diagrams (design)
 
-> **Phase 9** · Status: approved, planned · Plan: [phase-09-hooks-and-diagrams.md](../plans/phase-09-hooks-and-diagrams.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+> **Phase 9** · Status: merged · Plan: [phase-09-hooks-and-diagrams.md](../plans/phase-09-hooks-and-diagrams.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 Date: 2026-11-25. Mockups: the "Research Feed — App Design" canvas (https://claude.ai/artifact/JnycnAXpyjtqyybVmv9xMK), look A (the robot-agents card and paper screen show the diagram).
 

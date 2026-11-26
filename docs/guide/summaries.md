@@ -352,6 +352,20 @@ All checks pass: 4 nodes, edges point at real ids, labels are short, every label
 
 **How to check it.** `uv run pytest -q tests/test_diagram.py tests/test_citations.py tests/test_summarize.py`. To see the real thing, `rpipe eval run` writes one line per paper (drawn, none, or dropped and why).
 
+**Measured (2026-11-25, owner's machine, `q3.8-27b-34k`, 56,320-token context, model fully in GPU memory, 10 gold papers, judged by Claude Sonnet).** Before and after the Phase 9 prompts (`2026-11-p7` → `2026-11-p9`), both read whole:
+
+| | before (p7) | after (p9, plain words + hook + diagram) |
+|---|---|---|
+| facts covered (of 50) | 11 | 11 |
+| contradicted | 2 | 1 |
+| unverified citations | 0 | 0 |
+| hooks kept | — | 9 of 10 |
+| key numbers kept / dropped | — | 28 / 2 |
+| diagrams drawn / dropped / none | — | 10 / 0 / 0 |
+| time for the 10 papers (incl. judging) | 9 min 45 s | 11 min 46 s (about 12 s per diagram call) |
+
+That passes the eval rule (facts covered did not drop; contradictions and unverified citations did not rise), so the plain-words wording does not cost facts on this set. Claude read the 9 shown hooks against their cited section text: all 9 were true (no overstatement, no wrong number), most close to the paper's own sentence. The one lost hook was a false drop: the paper wrote "80 per cent" and the hook "80%"; the number check now reads "per cent", "percent" and "pct" as "%". Two hooks ran over the 90-character limit (93 and 108 characters); the limit is in the prompt only. 8 of the 10 diagrams chose the `loop` shape. No diagram was dropped for its labels, so the label rule stays strict. Cautions: the same setup scored 16 facts in an earlier split-mode run that day, so differences of a few facts are noise; the diagram time was measured on a GPU, and on a CPU-only machine a diagram call takes much longer, which is why `auto` turns diagrams off there.
+
 **Where the code is.** `src/research_pipeline/diagram.py` (`check_diagram`, `make_diagram`), `prompts.py` (`build_diagram_prompt`, `diagram_feedback`), `summarize.py` (`run_summarize(diagrams=)`, `phase_note`), `requests_queue.py` and `cli.py` (pass the decision on), `db.save_diagram` / `get_diagram`.
 
 ### Provenance: which model and prompt wrote this

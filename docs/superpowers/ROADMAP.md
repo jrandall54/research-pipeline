@@ -1,8 +1,8 @@
 # Roadmap
 
-The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-25.
+The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-25 (Phase 9 merged).
 
-**Next up:** Phase 9 (hooks, key numbers, plain words, diagrams): build (plan written). Before that, check the 2026-11-26 nightly run (see `handoff.md`).
+**Next up:** check the first nightly run with hooks and diagrams (see `handoff.md`), then Phase 10 (sharing): design conversation.
 
 ## How this is organized
 
@@ -36,7 +36,7 @@ The single list of all work on rpipe: what is done, what is next, and where each
 | 7 | Pipeline/app split: one lock, `library_api`, request list | merged | [design](specs/phase-07-pipeline-app-split-design.md) | [plan](plans/phase-07-pipeline-app-split.md) |
 | 8 | Your own feed: `rpipe app`, phone and desktop, Skim/Read, votes, saves, search | merged | [design](specs/phase-08-your-feed-design.md) | [plan](plans/phase-08-your-feed.md) |
 | 8.1 | Readable text in the app: each summary field spaced out, longer ones as points | merged | (Phase 9 design conversation) | [plan](plans/phase-08.1-readable-text.md) |
-| 9 | Diagrams in the feed, plus hooks, key numbers and plain-words fields, checked against the paper | planned | [design](specs/phase-09-hooks-and-diagrams-design.md) | [plan](plans/phase-09-hooks-and-diagrams.md) |
+| 9 | Diagrams in the feed, plus hooks, key numbers and plain-words fields, checked against the paper | merged | [design](specs/phase-09-hooks-and-diagrams-design.md) | [plan](plans/phase-09-hooks-and-diagrams.md) |
 | 10 | Sharing: publish your feed, a directory, follow others, custom mixes | idea | | |
 | 11 | Notes and link capture; the shelf grows into one library (overlap alerts, archive connections, weekly synthesis page) | idea | | |
 | 12 | Narrated video explainers | idea | | |

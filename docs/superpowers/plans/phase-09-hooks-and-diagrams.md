@@ -1,6 +1,6 @@
 # Phase 9 — Hooks, key numbers, plain words and diagrams: Implementation Plan
 
-> **Phase 9** · Status: planned · Design: [phase-09-hooks-and-diagrams-design.md](../specs/phase-09-hooks-and-diagrams-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+> **Phase 9** · Status: merged · Design: [phase-09-hooks-and-diagrams-design.md](../specs/phase-09-hooks-and-diagrams-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

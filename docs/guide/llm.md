@@ -177,7 +177,7 @@ Working caching shows the second time far smaller than the first (only the task 
 
 ## The diagrams setting
 
-**What it does.** Each paper can get a small diagram of its approach, which is one more model call per paper. `diagrams` in `config.yaml` says whether to make it: `on`, `off` or `auto` (the default). Set it with `rpipe model set-diagrams auto|on|off` (any capitals; anything else is refused with the three choices listed and the config left unchanged). `rpipe model show` prints `diagrams: auto (change with `rpipe model set-diagrams`)`.
+**What it does.** Each paper can get a small diagram of its approach, which is one more model call per paper. `diagrams` in `config.yaml` says whether to make it: `on`, `off` or `auto` (the default). Set it with `rpipe model set-diagrams auto|on|off` (any capitals; anything else is refused with the three choices listed and the config left unchanged). `rpipe model show` prints `diagrams: auto (change with `rpipe model set-diagrams`)`. `off` also hides diagrams already drawn: the app's paper screen leaves out "How it works" while the setting is `off` (Phase 9.3). Nothing is deleted, so `on` or `auto` shows them again.
 
 **How it works.** In the same `reading mode` stage that picks whole or split, `resolve_diagrams` (`parts.py`) turns the setting into yes or no and a one-line reason that is shown as a progress note:
 
@@ -188,6 +188,8 @@ Working caching shows the second time far smaller than the first (only the task 
 Worked example: a CPU-only laptop with the default settings. `rpipe run` loads the model, reads share 0.0, notes `split: the model runs on the CPU only (GPU share 0.0)` and `diagrams off: the model runs on the CPU only (GPU share 0.0)`, and papers get no diagram. `rpipe model set-diagrams on` forces them back, at the cost of one more slow call per paper.
 
 **Why it is built this way.** A CPU reads and writes tokens many times slower than a GPU, so for a pipeline that already struggles to finish overnight on a CPU, an optional picture is the first thing to drop (see `hardware.md`). Rejected: always on (it can push a CPU-only night past the morning deadline) and always off (it wastes capable machines). The value is stored as a quoted string, because an unquoted `off` is a boolean to YAML; a hand-edited `diagrams: off` is read as `off` all the same.
+
+Phase 9.3 (2026-11-26): the owner switched diagrams off after the first nightly run with them. A diagram drawn from the model's reading of the paper is a few labels in boxes that repeat "What they did"; it shows nothing new. Diagrams worth having would come from the paper itself (its own figures and tables), which is a separate future phase. Until then the setting is `off` on the owner's machine and stored diagrams stay hidden.
 
 **How to check it.** `rpipe model show` prints the setting; the `reading mode` stage shows the reason during a run. `tests/test_parts.py` checks `resolve_diagrams` for each case, `tests/test_profile_edit.py` and `tests/test_cli_model.py` check the command and the `show` line.
 

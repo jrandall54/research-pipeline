@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from research_pipeline import ids, library_api
+from research_pipeline import ids, library_api, vault
 from research_pipeline.db import UnknownPaperError
 from research_pipeline.webapp import present
 from research_pipeline.webapp.deps import get_conn, templates
@@ -20,12 +20,26 @@ def _cards(conn: sqlite3.Connection, views: list[library_api.PaperView]) -> list
     return [present.card(v, states.get(v.id)) for v in views]
 
 
+def _diagrams_off(request: Request) -> bool:
+    """True when the vault's `diagrams` setting is "off" (Phase 9.3): stored diagrams are then hidden too.
+
+    Read on every request, so `rpipe model set-diagrams` takes effect without restarting the app.
+    A missing or unreadable config.yaml counts as not off, so a settings problem never breaks the page.
+    """
+    try:
+        return vault.load_config(request.app.state.vault_db.parent / "config.yaml").diagrams == "off"
+    except vault.ConfigError:
+        return False
+
+
 @router.get("/paper/{paper_id}")
 def paper(paper_id: str, request: Request, conn: Conn):
     try:
         view = library_api.get_paper(conn, ids.normalise_paper_id(paper_id))
     except (ValueError, UnknownPaperError):
         raise HTTPException(404, "That paper isn't in your library.") from None
+    if _diagrams_off(request):
+        view = view.model_copy(update={"diagram": None})
     state = library_api.summarize_states(conn, [view.id]).get(view.id)
     day = library_api.digest_papers(conn, view.digest_date) if view.digest_date else []
     ctx = {"nav": "feed", "d": present.paper_detail(view, state, library_api.summary_provenance(conn, view.id)),

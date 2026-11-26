@@ -197,3 +197,31 @@ def test_paper_page_how_it_works_section(client, vault):
 def test_no_diagram_no_heading(client):
     html = client.get("/paper/2611.25005").text
     assert "the one line" in html and "How it works" not in html and "<figure" not in html
+
+
+def _set_diagrams(vault, value):
+    d = vault[1].parent
+    (d / "config.yaml").write_text(f'vault_path: "{d}"\ndiagrams: "{value}"\n', encoding="utf-8")
+
+
+def test_diagrams_off_hides_stored_diagram(client, vault):
+    # Phase 9.3: `rpipe model set-diagrams off` also hides diagrams already drawn (nothing is deleted).
+    _add_hook_and_diagram(vault[0], "2611.25005")
+    _set_diagrams(vault, "off")
+    html = client.get("/paper/2611.25005").text
+    assert "How it works" not in html and "<figure" not in html
+    assert "The problem" in html
+
+
+@pytest.mark.parametrize("value", ["on", "auto"])
+def test_diagrams_on_or_auto_shows_stored_diagram(client, vault, value):
+    _add_hook_and_diagram(vault[0], "2611.25005")
+    _set_diagrams(vault, value)
+    assert "<h2>How it works</h2>" in client.get("/paper/2611.25005").text
+
+
+def test_unreadable_config_still_shows_page(client, vault):
+    _add_hook_and_diagram(vault[0], "2611.25005")
+    (vault[1].parent / "config.yaml").write_text("diagrams: [nonsense\n", encoding="utf-8")
+    r = client.get("/paper/2611.25005")
+    assert r.status_code == 200 and "<h2>How it works</h2>" in r.text

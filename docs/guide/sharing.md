@@ -56,7 +56,19 @@ Files from other people are never trusted. Reading a feed refuses one that is to
 
 ## How it works
 
-(The directory is filled in by a later task.)
+### The directory
+
+The directory is a list of published feeds you can browse and follow without knowing anyone's handle. Code: `src/research_pipeline/share_directory.py` (`refresh`, stage `directory`).
+
+**The tag, and no gatekeeper.** When someone turns sharing on, their `rpipe-feed` repository gets the GitHub topic `rpipe-feed` (a topic is a free-text tag on a repository). There is no registry and nobody approves entries: GitHub's own search is the index. `refresh` asks GitHub for `topic:rpipe-feed` repositories that are not forks (up to 100 hits per search).
+
+**How junk is filtered.** Anyone can tag any repository, so a hit proves nothing. For each hit named exactly `rpipe-feed`, rpipe works out the feed address from the owner's login (`https://<owner>.github.io/rpipe-feed/feed.json`), downloads it with the same safe download as following (https only, 5 MB cap, time limit) and runs it through the normal feed validation. A hit that is a 404, is not JSON, is too big or fails validation is simply left out. Nothing the owner wrote in the search result itself is trusted.
+
+**What is stored** (table `directory_entries`, one row per valid feed): handle, display name, topics, `posts_per_day` (items in the last 30 days divided by 30, one decimal; a feed with 15 recent papers shows 0.5) and a `preview` of up to the 3 newest items (title plus the one-line summary, or the start of the abstract when there is none). The feed id is `github:<owner in lowercase>/rpipe-feed`, the same id that following uses.
+
+**Failure rules.** The table is replaced in one go, and only when the search worked. If GitHub is unreachable or rate-limits the search, the old list stays and the error is reported; one broken hit never affects the others. Progress shows `checking 2 of 5: alex` for each feed.
+
+**"Feeds like yours."** `feed_format.shared_topics(theirs, mine)` counts the topics two people have in common, ignoring case and spacing (`"Agents "` matches `"agents"`). The app uses it to rank directory entries by how many topics they share with your profile.
 
 ### Following
 

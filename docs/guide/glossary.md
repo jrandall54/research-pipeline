@@ -387,3 +387,5 @@
 **Follow (a feed)** — telling rpipe to download another person's published feed on every nightly run and keep their posts in your database. The posts live in their own table (`followed_posts`) apart from your own papers. See "Following" in `sharing.md`.
 
 **Stopped publishing** — how rpipe describes a followed feed that has failed to download 7 nights in a row, or whose owner turned sharing off (the feed says `active: false`). Its old posts stay; rpipe keeps trying, and one good download clears the mark. See "Following" in `sharing.md`.
+
+**Directory (of feeds)** — the cached list of published rpipe feeds found by searching GitHub for repositories tagged with the topic `rpipe-feed`. Each candidate's feed is downloaded and validated before it is listed; there is no approval step. See "The directory" in `sharing.md`.

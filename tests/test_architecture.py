@@ -84,7 +84,7 @@ PIPELINE = {"collect", "sources", "triage", "rank", "fulltext", "summarize", "pr
             "evaluate", "gold", "judge", "pruning", "parts", "citations", "numbers", "extras", "diagram", "spill",
             "ollama_fit", "ollama_tune", "bench", "scan", "catalog", "recommender", "machine",
             "registry", "run_lock", "requests_queue", "seed_input", "onboarding", "share_github", "share_publish",
-            "share_fetch"}
+            "share_fetch", "share_directory"}
 APP = {"library", "shelf", "review", "serve", "library_api", "workbench", "webapp"}
 COMPOSITION = {"cli", "progress_render"}
 GROUPS = {"shared": SHARED, "pipeline": PIPELINE, "app": APP, "composition": COMPOSITION}

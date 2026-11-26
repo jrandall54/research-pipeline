@@ -20,7 +20,15 @@ from research_pipeline.backends.claude_code import resolve_model
 from research_pipeline.categories import describe_unknown, unknown
 from research_pipeline.ids import normalise_paper_id
 from research_pipeline.llm import NO_MODEL
-from research_pipeline.models import ALL_CATEGORIES, CATEGORY_RE, Config, Profile, normalise_deadline
+from research_pipeline.models import (
+    ALL_CATEGORIES,
+    CATEGORY_RE,
+    Config,
+    Profile,
+    check_share_handle,
+    check_share_name,
+    normalise_deadline,
+)
 from research_pipeline.schedule import parse_time
 from research_pipeline.vault import ConfigError, load_config, load_profile
 
@@ -442,6 +450,33 @@ def set_diagrams(vault: Path, value: str) -> None:
 
     _edit(_config_path(vault), Config, change)
 
+
+def set_share(
+    vault: Path,
+    *,
+    enabled: bool | None = None,
+    display_name: str | None = None,
+    handle: str | None = None,
+) -> None:
+    """Sharing settings (Phase 10). Only the settings given change; the rest are kept.
+
+    `display_name` is 1 to 60 characters on one line; `handle` is a GitHub login. Both are
+    checked before the file is touched, so a bad value raises ValueError and changes nothing.
+    """
+    name = None if display_name is None else check_share_name(display_name)
+    login = None if handle is None else check_share_handle(handle)
+
+    def change(data) -> bool:
+        if enabled is not None:
+            data["share_enabled"] = bool(enabled)
+        if name is not None:
+            # Quoted, so a name such as on, yes or 1234 is read back as text.
+            data["share_display_name"] = DoubleQuotedScalarString(name)
+        if login is not None:
+            data["share_handle"] = DoubleQuotedScalarString(login)
+        return True
+
+    _edit(_config_path(vault), Config, change)
 
 def enable_source(vault: Path, name: str, known: set[str]) -> bool:
     """Turn a source on (appended to the end of the order). False if it was already on."""

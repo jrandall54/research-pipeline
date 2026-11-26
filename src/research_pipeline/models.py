@@ -53,6 +53,29 @@ class Profile(BaseModel):
 
 
 NAME_PATTERN = r"^[a-z0-9][a-z0-9_-]*$"
+# GitHub login: letters, digits and hyphens, 1 to 39 characters.
+SHARE_HANDLE_PATTERN = r"^[A-Za-z0-9-]{1,39}$"
+
+
+def check_share_name(text: str) -> str:
+    """The public display name of a shared feed: stripped, 1 to 60 characters, one line.
+
+    ValueError with a plain message otherwise (no control characters, so no newlines).
+    """
+    name = text.strip()
+    if not 1 <= len(name) <= 60 or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        raise ValueError("share display name must be 1 to 60 characters on one line")
+    return name
+
+
+def check_share_handle(text: str) -> str:
+    """The GitHub login a shared feed is followed by, stripped; ValueError if it is not a login."""
+    handle = text.strip()
+    if not re.fullmatch(SHARE_HANDLE_PATTERN, handle):
+        raise ValueError(
+            "GitHub handle must be 1 to 39 letters, digits or hyphens (for example jane-ex)"
+        )
+    return handle
 
 
 def normalise_deadline(v: Any) -> Any:
@@ -103,12 +126,27 @@ class Config(BaseModel):
     # Whether each paper also gets a diagram (one more model call): on, off, or auto (off on a
     # CPU-only Ollama model, on otherwise). See docs/guide/summaries.md.
     diagrams: Literal["auto", "on", "off"] = "auto"
+    # Sharing (Phase 10): whether this vault publishes its feed, the name readers see and the
+    # GitHub login they follow it by. Set by `rpipe share setup`, `set-name` and `stop`.
+    share_enabled: bool = False
+    share_display_name: str | None = None
+    share_handle: str | None = None
 
     @field_validator("diagrams", mode="before")
     @classmethod
     def _diagrams_bool(cls, v: Any) -> Any:
         # A hand-edited `diagrams: off` is a YAML boolean; read it as the word.
         return {True: "on", False: "off"}.get(v, v) if isinstance(v, bool) else v
+
+    @field_validator("share_display_name")
+    @classmethod
+    def _check_share_name(cls, v: str | None) -> str | None:
+        return None if v is None else check_share_name(v)
+
+    @field_validator("share_handle")
+    @classmethod
+    def _check_share_handle(cls, v: str | None) -> str | None:
+        return None if v is None else check_share_handle(v)
 
     @field_validator("night_deadline", mode="before")
     @classmethod

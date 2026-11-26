@@ -12,6 +12,7 @@ from typing import Literal, Protocol
 
 REPO = "rpipe-feed"
 TOPIC = "rpipe-feed"
+DESCRIPTION = "My rpipe research feed"
 
 
 class GithubError(Exception):
@@ -65,25 +66,44 @@ def login(runner: Runner) -> str:
 
 
 def repo_status(runner: Runner, handle: str) -> Literal["missing", "rpipe", "other"]:
-    """Whether ``<handle>/rpipe-feed`` is absent, already an rpipe feed, or someone's other repo."""
-    if runner.run(["gh", "api", f"repos/{handle}/{REPO}"]).returncode != 0:
-        return "missing"
-    r = runner.run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json",
+    """Whether ``<handle>/rpipe-feed`` is absent, an rpipe feed (or our own half-made one), or other.
+
+    A repo that only has ``README.md`` and the description ``create_repo`` sets counts as
+    "rpipe": setup died after creating it and a retry must be able to carry on.
+    Anything but a clean "not found" from GitHub raises (offline, signed out) rather than
+    reading as "missing".
+    """
+    r = runner.run(["gh", "api", f"repos/{handle}/{REPO}"])
+    if r.returncode != 0:
+        if "404" in r.stderr or "not found" in r.stderr.lower():
+            return "missing"
+        raise _fail("Looking up your rpipe-feed repository", r)
+    try:
+        repo = json.loads(r.stdout)
+    except ValueError:
+        repo = None
+    f = runner.run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json",
                     f"repos/{handle}/{REPO}/contents/feed.json"])
-    if r.returncode == 0:
+    if f.returncode == 0:
         try:
-            doc = json.loads(r.stdout)
+            doc = json.loads(f.stdout)
         except ValueError:
             return "other"
-        if isinstance(doc, dict) and "_rpipe" in doc:
-            return "rpipe"
-    return "other"
+        return "rpipe" if isinstance(doc, dict) and "_rpipe" in doc else "other"
+    if not isinstance(repo, dict) or repo.get("description") != DESCRIPTION:
+        return "other"
+    root = runner.run(["gh", "api", f"repos/{handle}/{REPO}/contents"])
+    try:
+        names = {e.get("name") for e in json.loads(root.stdout)} if root.returncode == 0 else None
+    except (ValueError, AttributeError):
+        names = None
+    return "rpipe" if names == {"README.md"} else "other"
 
 
 def create_repo(runner: Runner, handle: str, clone_dir: Path) -> None:
     """Create the public repository (with a first commit so ``main`` exists) and clone it."""
     r = runner.run(["gh", "repo", "create", f"{handle}/{REPO}", "--public", "--add-readme",
-                    "--description", "My rpipe research feed"])
+                    "--description", DESCRIPTION])
     if r.returncode != 0:
         raise _fail("Creating the repository", r)
     r = runner.run(["git", "clone", f"https://github.com/{handle}/{REPO}.git", str(clone_dir)])

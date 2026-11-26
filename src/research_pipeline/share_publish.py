@@ -72,24 +72,35 @@ def _git(runner: Runner, clone_dir: Path, args: list[str], what: str):
     return r
 
 
+def _unpushed(runner: Runner, clone_dir: Path) -> bool:
+    """True when local commits haven't reached GitHub (for example an earlier push failed)."""
+    r = runner.run(["git", "rev-list", "--count", "@{u}..HEAD"], cwd=clone_dir)
+    return r.returncode == 0 and r.stdout.strip().isdigit() and int(r.stdout.strip()) > 0
+
+
 def push(runner: Runner, clone_dir: Path, message: str) -> bool:
-    """Stage everything, commit if something changed, push. Returns whether a push happened."""
+    """Stage everything, commit if something changed, push. Returns whether a push happened.
+
+    Also pushes commits left over from an earlier failed push, so a bad night is retried.
+    """
     _git(runner, clone_dir, ["add", "-A"], "Staging the feed files")
-    if runner.run(["git", "diff", "--cached", "--quiet"], cwd=clone_dir).returncode == 0:
+    staged = runner.run(["git", "diff", "--cached", "--quiet"], cwd=clone_dir).returncode != 0
+    if not staged and not _unpushed(runner, clone_dir):
         return False
-    _git(runner, clone_dir, ["commit", "-m", message], "Committing the feed")
+    if staged:
+        _git(runner, clone_dir, ["commit", "-m", message], "Committing the feed")
     _git(runner, clone_dir, ["push"], "Pushing the feed")
     return True
 
 
 def publish(conn: sqlite3.Connection, clone_dir: Path, runner: Runner, *, display_name: str,
-            topics: list[str], active: bool, now: str, handle: str | None = None,
+            topics: list[str], active: bool, now: str, handle: str,
             reporter: Reporter | None = None) -> Literal["pushed", "unchanged"]:
     """Rebuild the feed files from the database and push them if they changed."""
     with stage(reporter, "publish", label="Publishing your feed") as st:
         posts = collect_posts(conn)
         st.step(f"Building {len(posts)} posts")
-        base = feed_url(handle).removesuffix("feed.json") if handle else None
+        base = feed_url(handle).removesuffix("feed.json")
         files = feed_format.build_files(posts, display_name=display_name, topics=topics,
                                         active=active, now=now, base_url=base)
         write_site(clone_dir, files)

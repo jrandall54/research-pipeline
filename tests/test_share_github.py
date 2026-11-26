@@ -22,7 +22,9 @@ def test_login_returns_handle_or_asks_to_sign_in():
 
 
 def test_repo_status_missing_rpipe_other():
-    assert sg.repo_status(FakeRunner({("gh", "api", "repos/a/rpipe-feed"): done(1)}), "a") == "missing"
+    assert sg.repo_status(FakeRunner({("gh", "api", "repos/a/rpipe-feed"): done(1, "", "HTTP 404: Not Found")}), "a") == "missing"
+    with pytest.raises(sg.GithubError):  # offline is not "missing"
+        sg.repo_status(FakeRunner({("gh", "api", "repos/a/rpipe-feed"): done(1, "", "network down")}), "a")
     # the repo exists but has no feed.json
     other = FakeRunner({("gh", "api", "-H"): done(1, "", "Not Found")})
     assert sg.repo_status(other, "a") == "other"
@@ -70,3 +72,17 @@ def test_credentials_and_delete():
 def test_subprocess_runner_reports_missing_command():
     r = sg.SubprocessRunner().run(["definitely-not-a-command-xyz"])
     assert isinstance(r, subprocess.CompletedProcess) and r.returncode == 127
+
+
+def _half(description, names):
+    return FakeRunner({
+        ("gh", "api", "repos/a/rpipe-feed"): done(0, json.dumps({"description": description})),
+        ("gh", "api", "-H"): done(1, "", "Not Found"),
+        ("gh", "api", "repos/a/rpipe-feed/contents"): done(0, json.dumps([{"name": n} for n in names])),
+    })
+
+
+def test_repo_status_half_made_repo_is_resumable():
+    assert sg.repo_status(_half("My rpipe research feed", ["README.md"]), "a") == "rpipe"
+    assert sg.repo_status(_half("My rpipe research feed", ["README.md", "app.py"]), "a") == "other"
+    assert sg.repo_status(_half("Someone's repo", ["README.md"]), "a") == "other"

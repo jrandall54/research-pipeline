@@ -133,3 +133,15 @@ def test_wait_live_gives_up_and_rejects_non_feed():
     with httpx.Client() as http:
         assert sp.wait_live(http, "https://a.github.io/rpipe-feed/feed.json", None,
                             timeout_s=30, sleep=lambda s: None) is False
+
+
+def test_failed_push_is_retried_when_nothing_changed(tmp_path):
+    failing = FakeRunner({("git", "diff"): done(1), ("git", "push"): done(1, "", "offline")})
+    with pytest.raises(GithubError):
+        sp.push(failing, tmp_path, "msg")
+    # next night: nothing staged, but the commit is still ahead of GitHub
+    retry = FakeRunner({("git", "diff"): done(0), ("git", "rev-list"): done(0, "1\n")})
+    assert sp.push(retry, tmp_path, "msg") is True
+    assert ["git", "push"] in retry.calls and not any(c[1] == "commit" for c in retry.calls)
+    clean = FakeRunner({("git", "diff"): done(0), ("git", "rev-list"): done(0, "0\n")})
+    assert sp.push(clean, tmp_path, "msg") is False

@@ -381,3 +381,48 @@ def test_hand_edited_unquoted_bool_reads_as_word(vault, word):
 def test_set_diagrams_writes_a_quoted_string(vault):
     pe.set_diagrams(vault, "off")
     assert 'diagrams: "off"' in (vault / "config.yaml").read_text()
+
+
+def test_set_share_writes_keys(vault):
+    assert cfg(vault).share_enabled is False
+    pe.set_share(vault, enabled=True, display_name="  Jane's feed ", handle="jane-ex")
+    c = cfg(vault)
+    assert c.share_enabled is True
+    assert c.share_display_name == "Jane's feed"
+    assert c.share_handle == "jane-ex"
+    # Only the given keys change: turning sharing off keeps the name and handle.
+    pe.set_share(vault, enabled=False)
+    c = cfg(vault)
+    assert c.share_enabled is False
+    assert c.share_display_name == "Jane's feed"
+    assert c.share_handle == "jane-ex"
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "x" * 61, "a\nb", "a\rb"])
+def test_set_share_rejects_bad_name(vault, bad):
+    before = (vault / "config.yaml").read_bytes()
+    with pytest.raises(ValueError, match="share display name must be 1 to 60 characters"):
+        pe.set_share(vault, display_name=bad)
+    assert (vault / "config.yaml").read_bytes() == before
+
+
+def test_set_share_accepts_name_at_limit(vault):
+    pe.set_share(vault, display_name="x" * 60)
+    assert cfg(vault).share_display_name == "x" * 60
+
+
+@pytest.mark.parametrize("bad", ["", "-" * 40, "a" * 40, "jane_ex", "jane ex", "jane.ex", "jané"])
+def test_set_share_rejects_bad_handle(vault, bad):
+    before = (vault / "config.yaml").read_bytes()
+    with pytest.raises(ValueError, match="GitHub"):
+        pe.set_share(vault, handle=bad)
+    assert (vault / "config.yaml").read_bytes() == before
+
+
+def test_set_share_quotes_names_that_look_like_yaml_scalars(vault):
+    pe.set_share(vault, display_name="on", handle="1234")
+    text = (vault / "config.yaml").read_text()
+    assert 'share_display_name: "on"' in text
+    assert 'share_handle: "1234"' in text
+    assert cfg(vault).share_display_name == "on"
+    assert cfg(vault).share_handle == "1234"

@@ -1,8 +1,8 @@
 # Roadmap
 
-The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-26 (Phase 9.3 merged; summaries and app look kept as they are).
+The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-26 (Phase 10 built on branch phase-10-sharing, awaiting merge).
 
-**Next up:** Phase 10 (sharing): design conversation. Summaries and the app's look stay as they are (owner ruling 2026-11-26).
+**Next up:** the owner's first real `rpipe share setup`, then a first nightly run with sharing. Summaries and the app's look stay as they are (owner ruling 2026-11-26).
 
 ## How this is organized
 
@@ -40,7 +40,7 @@ The single list of all work on rpipe: what is done, what is next, and where each
 | 9.1 | Stricter diagrams: no diagram by default, generic ones dropped, boxes must come from the method | merged | (owner request after the Phase 9 eval) | [plan](plans/phase-09.1-stricter-diagrams.md) |
 | 9.2 | Diagrams on the paper screen only, not in the feed | merged | (owner's choice after the 9.1 measurements) | [plan](plans/phase-09.2-diagram-on-paper-page.md) |
 | 9.3 | Diagrams off: the setting also hides diagrams already drawn | merged | (owner ruling 2026-11-26: diagrams from summaries are pointless) | [plan](plans/phase-09.3-diagrams-off.md) |
-| 10 | Sharing: publish your feed, a directory, follow others, custom mixes | idea | | |
+| 10 | Sharing: publish your feed, a directory, follow others, custom mixes | merged | [design](specs/phase-10-sharing-design.md) | [plan](plans/phase-10-sharing.md) |
 | 11 | Notes and link capture; the shelf grows into one library (overlap alerts, archive connections, weekly synthesis page) | idea | | |
 | 12 | Narrated video explainers | idea | | |
 | 13 | Study material: concept map linked to coursework, quizzes, the teacher's layered templates | idea | | |

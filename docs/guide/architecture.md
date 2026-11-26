@@ -36,8 +36,8 @@ No files were moved; the groups are lists in `tests/test_architecture.py`, check
 
 | Group | Modules | In plain words | May import |
 | --- | --- | --- | --- |
-| **Shared** | `models`, `summary_models`, `db`, `vault`, `embed`, `llm`, `backends`, `defaults`, `seeds`, `profile_edit`, `ids`, `progress`, `categories`, `schedule`, `netguard` | The building blocks both halves need: data shapes, the database connection and schema, the vault folders, the embedding and language-model clients, the profile and config editors, paper-id clean-up, progress events, the host allowlist for servers with no login | shared only |
-| **Pipeline** | `collect`, `sources`, `triage`, `rank`, `fulltext`, `summarize`, `prompts`, `digest`, `evaluate`, `gold`, `judge`, `pruning`, `parts`, `citations` (also `section_texts`, the text of cited sections), `numbers` (checks that numbers in a hook appear in the cited text), `extras` (drops a hook or key number that fails that check), `diagram` (the diagram call and its checks), `spill`, `ollama_fit`, `ollama_tune`, `bench`, `scan`, `catalog`, `recommender`, `machine`, `registry`, `run_lock`, `requests_queue`, `seed_input`, `onboarding` | Getting and processing papers, plus everything about choosing, fitting and tuning the model that does it, the lock, and draining the request list | shared, plus the read functions of `library` listed in `library.PIPELINE_READS` |
+| **Shared** | `models`, `summary_models`, `db`, `vault`, `embed`, `llm`, `backends`, `defaults`, `seeds`, `profile_edit`, `ids`, `progress`, `categories`, `schedule`, `netguard`, `feed_format` (the files of a published feed: building, parsing, reason parsing) | The building blocks both halves need: data shapes, the database connection and schema, the vault folders, the embedding and language-model clients, the profile and config editors, paper-id clean-up, progress events, the host allowlist for servers with no login | shared only |
+| **Pipeline** | `collect`, `sources`, `triage`, `rank`, `fulltext`, `summarize`, `prompts`, `digest`, `evaluate`, `gold`, `judge`, `pruning`, `parts`, `citations` (also `section_texts`, the text of cited sections), `numbers` (checks that numbers in a hook appear in the cited text), `extras` (drops a hook or key number that fails that check), `diagram` (the diagram call and its checks), `spill`, `ollama_fit`, `ollama_tune`, `bench`, `scan`, `catalog`, `recommender`, `machine`, `registry`, `run_lock`, `requests_queue`, `seed_input`, `onboarding`, `share_github` (the `git`/`gh` operations behind a fakeable runner), `share_publish` (build the feed from the database and push it), `share_fetch` (follow feeds and download them safely), `share_directory` (the directory of published feeds found by GitHub search) | Getting and processing papers, plus everything about choosing, fitting and tuning the model that does it, the lock, and draining the request list | shared, plus the read functions of `library` listed in `library.PIPELINE_READS` |
 | **App** | `library`, `shelf`, `review`, `serve`, `library_api`, `workbench`, `webapp` | What you do with the papers: votes, saves, skips, the shelf, the review queue, the browser view, the one door, and `workbench/` (an empty package waiting for the app's future features) and `webapp/` (the web app server, see [app.md](app.md)) | shared and app; never pipeline |
 | **Composition** | `cli`, `progress_render` | The `rpipe` commands, and turning progress events into terminal lines | anything |
 
@@ -143,6 +143,23 @@ Added for the web app's feed page (all plain reads, no writes):
 - `digest_dates(conn, limit=60)` lists the distinct digest dates, newest first, for the "Earlier days" list.
 - `summarize_states(conn, paper_ids)` gives the status (`pending`, `running`, `done`, `failed`) of the newest `summarize` request for each paper; a paper nobody asked about is absent.
 - `summary_provenance(conn, paper_id)` returns a `ProvenanceView` (`model`, `created_at`) saying which model wrote the stored summary and when, or none when there is no summary or it predates provenance. The page shows it under "About this summary".
+
+Added for sharing (Phase 10; see [sharing.md](sharing.md)). All local: they read tables that `rpipe run` and `rpipe follow` filled, and never touch the network.
+
+| Object | Fields | Returned by |
+| --- | --- | --- |
+| `SourceView` | `feed_id` (none = you), `name` ("You" or the publisher's display name), `handle` | inside `FollowedPostView.sources` |
+| `FollowedPostView` | `feed_id` (none = your own paper in Mix), `paper` (a `PaperView` whose `summary` is the publisher's, `triage_reasons` their public reasons, `vote`/`saved` yours), `digest_date`, `rank`, `sources` (you first, then feeds in follow order), `reasons` | `following_posts`, `mix_posts`, `followed_post` |
+| `FollowView` | `feed_id`, `handle`, `display_name`, `topics`, `in_mix`, `last_fetched_at`, `last_error`, `stopped`, `posts`, `waiting` (followed, never fetched) | `follows` |
+| `DirectoryEntryView` | `feed_id`, `handle`, `display_name`, `topics`, `posts_per_day`, `preview`, `shared_topics` (with your topics), `following` | `directory` |
+
+- `follows(conn)`, `follow_request(conn, handle)` (the Follow button: records the follow from the directory entry; the posts arrive at the next fetch; `ValueError` for a handle not in the directory), `unfollow(conn, feed_id)` (drops the feed's posts except papers you saved or voted on), `set_in_mix(conn, feed_id, on)`.
+- `following_days` / `following_posts(conn, day)`: the feeds you follow, by follow order then the publisher's rank.
+- `mix_days` / `mix_posts(conn, day)`: your own digest papers first (score order), then followed posts of feeds that are in the mix. One entry per paper id: if you and Alex both have it, it appears once with `sources` = You, Alex, filed under the earliest date among them.
+- `directory(conn, my_topics)`: most shared topics first, then by name.
+- `followed_post(conn, paper_id)`: the newest post of that paper, for the paper screen when it is not (or only a copy of) your own.
+- `stopped` uses the same rule as `share_fetch.is_stopped` (7 failures or an inactive feed); the number lives in `feed_format.STOPPED_AFTER` because `library_api` may not import pipeline code.
+- `vote` and `save` on a followed post that is not in your `papers` first **copy it in**: a `papers` row with `source='feed'`, `status='skipped'` (so it never enters your digest), full-text indexed so search finds it. A paper you already have is used as is, so voting on Alex's copy of your own paper never overwrites your row. The collector takes a `feed` row over if it later finds the real paper.
 
 `library_api` does not hold rules of its own about votes or the shelf. It passes each change on to the module that already owns it: `library.py` for votes, saves and skips, `shelf.py` for the shelf, `review.py` for the queue queries, `db.py` for papers and summaries.
 

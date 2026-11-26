@@ -99,3 +99,8 @@ def address(unit_dir: Path) -> str | None:
 
 def is_active(runner: Runner) -> bool:
     return runner(["systemctl", "--user", "is-active", "--quiet", SERVICE_NAME]) == 0
+
+
+def restart(runner: Runner) -> bool:
+    """Restart the service (the same command `install` ends with); True when systemctl succeeded."""
+    return runner(["systemctl", "--user", "restart", SERVICE_NAME]) == 0

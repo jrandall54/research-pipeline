@@ -106,10 +106,10 @@ def test_insert_request_canonical_payload(conn):
     assert row["payload"] == json.dumps({"b": 1, "paper_id": PID}, sort_keys=True)
 
 
-def test_fresh_db_is_version_4(tmp_path):
+def test_fresh_db_is_current_version(tmp_path):
     conn = open_db(tmp_path / "v.sqlite")
-    assert SCHEMA_VERSION == 4
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert SCHEMA_VERSION == 5
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
 
 
 def test_old_vault_gains_requests_table(tmp_path):
@@ -122,7 +122,7 @@ def test_old_vault_gains_requests_table(tmp_path):
     conn = open_db(path)
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "requests" in names
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
     conn.close()
 
 

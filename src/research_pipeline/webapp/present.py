@@ -2,11 +2,11 @@
 
 import re
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Literal
 
-from research_pipeline.library_api import PaperView, ProvenanceView, ReasonView, plain_reasons
+from research_pipeline.library_api import FollowedPostView, PaperView, ProvenanceView, ReasonView, plain_reasons
 from research_pipeline.summary_models import Claim, Diagram
 
 SummarizeState = Literal["none", "pending", "running", "done", "failed"]
@@ -40,19 +40,21 @@ def sentences(text: str) -> list[str]:
     return parts
 
 
-def _phrase(r: ReasonView) -> str:
+def _phrase(r: ReasonView, you: bool = True) -> str:
+    """One reason in words. ``you=False`` words it about the publisher of a followed post ("they")."""
+    who, poss = ("you", "your") if you else ("they", "their")
     return {
-        "topic": f"you follow {r.label}",
-        "liked": "it resembles a paper you liked",
+        "topic": f"{who} follow {r.label}",
+        "liked": f"it resembles a paper {who} liked",
         "upvotes": f"{r.label} people upvoted it on Hugging Face",
-        "author": f"it's by {r.label}, whom you follow",
+        "author": f"it's by {r.label}, whom {who} follow",
         "keyword": f"it mentions {r.label}",
-        "shelf": f'it\'s close to "{r.label}" on your shelf',
+        "shelf": f'it\'s close to "{r.label}" on {poss} shelf',
     }[r.kind]
 
 
-def why_sentence(reasons: list[ReasonView]) -> str | None:
-    parts = [_phrase(r) for r in reasons]
+def why_sentence(reasons: list[ReasonView], you: bool = True) -> str | None:
+    parts = [_phrase(r, you) for r in reasons]
     if not parts:
         return None
     if len(parts) == 1:
@@ -127,6 +129,8 @@ class CardData:
     vote: int
     saved: bool
     summarize_state: SummarizeState
+    sources: list[str] = field(default_factory=list)  # whose pick: names for Following/Mix cards, [] on Mine
+    followed: bool = False  # a followed feed's post: the publisher's summary, no Summarize button
 
 
 def _field(claim: Claim | None) -> Field | None:
@@ -153,6 +157,19 @@ def card(view: PaperView, state: str | None) -> CardData:
         vote=view.vote, saved=view.saved,
         summarize_state="done" if s else (state or "none"),  # type: ignore[arg-type]
     )
+
+
+def followed_card(post: FollowedPostView, state: str | None) -> CardData:
+    """A card for a Following or Mix entry: the labels (whose pick) and, for a followed feed's post, its wording.
+
+    Your own paper in Mix keeps your own "why"; with no other source it is labelled just "You".
+    """
+    c = card(post.paper, state)
+    followed = post.feed_id is not None
+    why = c.why
+    if followed and post.reasons:
+        why = f"{post.sources[0].name}'s pipeline picked it because {why_sentence(post.reasons, you=False)}"
+    return replace(c, sources=[s.name for s in post.sources], followed=followed, why=why)
 
 
 _SECTIONS_SUFFIX = re.compile(r"\s*\[sections?:[^\]]*\]\s*$", re.IGNORECASE)
@@ -182,7 +199,10 @@ def _tagged(claims: list[Claim]) -> list[Field]:
     return [(c.text, section_tag(c.sections)) for c in claims]
 
 
-def paper_detail(view: PaperView, state: str | None, provenance: ProvenanceView | None = None) -> DetailData:
+def paper_detail(
+    view: PaperView, state: str | None, provenance: ProvenanceView | None = None,
+    post: FollowedPostView | None = None,
+) -> DetailData:
     """Everything the paper page prints beyond the card: critique with tags and the "About this summary" lines."""
     ps = view.summary
     about: list[str] = []
@@ -197,7 +217,7 @@ def paper_detail(view: PaperView, state: str | None, provenance: ProvenanceView 
         about += [f'Could not check: "{t}"' for t in ps.unverified]
         about += [f"Left out: {r}" for r in ps.checks]
     return DetailData(
-        card=card(view, state),
+        card=followed_card(post, state) if post else card(view, state),
         authors_short=authors_short(view.authors), abstract=view.abstract,
         strengths=_tagged(ps.critique.strengths) if ps else [],
         weaknesses=_tagged(ps.critique.weaknesses) if ps else [],

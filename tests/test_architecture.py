@@ -12,6 +12,7 @@ CLI = PACKAGE_ROOT / "cli.py"
 APP_COMMANDS = {
     "vote", "_save_command", "feedback", "review", "show", "_show_paper",
     "shelf_add", "shelf_list", "shelf_remove", "shelf_sync", "requests_add",
+    "share_unfollow", "share_following", "share_mix_add", "share_mix_remove",
 }
 # Write helpers: by name pattern, wherever they come from.
 WRITE_PREFIXES = ("record_", "upsert_", "delete_", "mark_", "save_")
@@ -79,11 +80,12 @@ def test_app_commands_use_only_library_api():
 # ---- the pipeline/app boundary (see docs/guide/architecture.md, "The groups") ----
 
 SHARED = {"models", "summary_models", "db", "vault", "embed", "llm", "backends", "defaults",
-          "seeds", "profile_edit", "ids", "progress", "categories", "schedule", "netguard"}
+          "seeds", "profile_edit", "ids", "progress", "categories", "schedule", "netguard", "feed_format"}
 PIPELINE = {"collect", "sources", "triage", "rank", "fulltext", "summarize", "prompts", "digest",
             "evaluate", "gold", "judge", "pruning", "parts", "citations", "numbers", "extras", "diagram", "spill",
             "ollama_fit", "ollama_tune", "bench", "scan", "catalog", "recommender", "machine",
-            "registry", "run_lock", "requests_queue", "seed_input", "onboarding"}
+            "registry", "run_lock", "requests_queue", "seed_input", "onboarding", "share_github", "share_publish",
+            "share_fetch", "share_directory"}
 APP = {"library", "shelf", "review", "serve", "library_api", "workbench", "webapp"}
 COMPOSITION = {"cli", "progress_render"}
 GROUPS = {"shared": SHARED, "pipeline": PIPELINE, "app": APP, "composition": COMPOSITION}

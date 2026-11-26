@@ -20,7 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from research_pipeline import db, ids, library, review, shelf
+from research_pipeline import db, feed_format, ids, library, review, shelf
 from research_pipeline.db import REQUEST_KINDS, UnknownPaperError
 from research_pipeline.embed import Embedder
 from research_pipeline.progress import Reporter
@@ -35,6 +35,9 @@ __all__ = [
     "shelf_sync", "request",
     "ReasonView", "ProvenanceView", "plain_reasons", "digest_dates", "summarize_states",
     "summary_provenance",
+    "SourceView", "FollowedPostView", "FollowView", "DirectoryEntryView",
+    "follows", "follow_request", "unfollow", "set_in_mix", "following_days", "following_posts",
+    "mix_days", "mix_posts", "directory", "followed_post", "is_feed_copy",
 ]
 
 
@@ -96,11 +99,59 @@ class ProvenanceView(BaseModel):
     created_at: str
 
 
-_TOPIC_REASON = re.compile(r"^topic: (.+?) \(\d+(?:\.\d+)?\)$")
-_PREFIX_REASONS: list[tuple[str, Literal["upvotes", "author", "keyword", "shelf"]]] = [
-    ("HF upvotes: ", "upvotes"), ("followed author: ", "author"),
-    ("keyword: ", "keyword"), ("near your shelf: ", "shelf"),
-]
+class SourceView(BaseModel):
+    """Whose pick a post is: you (``feed_id`` None, ``name`` "You") or a followed feed."""
+
+    feed_id: str | None
+    name: str
+    handle: str | None = None
+
+
+class FollowedPostView(BaseModel):
+    """One entry of Following or Mix: the paper, who picked it and why they say so.
+
+    ``paper.summary`` is the publisher's summary and ``paper.triage_reasons`` their public
+    reasons; ``paper.vote`` and ``paper.saved`` are yours (0/False until you copy it in).
+    ``feed_id`` is None for your own paper in Mix. ``sources`` lists you first, then the
+    feeds in follow order.
+    """
+
+    feed_id: str | None
+    paper: PaperView
+    digest_date: str
+    rank: int
+    sources: list[SourceView]
+    reasons: list[ReasonView]
+
+
+class FollowView(BaseModel):
+    """A feed you follow. ``waiting`` = followed but not fetched yet; ``stopped`` = see ``_is_stopped``."""
+
+    feed_id: str
+    handle: str
+    display_name: str
+    topics: list[str]
+    in_mix: bool
+    last_fetched_at: str | None
+    last_error: str | None
+    stopped: bool
+    posts: int
+    waiting: bool
+
+
+class DirectoryEntryView(BaseModel):
+    """A feed listed in the public directory, with how many topics it shares with you."""
+
+    feed_id: str
+    handle: str
+    display_name: str
+    topics: list[str]
+    posts_per_day: float
+    preview: list[dict]
+    shared_topics: int
+    following: bool
+    is_you: bool = False  # your own feed (it is in the directory too, but you cannot follow yourself)
+
 
 _DIRECTIONS: dict[str, int] = {"up": 1, "down": -1, "clear": 0}
 
@@ -197,15 +248,21 @@ def search_papers(conn: sqlite3.Connection, query: str, limit: int = 20) -> list
 def vote(conn: sqlite3.Connection, paper_id: str, direction: Literal["up", "down", "clear"]) -> None:
     """Vote a paper up or down, or clear your vote. Commits.
 
+    A post of a feed you follow that is not in your papers yet is copied in first.
+
     ValueError for any other direction; UnknownPaperError for an id not in the database.
     """
     if direction not in _DIRECTIONS:
         raise ValueError(f"Direction must be up, down or clear, not {direction!r}.")
+    if direction != "clear":
+        _copy_in_followed_post(conn, paper_id)
     library.record_vote(conn, paper_id, _DIRECTIONS[direction])
 
 
 def save(conn: sqlite3.Connection, paper_id: str, saved: bool) -> None:
     """Save (``True``) or unsave (``False``) a paper. Idempotent; commits."""
+    if saved:
+        _copy_in_followed_post(conn, paper_id)
     library.set_saved(conn, paper_id, saved)
 
 
@@ -336,15 +393,9 @@ def plain_reasons(reasons: list[str]) -> list[ReasonView]:
     """
     out: list[ReasonView] = []
     for text in reasons:
-        if m := _TOPIC_REASON.match(text):
-            out.append(ReasonView(kind="topic", label=m.group(1)))
-        elif text.startswith("liked similar: "):
-            out.append(ReasonView(kind="liked", label="", paper_id=text.removeprefix("liked similar: ")))
-        else:
-            for prefix, kind in _PREFIX_REASONS:
-                if text.startswith(prefix):
-                    out.append(ReasonView(kind=kind, label=text.removeprefix(prefix)))
-                    break
+        if parsed := feed_format.parse_reason(text):
+            kind, label, paper_id = parsed
+            out.append(ReasonView(kind=kind, label=label, paper_id=paper_id))
     return out
 
 
@@ -378,3 +429,210 @@ def summary_provenance(conn: sqlite3.Connection, paper_id: str) -> ProvenanceVie
     if not prov or not prov.get("model") or not prov.get("created_at"):
         return None
     return ProvenanceView(model=prov["model"], created_at=prov["created_at"])
+
+
+# ---- following other people's feeds ----
+
+
+def _is_stopped(row: sqlite3.Row) -> bool:
+    """Same rule as ``share_fetch.is_stopped`` (library_api must not import pipeline code)."""
+    return row["failures"] >= feed_format.STOPPED_AFTER or not row["active"]
+
+
+def _source(row: sqlite3.Row) -> SourceView:
+    return SourceView(feed_id=row["feed_id"], name=row["display_name"], handle=row["handle"])
+
+
+_YOU = SourceView(feed_id=None, name="You")
+
+
+def _post_paper_view(conn: sqlite3.Connection, post: sqlite3.Row) -> PaperView:
+    try:
+        summary = PaperSummary.model_validate(json.loads(post["summary"])) if post["summary"] else None
+    except ValueError:  # includes pydantic's ValidationError: a bad summary is shown as none
+        summary = None
+    pid = post["paper_id"]
+    return PaperView(
+        id=pid, title=post["title"], abstract=post["abstract"],
+        authors=json.loads(post["authors"] or "[]"), url=post["url"], published=post["published"],
+        status="feed", digest_date=post["digest_date"], triage_score=None,
+        triage_reasons=json.loads(post["reasons"] or "[]"), summary=summary,
+        vote=_current_vote(conn, pid), saved=library.is_saved(conn, pid),
+    )
+
+
+def _post_view(conn: sqlite3.Connection, post: sqlite3.Row, sources: list[sqlite3.Row]) -> FollowedPostView:
+    paper = _post_paper_view(conn, post)
+    return FollowedPostView(
+        feed_id=post["feed_id"], paper=paper, digest_date=post["digest_date"], rank=post["rank"],
+        sources=[_source(s) for s in sources], reasons=plain_reasons(paper.triage_reasons),
+    )
+
+
+def _copy_in_followed_post(conn: sqlite3.Connection, paper_id: str) -> None:
+    """Copy a followed post into ``papers`` (once) so a vote or save has a paper to point at."""
+    if db.get_paper(conn, paper_id) is not None:
+        return
+    post = _newest_post(conn, paper_id)
+    if post is not None:
+        db.insert_feed_paper(conn, post)
+
+
+def _newest_post(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT p.*, f.display_name, f.handle FROM followed_posts p"
+        " JOIN follows f ON f.feed_id = p.feed_id WHERE p.paper_id = ?"
+        " ORDER BY p.digest_date DESC, p.fetched_at DESC, p.feed_id LIMIT 1", (paper_id,)
+    ).fetchone()
+
+
+def follows(conn: sqlite3.Connection) -> list[FollowView]:
+    """The feeds you follow, in the order you followed them."""
+    counts = {
+        r[0]: r[1] for r in conn.execute("SELECT feed_id, COUNT(*) FROM followed_posts GROUP BY feed_id")
+    }
+    return [
+        FollowView(
+            feed_id=r["feed_id"], handle=r["handle"], display_name=r["display_name"],
+            topics=json.loads(r["topics"]), in_mix=bool(r["in_mix"]),
+            last_fetched_at=r["last_fetched_at"], last_error=r["last_error"],
+            stopped=_is_stopped(r), posts=counts.get(r["feed_id"], 0),
+            waiting=r["last_fetched_at"] is None,
+        )
+        for r in db.list_follows(conn)
+    ]
+
+
+def _is_own(handle: str, own_handle: str | None) -> bool:
+    return bool(own_handle) and handle.strip().removeprefix("@").lower() == own_handle.removeprefix("@").lower()
+
+
+def follow_request(conn: sqlite3.Connection, handle: str, own_handle: str | None = None) -> None:
+    """Follow the directory's feed with this handle. Commits; posts arrive at the next fetch.
+
+    ValueError if no directory entry has that handle, or it is your own (``own_handle``).
+    """
+    if _is_own(handle, own_handle):
+        raise ValueError("That's your own feed.")
+    row = conn.execute(
+        "SELECT * FROM directory_entries WHERE lower(handle) = lower(?)", (handle.strip(),)
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"No feed with handle {handle!r} in the directory.")
+    db.upsert_follow(
+        conn, row["feed_id"], row["feed_url"], row["handle"], row["display_name"],
+        json.loads(row["topics"]),
+    )
+    conn.commit()
+
+
+def unfollow(conn: sqlite3.Connection, feed_id: str) -> None:
+    """Stop following a feed. Its posts go, except papers you saved or voted on. Commits.
+
+    ValueError for a feed you never followed.
+    """
+    if db.get_follow(conn, feed_id) is None:
+        raise ValueError(f"You do not follow a feed with id {feed_id!r}.")
+    kept = {r["paper_id"] for r in library.list_saved(conn)} | {
+        r["paper_id"] for r in library.current_votes(conn)
+    }
+    db.mark_unfollowed(conn, feed_id, kept)
+    conn.commit()
+
+
+def set_in_mix(conn: sqlite3.Connection, feed_id: str, on: bool) -> None:
+    """Include (or leave out) a followed feed in Mix. Commits."""
+    db.set_in_mix(conn, feed_id, on)
+    conn.commit()
+
+
+_ACTIVE_POSTS = (
+    "SELECT p.*, f.display_name, f.handle FROM followed_posts p"
+    " JOIN follows f ON f.feed_id = p.feed_id WHERE f.unfollowed_at IS NULL"
+)
+_FOLLOW_ORDER = " ORDER BY f.followed_at, f.feed_id, p.rank"
+
+
+def following_days(conn: sqlite3.Connection, limit: int = 60) -> list[str]:
+    """Dates (``YYYY-MM-DD``) with posts from feeds you follow, newest first."""
+    rows = conn.execute(
+        "SELECT DISTINCT p.digest_date FROM followed_posts p JOIN follows f ON f.feed_id = p.feed_id"
+        " WHERE f.unfollowed_at IS NULL ORDER BY p.digest_date DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def following_posts(conn: sqlite3.Connection, day: str) -> list[FollowedPostView]:
+    """One day of the feeds you follow: by follow order, then the publisher's rank."""
+    rows = conn.execute(_ACTIVE_POSTS + " AND p.digest_date = ?" + _FOLLOW_ORDER, (day,)).fetchall()
+    return [_post_view(conn, r, [r]) for r in rows]
+
+
+def _mix_entries(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Every Mix paper by id: ``date`` (earliest among sources), ``own`` row, ``posts`` (follow order)."""
+    entries: dict[str, dict] = {}
+    for r in conn.execute("SELECT * FROM papers WHERE digest_date IS NOT NULL"):
+        entries[r["id"]] = {"date": r["digest_date"], "own": r, "posts": []}
+    for r in conn.execute(_ACTIVE_POSTS + " AND f.in_mix = 1" + _FOLLOW_ORDER):
+        e = entries.setdefault(r["paper_id"], {"date": r["digest_date"], "own": None, "posts": []})
+        e["date"] = min(e["date"], r["digest_date"])
+        e["posts"].append(r)
+    return entries
+
+
+def mix_days(conn: sqlite3.Connection, limit: int = 60) -> list[str]:
+    """Dates with anything in Mix (your digests plus followed feeds in the mix), newest first."""
+    return sorted({e["date"] for e in _mix_entries(conn).values()}, reverse=True)[:limit]
+
+
+def mix_posts(conn: sqlite3.Connection, day: str) -> list[FollowedPostView]:
+    """One day of Mix: your papers first (score order), then followed posts; one entry per paper.
+
+    A paper that is yours and also posted by feeds appears once with every source listed, you
+    first, and sits under the earliest date among them.
+    """
+    entries = {pid: e for pid, e in _mix_entries(conn).items() if e["date"] == day}
+    out: list[FollowedPostView] = []
+    own = sorted(
+        (e for e in entries.values() if e["own"] is not None),
+        key=lambda e: (-(e["own"]["triage_score"] or 0.0), e["own"]["id"]),
+    )
+    for rank, e in enumerate(own, start=1):
+        paper = _view(conn, e["own"])
+        out.append(FollowedPostView(
+            feed_id=None, paper=paper, digest_date=day, rank=rank,
+            sources=[_YOU, *(_source(p) for p in e["posts"])], reasons=plain_reasons(paper.triage_reasons),
+        ))
+    for e in entries.values():  # insertion order = follow order, then rank
+        if e["own"] is not None:
+            continue
+        out.append(_post_view(conn, e["posts"][0], e["posts"]))
+    return out
+
+
+def directory(conn: sqlite3.Connection, my_topics: list[str],
+              own_handle: str | None = None) -> list[DirectoryEntryView]:
+    """The public directory, most shared topics first, then by name. Your own feed is marked ``is_you``."""
+    following = {r["feed_id"] for r in db.list_follows(conn)}
+    views = []
+    for r in conn.execute("SELECT * FROM directory_entries"):
+        topics = json.loads(r["topics"])
+        views.append(DirectoryEntryView(
+            feed_id=r["feed_id"], handle=r["handle"], display_name=r["display_name"], topics=topics,
+            posts_per_day=r["posts_per_day"], preview=json.loads(r["preview"]),
+            shared_topics=feed_format.shared_topics(topics, my_topics), following=r["feed_id"] in following,
+            is_you=_is_own(r["handle"], own_handle),
+        ))
+    return sorted(views, key=lambda v: (-v.shared_topics, v.display_name.lower()))
+
+
+def followed_post(conn: sqlite3.Connection, paper_id: str) -> FollowedPostView | None:
+    """The newest post of this paper from any feed you follow (or followed and kept), or None."""
+    post = _newest_post(conn, paper_id)
+    return None if post is None else _post_view(conn, post, [post])
+
+
+def is_feed_copy(conn: sqlite3.Connection, paper_id: str) -> bool:
+    """True when this paper's row was copied in from a followed post (``source='feed'``), not collected by you."""
+    row = db.get_paper(conn, paper_id)
+    return row is not None and row["source"] == "feed"

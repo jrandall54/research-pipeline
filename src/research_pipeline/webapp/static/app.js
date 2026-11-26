@@ -24,6 +24,27 @@
   });
 })();
 
+// Mine / Following / Mix: shown only when you follow someone. The choice is remembered on this
+// device, and opening the feed with no choice in the address goes to the remembered one.
+(function () {
+  var VIEWS = ["mine", "following", "mix"];
+  document.addEventListener("DOMContentLoaded", function () {
+    var links = document.querySelectorAll("[data-view-set]");
+    if (!links.length) return;
+    var saved = null;
+    try { saved = localStorage.getItem("view"); } catch (e) { /* private mode: no memory */ }
+    if (location.pathname === "/" && !location.search && VIEWS.indexOf(saved) > 0) {
+      location.replace("/?view=" + saved);
+      return;
+    }
+    links.forEach(function (a) {
+      a.addEventListener("click", function () {
+        try { localStorage.setItem("view", a.getAttribute("data-view-set")); } catch (e) { /* ignore */ }
+      });
+    });
+  });
+})();
+
 // Vote, save and summarize: each button posts to /api/paper/<id>/... and updates itself from the answer.
 (function () {
   function post(id, action, body) {
@@ -85,5 +106,56 @@
   document.addEventListener("click", function (ev) {
     var btn = ev.target.closest("button[data-action]");
     if (btn) handle(btn);
+  });
+})();
+
+// People: Follow buttons and Mix ticks post to /api/feed/<handle>/... and update from the answer.
+(function () {
+  function post(handle, action, body) {
+    return fetch("/api/feed/" + encodeURIComponent(handle) + "/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).catch(function () {
+      throw new Error("Couldn't reach your library. Check your connection.");
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) throw new Error(data.error || "Something went wrong. Try again.");
+        return data;
+      });
+    });
+  }
+  function statusOf(el) {
+    var scope = el.closest(".person, .showing");
+    return scope ? scope.querySelector(".status") : null;
+  }
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest("button[data-follow]");
+    if (!btn) return;
+    var status = statusOf(btn);
+    btn.disabled = true;
+    if (status) status.textContent = "";
+    post(btn.getAttribute("data-follow"), "follow").then(function () {
+      btn.textContent = "Following · posts arrive tonight";
+    }, function (e) {
+      btn.disabled = false;
+      if (status) status.textContent = e.message;
+    });
+  });
+  document.addEventListener("change", function (ev) {
+    var box = ev.target.closest("input[data-mix]");
+    if (!box) return;
+    var status = statusOf(box);
+    var on = box.checked;
+    box.disabled = true;
+    if (status) status.textContent = "";
+    post(box.getAttribute("data-mix"), "mix", { on: on }).then(function () {
+      box.disabled = false;
+      if (box.hasAttribute("data-reload")) location.reload();
+    }, function (e) {
+      box.disabled = false;
+      box.checked = !on;
+      if (status) status.textContent = e.message;
+    });
   });
 })();

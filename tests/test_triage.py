@@ -271,3 +271,20 @@ def test_progress_embedding_stage_has_no_total(conn, embedder):
     run_triage(conn, embedder, PROFILE, SEEDS, reporter=rep)
     starts = [e for e in rep.events if e.kind == "start" and e.stage == "triage"]
     assert starts and starts[0].total is None
+
+
+def test_triage_embeds_voted_feed_paper(conn, embedder):
+    from research_pipeline.db import insert_feed_paper
+
+    post = {"paper_id": "f1", "title": "Adversarial robustness", "abstract": "adversarial robustness " * 2,
+            "authors": "[]", "url": "u", "published": None}
+    insert_feed_paper(conn, post)
+    record_vote(conn, "f1", 1)
+    # No new papers: triage still embeds the voted feed paper, and leaves its status alone.
+    assert run_triage(conn, embedder, PROFILE, SEEDS) == {"triaged": 0, "skipped": 0, "embedded": 1}
+    assert conn.execute("SELECT 1 FROM embeddings WHERE item_id = 'f1'").fetchone()
+    assert get_paper(conn, "f1")["status"] == "skipped"
+    add(conn, "2501.00009", "Adversarial robustness of models")
+    run_triage(conn, embedder, PROFILE, SEEDS)
+    reasons = json.loads(get_paper(conn, "2501.00009")["triage_reasons"])
+    assert "liked similar: f1" in reasons

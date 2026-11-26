@@ -119,7 +119,7 @@ All state lives in one SQLite file (`vault.sqlite` in the vault), opened by `ope
 
 ### Other tables
 
-Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; Phase 3 uses `votes` and `saves`; the review loop uses `skips`; the shelf ([shelf design](../superpowers/specs/phase-04-shelf-design.md)) uses `shelf_items` and `shelf_chunks`; the pipeline/app split (Phase 7) adds `requests`, the request list (below).
+Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; Phase 3 uses `votes` and `saves`; the review loop uses `skips`; the shelf ([shelf design](../superpowers/specs/phase-04-shelf-design.md)) uses `shelf_items` and `shelf_chunks`; the pipeline/app split (Phase 7) adds `requests`, the request list (below); sharing (Phase 10) adds `follows`, `followed_posts` and `directory_entries` (below).
 
 **Who writes which tables.** The code is split in two halves. `db.py` owns the schema, the connection and the pipeline's own writes (`papers`, `runs`, `summaries`, `fulltexts`, `embeddings`, and `papers_fts`). `library.py` owns the writes you make by hand: `votes`, `saves`, `skips`, `shelf_items` and `shelf_chunks`. The app commands (`rpipe vote`, `save`, `unsave`, `feedback`, `review`, `show` and `shelf`) do not call `db.py` or `library.py` themselves: they go through `library_api.py`, the app's one door, which hands back data objects and passes each change on to `library.py` or `shelf.py` (see "The app's door" in [architecture.md](architecture.md)). The `requests` table (the request list, below) is written by both halves: the app adds requests through `library_api.request`, and the pipeline later marks them running, done or failed. The pipeline (`triage.py`, `rank.py`, `digest.py`) reads only the names listed in `library.PIPELINE_READS`, so the nightly code never writes your votes. One thing in a nightly run does write library rows: just before triage, `rpipe run` (and `rpipe triage`) rebuild the shelf rows from your `my_work/` files with `library_api.shelf_sync`, the same call as `rpipe shelf sync`. That call is made by the command (`cli.py`), not by triage, which only reads the shelf. Both halves share one database file. `library.py` imports two helpers from `db.py`: `_now()` (the timestamp format) and `_require_paper()` (the check that a paper id exists).
 
@@ -138,11 +138,25 @@ Phase 1 uses `runs` and `embeddings`; Phase 2 uses `fulltexts` and `summaries`; 
 | `runs` | `id`, `started_at`, `finished_at`, `counts` (JSON object), `errors` (JSON list) | One row per pipeline run: `start_run()` opens it, `finish_run()` fills in counts per stage and error messages. |
 | `papers_fts` | `title`, `abstract` | Full-text search index (below). |
 
+### Sharing tables (Phase 10, schema version 5)
+
+Sharing lets you follow other people's published digests ([design](../superpowers/specs/phase-10-sharing-design.md)). Three tables hold the follower's side. They are separate from `papers` on purpose: a followed post is someone else's pick, so it must never be triaged, summarised or used to train your profile.
+
+| Table | Columns | Purpose |
+| --- | --- | --- |
+| `follows` | `feed_id` (primary key), `feed_url`, `handle`, `display_name`, `topics` (JSON), `in_mix` (1 = its posts appear in your digest mix), `followed_at`, `unfollowed_at` (NULL while followed), `last_fetched_at`, `last_error`, `failures` (consecutive failed fetches), `active` (the feed's own "still publishing" flag), `archive_hashes` (JSON map used to skip archives that did not change) | One row per feed you follow. Unfollowing keeps the row (with `unfollowed_at` set) so a re-follow restores it. |
+| `followed_posts` | `feed_id`, `paper_id`, `digest_date`, `rank`, `title`, `abstract`, `authors` (JSON), `url`, `published`, `summary` (JSON or NULL), `reasons` (JSON), `provenance` (JSON or NULL), `fetched_at`; primary key (`feed_id`, `paper_id`), index on `digest_date` | The posts fetched from feeds. Fetching the same paper again replaces the row, so it keeps its latest `digest_date`. |
+| `directory_entries` | `feed_id` (primary key), `feed_url`, `handle`, `display_name`, `topics` (JSON), `posts_per_day`, `preview` (JSON), `checked_at` | The last snapshot of the public directory of feeds, replaced as a whole on each refresh. |
+
+Helpers in `db.py` (none commit; the caller owns the transaction): `upsert_follow()` (follow, or re-activate an unfollowed feed), `get_follow()`, `list_follows()` (in follow order; unfollowed ones only with `include_unfollowed=True`), `record_fetch()` (success clears `failures` and `last_error`; a failure adds one), `replace_followed_posts()` (upsert by `feed_id` and `paper_id`, returns how many were new; each post is a dict keyed by the column names above, with the JSON columns given as normal Python values), `mark_unfollowed()` (stamps `unfollowed_at` and deletes the feed's posts except the ids you pass to keep, e.g. ones you saved or voted on), `set_in_mix()` and `replace_directory()`.
+
+**The takeover rule.** A paper that a followed feed mentions may later be collected by your own sources (arXiv, Hugging Face). If the stored `papers` row has `source = 'feed'`, `upsert_paper()` lets the collector take it over: `source` and all metadata come from the incoming paper, the status goes back to `new` (so it is triaged like any other), the old full text and summaries are dropped, and the call returns `updated`. Your votes, saves and skips are untouched because they live in their own tables.
+
 ### Timestamps and schema version
 
 Every `created_at` / `updated_at` is UTC ISO 8601 to the second with an explicit offset, e.g. `2026-11-21T09:30:00+00:00` (made by `_now()` in `db.py`: `datetime.now(UTC).isoformat(timespec="seconds")`). Anything that writes rows directly, such as a Datasette SQL insert into `votes` or `saves`, must use the same format so rows sort correctly; in SQL: `strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now')`.
 
-The database carries a version number in SQLite's built-in `PRAGMA user_version` (a spare integer stored in the file header; new files start at 0). `open_db()` compares it with `SCHEMA_VERSION` (now 4) and, if the file is older, runs `_migrate()` and stamps the new number. Tables are created with `CREATE TABLE IF NOT EXISTS`, so adding a table (as `saves`, `skips`, `shelf_items`, `shelf_chunks` and, in version 4, `requests` were) needs no work beyond bumping the version; changes to existing tables (new column, data fix) get an `if from_version < N:` step in `_migrate()`. An existing vault therefore upgrades itself the next time it is opened.
+The database carries a version number in SQLite's built-in `PRAGMA user_version` (a spare integer stored in the file header; new files start at 0). `open_db()` compares it with `SCHEMA_VERSION` (now 5) and, if the file is older, runs `_migrate()` and stamps the new number. Tables are created with `CREATE TABLE IF NOT EXISTS`, so adding a table (as `saves`, `skips`, `shelf_items`, `shelf_chunks`, in version 4 `requests` and, in version 5, `follows`, `followed_posts` and `directory_entries` were) needs no work beyond bumping the version; changes to existing tables (new column, data fix) get an `if from_version < N:` step in `_migrate()`. An existing vault therefore upgrades itself the next time it is opened.
 
 The reverse case is refused: if the file's `user_version` is *greater* than `SCHEMA_VERSION` (a vault last used by a newer `rpipe`), `open_db()` raises `SchemaTooNewError` and the CLI prints a message telling you to upgrade `rpipe`. The check runs before anything else touches the file (before the WAL setting, table creation or migration), so the file is left byte-for-byte unchanged. Code never downgrades a database.
 
@@ -206,6 +220,8 @@ Worked example (paper `2401.00001`):
 | 5 | v2 arrives | new title/abstract, version 2, status `triaged`; old full text, summaries and failure count cleared | `updated` |
 
 Now a different paper `2401.00002`, scored below the cut: status `skipped`. When v2 arrives its text is replaced and re-indexed, but the status stays `skipped`. Reason: the pipeline already decided you do not want this paper; a new version of it is not a reason to re-open that decision, and it stays searchable.
+
+4. **Stored row came from a followed feed** (`source = 'feed'`): the incoming paper takes it over, as described under "Sharing tables" above.
 
 ### Full-text search (FTS5)
 

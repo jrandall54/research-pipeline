@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import numpy as np
 
-from research_pipeline.db import papers_with_status, set_status
+from research_pipeline.db import get_paper, papers_with_status, set_status
 from research_pipeline.embed import Embedder
 from research_pipeline.library import current_votes, list_saved
 from research_pipeline.models import Profile, Status
@@ -38,10 +38,8 @@ def run_triage(
     ``my_work/`` files is the caller's job (`rpipe run` and `rpipe triage` sync it just before).
     """
     papers = papers_with_status(conn, Status.new)
-    if not papers:
-        with stage(reporter, "triage"):  # nothing to do: start and done only
-            pass
-        return {"triaged": 0, "skipped": 0, "embedded": 0}
+    votes, saves = current_votes(conn), list_saved(conn)
+    wanted = {r["paper_id"] for r in votes} | {r["paper_id"] for r in saves}
 
     model = embedder.model_name
     stored = {
@@ -50,7 +48,19 @@ def run_triage(
             "SELECT item_id, vector FROM embeddings WHERE embedding_model = ?", (model,)
         )
     }
-    todo = [p for p in papers if p["id"] not in stored]
+    # Voted or saved papers with no embedding yet (a copied-in feed paper is never `new`, so
+    # nothing else would embed it) join the same embed call as the new papers.
+    new_ids = {p["id"] for p in papers}
+    extra = [
+        row for pid in sorted(wanted - new_ids - stored.keys())
+        if (row := get_paper(conn, pid)) is not None
+    ]
+    todo = [p for p in papers if p["id"] not in stored] + extra
+    if not papers and not todo:
+        with stage(reporter, "triage"):  # nothing to do: start and done only
+            pass
+        return {"triaged": 0, "skipped": 0, "embedded": 0}
+
     with stage(reporter, "triage", total=None) as handle:
         if todo:
             handle.note(f"embedding {len(todo)} papers")  # one embed call, so no per-paper steps
@@ -62,14 +72,19 @@ def run_triage(
                     " VALUES (?, ?, ?, ?)",
                     (p["id"], model, v.tobytes(), len(v)),
                 )
-        return _rank_and_store(conn, embedder, profile, seed_texts, use_shelf, papers, stored, len(todo))
+        if not papers:  # only feedback papers needed embedding
+            conn.commit()
+            return {"triaged": 0, "skipped": 0, "embedded": len(todo)}
+        return _rank_and_store(
+            conn, embedder, profile, seed_texts, use_shelf, papers, stored, len(todo), votes, saves, wanted
+        )
 
 
-def _rank_and_store(conn, embedder, profile, seed_texts, use_shelf, papers, stored, n_embedded):
+def _rank_and_store(
+    conn, embedder, profile, seed_texts, use_shelf, papers, stored, n_embedded, votes, saves, wanted
+):
     paper_vecs = np.stack([stored[p["id"]] for p in papers])
     pv = build_profile_vectors(embedder, profile, seed_texts)
-    votes, saves = current_votes(conn), list_saved(conn)
-    wanted = {r["paper_id"] for r in votes} | {r["paper_id"] for r in saves}
     feedback = build_feedback_vectors(
         votes, saves, {k: v for k, v in stored.items() if k in wanted},
         profile.feedback_halflife_days, datetime.now(UTC),

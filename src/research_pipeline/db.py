@@ -115,6 +115,52 @@ CREATE TABLE IF NOT EXISTS requests (
     updated_at TEXT NOT NULL
 );
 
+-- Phase 10 sharing: the feeds you follow, their posts, and the public directory.
+CREATE TABLE IF NOT EXISTS follows (
+    feed_id        TEXT PRIMARY KEY,
+    feed_url       TEXT NOT NULL,
+    handle         TEXT NOT NULL,
+    display_name   TEXT NOT NULL,
+    topics         TEXT NOT NULL DEFAULT '[]',
+    in_mix         INTEGER NOT NULL DEFAULT 1,
+    followed_at    TEXT NOT NULL,
+    unfollowed_at  TEXT,
+    last_fetched_at TEXT,
+    last_error     TEXT,
+    failures       INTEGER NOT NULL DEFAULT 0,
+    active         INTEGER NOT NULL DEFAULT 1,
+    archive_hashes TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS followed_posts (
+    feed_id     TEXT NOT NULL,
+    paper_id    TEXT NOT NULL,
+    digest_date TEXT NOT NULL,
+    rank        INTEGER NOT NULL,
+    title       TEXT NOT NULL,
+    abstract    TEXT NOT NULL,
+    authors     TEXT NOT NULL DEFAULT '[]',
+    url         TEXT NOT NULL,
+    published   TEXT,
+    summary     TEXT,
+    reasons     TEXT NOT NULL DEFAULT '[]',
+    provenance  TEXT,
+    fetched_at  TEXT NOT NULL,
+    PRIMARY KEY (feed_id, paper_id)
+);
+CREATE INDEX IF NOT EXISTS idx_followed_posts_date ON followed_posts(digest_date);
+
+CREATE TABLE IF NOT EXISTS directory_entries (
+    feed_id       TEXT PRIMARY KEY,
+    feed_url      TEXT NOT NULL,
+    handle        TEXT NOT NULL,
+    display_name  TEXT NOT NULL,
+    topics        TEXT NOT NULL DEFAULT '[]',
+    posts_per_day REAL NOT NULL DEFAULT 0,
+    preview       TEXT NOT NULL DEFAULT '[]',
+    checked_at    TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts
     USING fts5(title, abstract, tokenize = 'unicode61');
 """
@@ -127,7 +173,7 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class SchemaTooNewError(RuntimeError):
@@ -148,6 +194,8 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         pass  # v2 -> v3: `shelf_items` and `shelf_chunks` are added by CREATE TABLE IF NOT EXISTS
     if from_version < 4:
         pass  # v3 -> v4: the `requests` table is added by CREATE TABLE IF NOT EXISTS
+    if from_version < 5:
+        pass  # v4 -> v5: follows, followed_posts, directory_entries via CREATE TABLE IF NOT EXISTS
 
 
 def open_db(path: Path, *, check_same_thread: bool = True) -> sqlite3.Connection:
@@ -292,6 +340,23 @@ def upsert_paper(
         _index(conn, cur.lastrowid, p.title, p.abstract)
         return "inserted"
 
+    if row["source"] == "feed":
+        # A followed feed's stub: the collector now has the real paper, so it takes the row over.
+        conn.execute("DELETE FROM fulltexts WHERE paper_id = ?", (p.id,))
+        conn.execute("DELETE FROM summaries WHERE paper_id = ?", (p.id,))
+        conn.execute(
+            "UPDATE papers SET source=?, title=?, abstract=?, authors=?, url=?, version=?,"
+            " hf_upvotes=?, repos=?, published=?, status='new', retry_count=0, error=NULL,"
+            " updated_at=? WHERE id=?",
+            (
+                p.source, p.title, p.abstract, json.dumps(p.authors), p.url, p.version,
+                p.hf_upvotes, json.dumps(p.repos),
+                p.published.isoformat() if p.published else None, now, p.id,
+            ),
+        )
+        _index(conn, row["rowid"], p.title, p.abstract)
+        return "updated"
+
     upvotes = max(row["hf_upvotes"], p.hf_upvotes)
     stored_repos = json.loads(row["repos"])
     repos = stored_repos + [r for r in p.repos if r not in stored_repos]
@@ -324,6 +389,153 @@ def upsert_paper(
         (upvotes, json.dumps(repos), now, p.id),
     )
     return "updated"
+
+
+def insert_feed_paper(conn: sqlite3.Connection, post: sqlite3.Row) -> None:
+    """Copy a followed post into `papers` as a `source='feed'`, `skipped` row, indexed for search.
+
+    Used when you vote on or save a post of a feed you follow. No commit. The collector's
+    `upsert_paper` takes such a row over if it later finds the real paper.
+    """
+    now = _now()
+    cur = conn.execute(
+        "INSERT INTO papers (id, title, abstract, authors, source, url, published, status,"
+        " created_at, updated_at) VALUES (?, ?, ?, ?, 'feed', ?, ?, 'skipped', ?, ?)",
+        (post["paper_id"], post["title"], post["abstract"], post["authors"], post["url"],
+         post["published"], now, now),
+    )
+    _index(conn, cur.lastrowid, post["title"], post["abstract"])
+
+
+def upsert_follow(
+    conn: sqlite3.Connection, feed_id: str, feed_url: str, handle: str, display_name: str,
+    topics: list[str],
+) -> None:
+    """Follow a feed, or re-activate one you unfollowed (clears `unfollowed_at` and forgets the downloaded archives, so the whole past is fetched again). No commit."""
+    conn.execute(
+        "INSERT INTO follows (feed_id, feed_url, handle, display_name, topics, followed_at)"
+        " VALUES (?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(feed_id) DO UPDATE SET feed_url=excluded.feed_url, handle=excluded.handle,"
+        " display_name=excluded.display_name, topics=excluded.topics,"
+        # a re-follow starts from scratch: forget which archives were downloaded, so the whole past comes back
+        " archive_hashes=CASE WHEN follows.unfollowed_at IS NULL THEN follows.archive_hashes ELSE '{}' END,"
+        " failures=CASE WHEN follows.unfollowed_at IS NULL THEN follows.failures ELSE 0 END,"
+        " followed_at=CASE WHEN follows.unfollowed_at IS NULL THEN follows.followed_at ELSE excluded.followed_at END,"
+        " unfollowed_at=NULL",
+        (feed_id, feed_url, handle, display_name, json.dumps(topics), _now()),
+    )
+
+
+def get_follow(conn: sqlite3.Connection, feed_id: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM follows WHERE feed_id = ?", (feed_id,)).fetchone()
+
+
+def list_follows(
+    conn: sqlite3.Connection, include_unfollowed: bool = False
+) -> list[sqlite3.Row]:
+    """Follows in follow order; unfollowed ones only when asked for."""
+    where = "" if include_unfollowed else " WHERE unfollowed_at IS NULL"
+    return conn.execute(
+        f"SELECT * FROM follows{where} ORDER BY followed_at, feed_id"
+    ).fetchall()
+
+
+def record_fetch(
+    conn: sqlite3.Connection,
+    feed_id: str,
+    *,
+    ok: bool,
+    error: str | None,
+    display_name: str | None = None,
+    topics: list[str] | None = None,
+    active: bool | None = None,
+    archive_hashes: dict | None = None,
+) -> None:
+    """Note the outcome of fetching a feed. ok resets `failures`; a failure adds one. No commit.
+
+    Optional fields left as None keep their stored value.
+    """
+    conn.execute(
+        "UPDATE follows SET last_fetched_at = ?,"
+        " failures = CASE WHEN ? THEN 0 ELSE failures + 1 END,"
+        " last_error = CASE WHEN ? THEN NULL ELSE ? END,"
+        " display_name = COALESCE(?, display_name), topics = COALESCE(?, topics),"
+        " active = COALESCE(?, active), archive_hashes = COALESCE(?, archive_hashes)"
+        " WHERE feed_id = ?",
+        (
+            _now(), ok, ok, error, display_name,
+            json.dumps(topics) if topics is not None else None,
+            None if active is None else int(active),
+            json.dumps(archive_hashes) if archive_hashes is not None else None,
+            feed_id,
+        ),
+    )
+
+
+def _dumps_or_none(value: object) -> str | None:
+    return None if value is None else json.dumps(value)
+
+
+def replace_followed_posts(conn: sqlite3.Connection, feed_id: str, posts: list[dict]) -> int:
+    """Upsert a feed's posts by (feed_id, paper_id); return how many were new. No commit.
+
+    Each dict has the `followed_posts` column names as keys (`authors`, `reasons`,
+    `summary`, `provenance` as Python values; they are stored as JSON).
+    """
+    now = _now()
+    new = 0
+    for p in posts:
+        exists = conn.execute(
+            "SELECT 1 FROM followed_posts WHERE feed_id = ? AND paper_id = ?",
+            (feed_id, p["paper_id"]),
+        ).fetchone()
+        new += exists is None
+        conn.execute(
+            "INSERT OR REPLACE INTO followed_posts (feed_id, paper_id, digest_date, rank, title,"
+            " abstract, authors, url, published, summary, reasons, provenance, fetched_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                feed_id, p["paper_id"], p["digest_date"], p["rank"], p["title"], p["abstract"],
+                json.dumps(p["authors"]), p["url"], p["published"],
+                _dumps_or_none(p["summary"]), json.dumps(p["reasons"]),
+                _dumps_or_none(p["provenance"]), now,
+            ),
+        )
+    return new
+
+
+def mark_unfollowed(conn: sqlite3.Connection, feed_id: str, keep_paper_ids: set[str]) -> None:
+    """Unfollow a feed: stamp `unfollowed_at` and delete its posts except `keep_paper_ids`."""
+    conn.execute(
+        "UPDATE follows SET unfollowed_at = ?, archive_hashes = '{}', failures = 0 WHERE feed_id = ?",
+        (_now(), feed_id),
+    )
+    for (pid,) in conn.execute(
+        "SELECT paper_id FROM followed_posts WHERE feed_id = ?", (feed_id,)
+    ).fetchall():
+        if pid not in keep_paper_ids:
+            conn.execute(
+                "DELETE FROM followed_posts WHERE feed_id = ? AND paper_id = ?", (feed_id, pid)
+            )
+
+
+def set_in_mix(conn: sqlite3.Connection, feed_id: str, on: bool) -> None:
+    conn.execute("UPDATE follows SET in_mix = ? WHERE feed_id = ?", (int(on), feed_id))
+
+
+def replace_directory(conn: sqlite3.Connection, entries: list[dict]) -> None:
+    """Replace the whole directory snapshot with `entries` (dicts keyed by column name)."""
+    conn.execute("DELETE FROM directory_entries")
+    for e in entries:
+        conn.execute(
+            "INSERT INTO directory_entries (feed_id, feed_url, handle, display_name, topics,"
+            " posts_per_day, preview, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                e["feed_id"], e["feed_url"], e["handle"], e["display_name"],
+                json.dumps(e["topics"]), e["posts_per_day"], json.dumps(e["preview"]),
+                e["checked_at"],
+            ),
+        )
 
 
 def get_paper(conn: sqlite3.Connection, paper_id: str) -> sqlite3.Row | None:

@@ -9,16 +9,18 @@ import re
 import shutil
 import signal
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Literal, cast
 from urllib.parse import urlparse
 
+import httpx
 import typer
 
 from research_pipeline import bench as bench_mod
@@ -35,6 +37,10 @@ from research_pipeline import (
     recommender,
     registry,
     schedule,
+    share_directory,
+    share_fetch,
+    share_github,
+    share_publish,
 )
 from research_pipeline import serve as serve_mod
 from research_pipeline.backends.claude_code import LOGIN_HINT, find_claude, logged_in, resolve_model
@@ -67,6 +73,7 @@ from research_pipeline.evaluate import (
     ungraded,
 )
 from research_pipeline.evaluate import report as eval_report
+from research_pipeline.feed_format import clean_text
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable, fetch_fulltext
 from research_pipeline.gold import (
     GOLD_TARGET,
@@ -93,7 +100,7 @@ from research_pipeline.llm import (
     pull_model,
 )
 from research_pipeline.machine import OLLAMA_INSTALL, _generation_models, detect_machine, recommend
-from research_pipeline.models import Config, PaperMeta, Profile, Section
+from research_pipeline.models import Config, PaperMeta, Profile, Section, check_share_name
 from research_pipeline.parts import SPLIT_BELOW_CTX, resolve_diagrams, resolve_mode
 from research_pipeline.progress import ListReporter, ProgressEvent, Reporter, StageHandle, stage
 from research_pipeline.progress_render import LineRenderer, LiveRenderer, make_reporter
@@ -380,7 +387,7 @@ def health_line(
     previous_unfinished: bool = False,
     unknown_categories: list[str] | None = None,
 ) -> str:
-    detail = "; ".join(" ".join(e.split()) for e in errors) or "none"
+    detail = "; ".join(" ".join(clean_text(e).split()) for e in errors) or "none"
     extras = ""
     if counts.get("abstract_only"):
         extras += f" · abstract-only {counts['abstract_only']}"
@@ -398,6 +405,9 @@ def health_line(
                        ("requests_waiting", "requests waiting")):
         if counts.get(key):
             extras += f" · {label} {counts[key]}"
+    if counts.get("followed_feeds"):
+        feeds, new = counts["followed_feeds"], counts.get("followed_new", 0)
+        extras += f" · followed: {feeds} feed{'' if feeds == 1 else 's'}, {new} new post{'' if new == 1 else 's'}"
     if counts.get("summaries_off"):
         extras += " · summaries off (abstracts-only mode)"
     if unknown_categories:
@@ -692,6 +702,7 @@ def _run_locked(ctx: _Context) -> None:
             except Exception as exc:  # noqa: BLE001 - record it, then still try to write the digest
                 crashed = True
                 errors.append(f"{stage}: {' '.join(str(exc).split()) or type(exc).__name__}")
+            _share_fetch_stage(ctx, counts, errors)  # before the digest, so tonight's health line has its counts
             today = date.today()
             unfinished = previous_run_unfinished(ctx.conn, run_id)
             try:
@@ -707,6 +718,9 @@ def _run_locked(ctx: _Context) -> None:
             except Exception as exc:  # noqa: BLE001
                 crashed = True
                 errors.append(f"digest: {' '.join(str(exc).split()) or type(exc).__name__}")
+            # Publishing needs tonight's digest papers, so it runs after the digest; its error
+            # goes to the run record (finish_run), not tonight's digest.
+            _share_publish_stage(ctx, profile, errors)
         finally:
             in_flight = sys.exc_info()[0] is not None  # an error is already propagating
             try:
@@ -721,6 +735,34 @@ def _run_locked(ctx: _Context) -> None:
     _report(counts, errors)
     if crashed:
         raise typer.Exit(code=1)
+
+
+def _share_publish_stage(ctx: _Context, profile: Profile, errors: list[str]) -> None:
+    """Nightly stage `publish` (only when sharing is on), after the digest; never fatal."""
+    if not ctx.config.share_enabled:
+        return
+    try:
+        with _reporter() as reporter:
+            _publish_feed(ctx, profile, _share_runner(), reporter,
+                          handle=ctx.config.share_handle, name=ctx.config.share_display_name)
+    except Exception as exc:  # noqa: BLE001 - a push problem never touches the digest
+        reason = " ".join(str(exc).split()) or type(exc).__name__
+        errors.append(f"sharing: push failed, will retry tomorrow: {reason}")
+
+
+def _share_fetch_stage(ctx: _Context, counts: dict[str, int], errors: list[str]) -> None:
+    """Nightly stage `fetch` + directory refresh (when sharing or following), before the digest; never fatal."""
+    if not (ctx.config.share_enabled or library_api.follows(ctx.conn)):
+        return
+    try:
+        with _share_http() as http, _reporter() as reporter:
+            fetch_counts, fetch_errors = share_fetch.fetch_all(ctx.conn, http, reporter)
+            counts |= fetch_counts
+            errors += fetch_errors
+            _found, dir_errors = share_directory.refresh(ctx.conn, http, reporter)
+            errors += dir_errors
+    except Exception as exc:  # noqa: BLE001 - a fetch problem never touches the digest
+        errors.append(f"fetch: {' '.join(str(exc).split()) or type(exc).__name__}")
 
 
 @app.command()
@@ -3256,6 +3298,38 @@ def _app_host(host: str | None) -> str:
         raise _fail(str(exc)) from exc
 
 
+def _app_settings(ctx: _Context) -> tuple[list[str], dict | None]:
+    """What the People page needs from the vault: your topic names and your sharing state.
+
+    A missing or broken profile only means no topics; it never stops the app from starting.
+    """
+    try:
+        topics = list(load_profile(ctx.vault / "profile.yaml").topics)
+    except Exception:  # noqa: BLE001 - the app needs topic names only; any profile problem means none
+        topics = []
+    share = None
+    if ctx.config.share_enabled and ctx.config.share_handle:
+        handle = ctx.config.share_handle
+        share = {"handle": handle, "display_name": ctx.config.share_display_name or handle,
+                 "address": share_publish.feed_url(handle)}
+    return topics, share
+
+
+def _restart_app_if_installed() -> None:
+    """After a sharing change, restart the background app (if installed and running) so People shows it."""
+    from research_pipeline.webapp import service as app_service
+
+    if _platform() != "Linux" or shutil.which("systemctl") is None:
+        return
+    if app_service.address(schedule.default_unit_dir()) is None:
+        return
+    try:
+        if app_service.is_active(schedule.system_runner) and app_service.restart(schedule.system_runner):
+            typer.echo("Restarted the app so it shows the change.")
+    except Exception:  # noqa: BLE001 - a restart problem must never fail a sharing command that worked
+        return
+
+
 @app_app.command("run")
 def app_run(
     host: Annotated[str | None, typer.Option(help="Address to listen on (default: this machine's Tailscale IPv4).")] = None,
@@ -3274,9 +3348,11 @@ def app_run(
     from research_pipeline.webapp.server import create_app
 
     shown = f"[{bind}]" if ":" in bind else bind
+    my_topics, share = _app_settings(ctx)
     typer.echo(f"Your feed is at http://{shown}:{port}/ (only your own devices can reach it)")
     typer.echo("Open exactly this address: a machine name such as name.tailnet.ts.net will not work.")
-    uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind), f"http://{shown}:{port}/"),
+    uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind), f"http://{shown}:{port}/",
+                                my_topics=my_topics, share=share),
                 host=bind, port=port, log_level="warning")
 
 
@@ -3406,3 +3482,400 @@ def sources_disable(
     with _clean_errors():
         changed = profile_edit.disable_source(ctx.vault, name)
     typer.echo(f"source {name.strip()} is now off." if changed else f"source {name.strip()} was already off.")
+
+
+# ---------------------------------------------------------------- share commands
+
+share_app = typer.Typer(help="Publish your feed, follow other people's, and browse the public directory.", no_args_is_help=True)
+app.add_typer(share_app, name="share")
+mix_app = typer.Typer(help="Include or leave out a followed feed in Mix.", no_args_is_help=True)
+share_app.add_typer(mix_app, name="mix")
+
+PUBLIC_WARNING = (
+    "This makes your feed public. Anyone can read it. "
+    "Copies people have already downloaded can't be pulled back if you stop."
+)
+
+
+def _share_runner() -> share_github.Runner:
+    """Runs `git` and `gh`. Tests replace this with a fake."""
+    return share_github.SubprocessRunner()
+
+
+def _share_http() -> httpx.Client:
+    """The client for feeds and the directory. GitHub's API rejects requests without a User-Agent.
+
+    Redirects are off here because `share_fetch.get_limited` follows them itself (https only).
+    """
+    return httpx.Client(headers={"User-Agent": "research-pipeline/0.1"}, timeout=20, follow_redirects=False)
+
+
+def _gh_login_interactive() -> int:
+    """Run `gh auth login` on the terminal (it asks its own questions). Tests replace this."""
+    return subprocess.run(["gh", "auth", "login"], check=False).returncode
+
+
+def _gh_refresh_interactive() -> int:
+    """Run `gh auth refresh` to add the delete permission, on the terminal (it prints a code and opens a browser)."""
+    return subprocess.run(["gh", "auth", "refresh", "-h", "github.com", "-s", "delete_repo"],
+                          check=False).returncode
+
+
+def _clone_dir(vault: Path) -> Path:
+    return vault / "share" / "rpipe-feed"
+
+
+def _now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _ensure_clone(runner: share_github.Runner, handle: str, clone: Path) -> None:
+    """Clone the feed repository if this machine has no copy yet (a re-run, or a new computer)."""
+    if (clone / ".git").exists():
+        return
+    clone.parent.mkdir(parents=True, exist_ok=True)
+    r = runner.run(["git", "clone", f"https://github.com/{handle}/rpipe-feed.git", str(clone)])
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout or "").strip()
+        raise share_github.GithubError(f"Cloning your rpipe-feed repository failed: {detail}")
+
+
+def _publish_feed(
+    ctx: _Context, profile: Profile, runner: share_github.Runner, reporter, *,
+    handle: str | None, name: str | None, active: bool = True,
+) -> str:
+    """Build and push the feed ("pushed" or "unchanged"). GithubError if sharing isn't set up."""
+    if not handle or not name:
+        raise share_github.GithubError("Sharing isn't set up yet. Run `rpipe share setup`.")
+    clone = _clone_dir(ctx.vault)
+    _ensure_clone(runner, handle, clone)
+    # commits carry GitHub's private noreply address, never the person's own email (also set for old clones)
+    share_github.set_identity(runner, clone, handle, name)
+    return share_publish.publish(
+        ctx.conn, clone, runner, display_name=name, topics=profile.topics, active=active,
+        now=_now(), handle=handle, reporter=reporter,
+    )
+
+
+def _name_for_prompt(text: str) -> str:
+    try:
+        return check_share_name(text)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _require_sharing(ctx: _Context) -> None:
+    if not (ctx.config.share_enabled and ctx.config.share_handle):
+        raise _fail("Publishing is off. Run `rpipe share setup` first.")
+
+
+def _follow_by_handle(ctx: _Context, handle: str) -> library_api.FollowView:
+    wanted = handle.strip().removeprefix("@").lower()
+    for f in library_api.follows(ctx.conn):
+        if f.handle.lower() == wanted:
+            return f
+    raise _fail(f"You don't follow '{handle}'. See who you follow with `rpipe share following`.")
+
+
+@share_app.command("setup")
+def share_setup(vault: VaultOption = None) -> None:
+    """Guided first-time publishing (run it again to repair things)."""
+    ctx = _open(vault)
+    profile = _load_profile(ctx)
+    with _pipeline_lock(ctx, "rpipe share setup"):
+        runner = _share_runner()
+        try:
+            share_github.check_tools(runner)
+            try:
+                handle = share_github.login(runner)
+            except share_github.GithubError:
+                typer.echo("You need to sign in to GitHub first. Follow the steps below.")
+                with _waiting_for_you():
+                    code = _gh_login_interactive()
+                if code != 0:
+                    raise _fail("GitHub sign-in didn't finish. Run `rpipe share setup` again.") from None
+                handle = share_github.login(runner)
+            status = share_github.repo_status(runner, handle)
+            if status == "other":
+                raise _fail(
+                    f"github.com/{handle}/rpipe-feed already exists and isn't an rpipe feed. "
+                    "Rename or delete it on GitHub, then run `rpipe share setup` again."
+                )
+            default = ctx.config.share_display_name
+            if not default:
+                r = runner.run(["gh", "api", "user", "--jq", ".name"])
+                default = r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else handle
+            name = _prompt("Display name shown to people who follow you", default=default[:60],
+                           value_proc=_name_for_prompt)
+            typer.echo(PUBLIC_WARNING)
+            if not _confirm("Publish your feed?"):
+                typer.echo("Nothing was created or changed.")
+                return
+            clone = _clone_dir(ctx.vault)
+            if status == "missing":
+                shutil.rmtree(clone, ignore_errors=True)  # a leftover from an aborted setup
+                clone.parent.mkdir(parents=True, exist_ok=True)
+                share_github.create_repo(runner, handle, clone)
+            else:
+                _ensure_clone(runner, handle, clone)
+            share_github.setup_git_credentials(runner)
+            with _reporter() as reporter:
+                _publish_feed(ctx, profile, runner, reporter, handle=handle, name=name)
+                share_github.set_topic(runner, handle, True)
+                share_github.enable_pages(runner, handle)
+                address = share_publish.feed_url(handle)
+                with _share_http() as http:
+                    live = share_publish.wait_live(http, address, reporter)
+            if not live:
+                raise _fail(
+                    "GitHub Pages isn't serving your feed yet (it can take a few minutes). "
+                    "Run `rpipe share setup` again in a little while; nothing is lost."
+                )
+            test = runner.run(["git", "push", "--dry-run"], cwd=clone)
+            if test.returncode != 0:
+                detail = (test.stderr or test.stdout or "").strip()
+                raise _fail(
+                    f"A test push failed, so tonight's automatic push would fail too: {detail}\n"
+                    "Fix the sign-in with `gh auth login`, then run `rpipe share setup` again."
+                )
+            profile_edit.set_share(ctx.vault, enabled=True, display_name=name, handle=handle)
+        except share_github.GithubError as exc:
+            raise _fail(str(exc)) from exc
+        _restart_app_if_installed()
+        typer.echo(f"Your feed is live: {address}")
+        typer.echo("It updates every night. Others can follow it with `rpipe share follow " + handle + "`.")
+
+
+@share_app.command("status")
+def share_status(vault: VaultOption = None) -> None:
+    """Whether you are publishing, your address, the last push, and each feed you follow."""
+    ctx = _open(vault)
+    cfg = ctx.config
+    if cfg.share_enabled and cfg.share_handle:
+        typer.echo(f"Publishing: on as '{cfg.share_display_name}'")
+        typer.echo(f"  Address: {share_publish.feed_url(cfg.share_handle)}")
+        clone = _clone_dir(ctx.vault)
+        if (clone / ".git").exists():
+            r = _share_runner().run(["git", "log", "-1", "--format=%cI"], cwd=clone)
+            if r.returncode == 0 and r.stdout.strip():
+                typer.echo(f"  Last local commit: {r.stdout.strip()[:19].replace('T', ' ')}")
+        last = list_runs(ctx.conn, 1)
+        if last and last[0]["finished_at"]:
+            bad = [e for e in json.loads(last[0]["errors"] or "[]") if e.startswith("sharing:")]
+            typer.echo(f"  Last night's push: {bad[0] if bad else 'ok'}")
+    else:
+        typer.echo("Publishing: off (start with `rpipe share setup`)")
+    feeds = library_api.follows(ctx.conn)
+    if not feeds:
+        typer.echo("Following: nobody yet (find feeds with `rpipe share browse`)")
+        return
+    typer.echo(f"Following {len(feeds)}:")
+    for f in feeds:
+        typer.echo("  " + _follow_line(f))
+
+
+def _follow_line(f: library_api.FollowView) -> str:
+    bits = [f"{clean_text(f.display_name)} (@{clean_text(f.handle)})"]
+    if f.waiting:
+        bits.append("waiting for the first fetch")
+    else:
+        bits.append(f"{f.posts} posts, fetched {(f.last_fetched_at or '')[:10]}")
+    bits.append("in Mix" if f.in_mix else "not in Mix")
+    if f.stopped:
+        bits.append("stopped publishing")
+    if f.last_error:
+        bits.append(f"last error: {clean_text(f.last_error)}")
+    return " · ".join(bits)
+
+
+@share_app.command("publish")
+def share_publish_now(vault: VaultOption = None) -> None:
+    """Rebuild and push your feed now (the nightly run does this on its own)."""
+    ctx = _open(vault)
+    profile = _load_profile(ctx)
+    with _pipeline_lock(ctx, "rpipe share publish"):
+        _require_sharing(ctx)
+        try:
+            with _reporter() as reporter:
+                result = _publish_feed(ctx, profile, _share_runner(), reporter,
+                                       handle=ctx.config.share_handle, name=ctx.config.share_display_name)
+        except share_github.GithubError as exc:
+            raise _fail(str(exc)) from exc
+        typer.echo("Pushed your feed." if result == "pushed" else "Nothing changed since the last push.")
+
+
+@share_app.command("set-name")
+def share_set_name(
+    name: Annotated[str, typer.Argument(help="The name people see (1 to 60 characters).")],
+    vault: VaultOption = None,
+) -> None:
+    """Change your display name (republishes if you are publishing)."""
+    ctx = _open(vault)
+    with _clean_errors():
+        profile_edit.set_share(ctx.vault, display_name=name)
+    name = check_share_name(name)
+    if not (ctx.config.share_enabled and ctx.config.share_handle):
+        typer.echo(f"Display name set to '{name}'. It is used when you run `rpipe share setup`.")
+        return
+    profile = _load_profile(ctx)
+    with _pipeline_lock(ctx, "rpipe share set-name"):
+        try:
+            with _reporter() as reporter:
+                _publish_feed(ctx, profile, _share_runner(), reporter,
+                              handle=ctx.config.share_handle, name=name)
+        except share_github.GithubError as exc:
+            raise _fail(f"Name saved, but publishing failed (tonight's run will retry): {exc}") from exc
+    typer.echo(f"Display name changed to '{name}' and published.")
+    _restart_app_if_installed()
+
+
+@share_app.command("stop")
+def share_stop(
+    delete: Annotated[bool, typer.Option("--delete", help="Also delete the rpipe-feed repository on GitHub.")] = False,
+    vault: VaultOption = None,
+) -> None:
+    """Stop publishing and leave the directory (optionally delete the repository)."""
+    ctx = _open(vault)
+    profile = _load_profile(ctx)
+    with _pipeline_lock(ctx, "rpipe share stop"):
+        handle = ctx.config.share_handle
+        if not handle:
+            raise _fail("You are not publishing. Nothing to stop.")
+        runner = _share_runner()
+        try:
+            if delete:
+                if not _confirm(f"Delete github.com/{handle}/rpipe-feed? Followers stop getting updates. "
+                                "Copies already downloaded stay with them."):
+                    typer.echo("Nothing was deleted or changed.")
+                    return
+                if not share_github.has_delete_scope(runner):
+                    # Interactive (a one-time code, a browser sign-in): run on the terminal, not
+                    # captured, with the vault lock let go of while it waits for you.
+                    typer.echo("GitHub needs your OK to delete repositories. A code is shown below and a "
+                               "browser sign-in may open; follow the steps there.")
+                    with _waiting_for_you():
+                        code = _gh_refresh_interactive()
+                    if code != 0:
+                        raise _fail("Getting permission to delete the repository didn't finish. "
+                                    "Run `rpipe share stop --delete` again.")
+                share_github.delete_repo(runner, handle)
+                shutil.rmtree(_clone_dir(ctx.vault), ignore_errors=True)
+            else:
+                with _reporter() as reporter:
+                    _publish_feed(ctx, profile, runner, reporter, handle=handle,
+                                  name=ctx.config.share_display_name, active=False)
+                share_github.set_topic(runner, handle, False)
+        except share_github.GithubError as exc:
+            raise _fail(str(exc)) from exc
+        profile_edit.set_share(ctx.vault, enabled=False)
+    _restart_app_if_installed()
+    if delete:
+        typer.echo("Deleted your rpipe-feed repository and stopped publishing.")
+    else:
+        typer.echo("Stopped publishing and left the directory. Your repository is kept; "
+                   "the old address still works and says you stopped. Run `rpipe share setup` to start again.")
+
+
+@share_app.command("browse")
+def share_browse(
+    search: Annotated[str | None, typer.Argument(help="Only feeds whose name, handle or topics contain this.")] = None,
+    vault: VaultOption = None,
+) -> None:
+    """Refresh the directory of published feeds and list it."""
+    ctx = _open(vault)
+    profile = _load_profile(ctx)
+    with _pipeline_lock(ctx, "rpipe share browse"):
+        with _share_http() as http, _reporter() as reporter:
+            _count, errors = share_directory.refresh(ctx.conn, http, reporter)
+    for e in errors:
+        typer.echo(f"  warning: {e}", err=True)
+    entries = library_api.directory(ctx.conn, profile.topics, ctx.config.share_handle)
+    if search:
+        q = search.strip().lower()
+        entries = [e for e in entries if q in e.display_name.lower() or q in e.handle.lower()
+                   or any(q in t.lower() for t in e.topics)]
+    if not entries:
+        typer.echo("No feeds found." if search else "No published feeds found yet.")
+        return
+    for e in entries:
+        topics = ", ".join(clean_text(t) for t in e.topics) or "no topics"
+        line = (f"{clean_text(e.display_name)} · @{clean_text(e.handle)} · {topics} · "
+                f"about {e.posts_per_day:g} papers a day · shares {e.shared_topics} of your topics")
+        typer.echo(line + (" · this is you" if e.is_you else " · you follow them" if e.following else ""))
+    typer.echo("Follow one with `rpipe share follow HANDLE`.")
+
+
+@share_app.command("follow")
+def share_follow(
+    target: Annotated[str, typer.Argument(help="A GitHub handle, or the https:// address of a feed.")],
+    vault: VaultOption = None,
+) -> None:
+    """Follow a feed and fetch everything it has published."""
+    ctx = _open(vault)
+    with _pipeline_lock(ctx, "rpipe share follow"):
+        try:
+            with _share_http() as http, _reporter() as reporter:
+                result = share_fetch.follow(ctx.conn, target, http, own_handle=ctx.config.share_handle,
+                                            reporter=reporter)
+        except ValueError as exc:
+            raise _fail(str(exc)) from exc
+    if result.error:
+        typer.echo(f"Following {target.strip()}, but the first fetch failed: {result.error}. "
+                   "`rpipe share fetch` tries again.", err=True)
+        return
+    typer.echo(f"Following {target.strip()}: {result.new_posts} posts downloaded.")
+
+
+@share_app.command("unfollow")
+def share_unfollow(handle: Annotated[str, typer.Argument(help="Their handle, as in `rpipe share following`.")],
+                   vault: VaultOption = None) -> None:
+    """Stop following a feed (posts you saved or voted on are kept)."""
+    ctx = _open(vault)
+    feed = _follow_by_handle(ctx, handle)
+    library_api.unfollow(ctx.conn, feed.feed_id)
+    typer.echo(f"Stopped following {clean_text(feed.display_name)} (@{clean_text(feed.handle)}).")
+
+
+@share_app.command("following")
+def share_following(vault: VaultOption = None) -> None:
+    """List the feeds you follow."""
+    ctx = _open(vault)
+    feeds = library_api.follows(ctx.conn)
+    if not feeds:
+        typer.echo("You follow nobody yet. Find feeds with `rpipe share browse`.")
+        return
+    for f in feeds:
+        typer.echo(_follow_line(f))
+
+
+@share_app.command("fetch")
+def share_fetch_now(vault: VaultOption = None) -> None:
+    """Fetch every feed you follow now (the nightly run does this on its own)."""
+    ctx = _open(vault)
+    with _pipeline_lock(ctx, "rpipe share fetch"):
+        if not library_api.follows(ctx.conn):
+            typer.echo("You follow nobody yet. Find feeds with `rpipe share browse`.")
+            return
+        with _share_http() as http, _reporter() as reporter:
+            counts, errors = share_fetch.fetch_all(ctx.conn, http, reporter)
+    typer.echo(f"Fetched {counts['followed_feeds']} feeds, {counts['followed_new']} new posts.")
+    for e in errors:
+        typer.echo(f"  error: {e}", err=True)
+
+
+@mix_app.command("add")
+def share_mix_add(handle: Annotated[str, typer.Argument(help="Their handle.")], vault: VaultOption = None) -> None:
+    """Include a followed feed in Mix."""
+    ctx = _open(vault)
+    feed = _follow_by_handle(ctx, handle)
+    library_api.set_in_mix(ctx.conn, feed.feed_id, True)
+    typer.echo(f"{clean_text(feed.display_name)} is now in Mix.")
+
+
+@mix_app.command("remove")
+def share_mix_remove(handle: Annotated[str, typer.Argument(help="Their handle.")], vault: VaultOption = None) -> None:
+    """Leave a followed feed out of Mix (you still follow it)."""
+    ctx = _open(vault)
+    feed = _follow_by_handle(ctx, handle)
+    library_api.set_in_mix(ctx.conn, feed.feed_id, False)
+    typer.echo(f"{clean_text(feed.display_name)} is no longer in Mix.")

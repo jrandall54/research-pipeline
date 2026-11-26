@@ -378,6 +378,8 @@ Which commands take the lock:
 | `gold add`, `gold suggest`, `gold auto`, `gold draft` | yes | fetch from arXiv or call the judge; grouped with the other gold-set builders so one job builds the set at a time |
 | `requests run` | yes | uses the model (GPU memory) and fetches full text |
 | `shelf add`, `shelf sync` | yes | load the embedder and rewrite shelf rows; `rpipe run` also syncs the shelf, so two syncs could collide |
+| `share setup`, `share publish`, `share fetch`, `share follow`, `share browse`, `share stop` | yes | write the share clone or fetched rows in bulk, and push or download over the network; `rpipe run` does the same work |
+| `share status`, `share following`, `share unfollow`, `share mix add/remove`, `share set-name` | no | quick reads and single-row or config writes (`set-name` takes the lock only for the republish that follows) |
 | `vote`, `save`, `unsave`, `feedback`, `review`, `show`, `runs`, `serve`, `shelf list`, `shelf remove`, `requests add`, `requests list` | no | app commands: quick reads and single-row writes that are safe beside a running job |
 | `profile show`, `profile add-seed`, `profile set-*`, `model show`, `model set*`, `model scan`, `model catalog show`, `model catalog update`, `gold list`, `gold remove`, `gold add-fact`, `gold edit-fact`, `gold remove-fact`, `eval grade`, `eval report`, `schedule *`, `sources *`, `init`, `plugins` | no | settings and read-only commands. `profile add-seed` does look the paper up on arXiv, but it writes only `profile.yaml`, never the database, so it cannot collide with a run |
 
@@ -394,6 +396,17 @@ Unlocked commands can still write to `vault.sqlite` while a job runs. SQLite all
 **`rpipe runs [--limit 10]`** prints one line per run, newest first: start time (UTC), how long it took (or `did not finish`), a counts summary (`new`, `kept`, `summarized`) and the number of errors, for example `2026-11-21T19:11:05+00:00  11s  new 339, kept 15, summarized 15  errors 0`.
 
 **A run that never finished.** If the process was killed outright (power cut, `kill -9`) nothing can record anything, so `finished_at` stays empty. The next `run` notices that the run immediately before it has no `finished_at` and adds `previous run did not finish` to the end of the digest's health line. Only the immediately preceding run is checked (the current run is itself unfinished while it writes the digest, so it is excluded), so the warning appears once and clears after the next healthy run.
+
+### The sharing stages
+
+Two stages are added to `rpipe run`, inside the same lock. Each is in its own `try`, so a network problem can never stop the digest. Details of what they do are in [sharing.md](sharing.md).
+
+1. **fetch and directory refresh**, when you follow someone or share yourself. It runs *before* the digest is written (it does not depend on tonight's papers): it downloads every followed feed, then refreshes the public directory. The counts `followed_feeds` and `followed_new` go on tonight's health line as ` · followed: 3 feeds, 24 new posts` and into the run record. A failure adds `fetch: ...` to the errors and the digest is still written.
+2. **publish**, only when sharing is on (`rpipe share setup` done). It runs *after* the digest, because the feed holds tonight's digest papers. It rebuilds your feed files and pushes them. A failed push (offline, signed out of GitHub) adds `sharing: push failed, will retry tomorrow: <reason>` to the run's errors; the commit stays local and the next night's push carries everything. Because the digest is already written, this error shows in `rpipe runs`, not in tonight's digest health line.
+
+Both stages report progress (`publish`, `fetch`, `directory`).
+
+Wiring: `_share_fetch_stage` and `_share_publish_stage` in `cli.py`. Tests: `test_run_publishes_after_digest`, `test_run_push_failure_is_reported_not_fatal`, `test_run_fetch_counts_in_health_line` in `tests/test_runs.py`.
 
 ### Running it nightly
 
@@ -448,6 +461,8 @@ Lint is `ruff` (a fast Python linter, installed with the dev group by `uv sync`)
 | `No vault found at ... (no config.yaml). Run rpipe init first.` (exit 1) | The vault does not exist yet, or you pointed `--vault` / `RESEARCH_VAULT` at the wrong folder. Run `init`, or fix the path. |
 | `invalid settings` / `invalid YAML` naming a file (exit 1) | One of the two settings files holds an invalid value (this should not happen if you only use `rpipe profile ...`, which refuses bad input). The message starts with the file path and says which field. Every `rpipe profile` command refuses to change a file that is already broken (and tells you which file), so this is the one case where you correct the named field in the file itself; the file reference in `vault-and-config.md` lists every field and its allowed values. After that the commands work again. |
 | `sentence-transformers is not installed; reinstall with the extra: ...` (exit 1; for `rpipe run` it is also recorded as `embed: ...` in `runs.errors`, so `rpipe runs` and the digest health line show it) | The `rpipe` that ran has no embed extra. Reinstall: `uv tool install --editable '.[embed]' --force` (plain `rpipe`, and the nightly timer), or `uv sync --extra embed` (repo use). `rpipe schedule install` refuses to run from an environment without it. |
+| `sharing: push failed, will retry tomorrow: ...` in `rpipe runs` | The nightly push failed (offline, signed out, or `gh`'s keyring was still locked because nobody had logged in yet when the timer fired; a push that hangs is stopped after 120 seconds). Nothing is lost: the commit stays local and the next night pushes it. Run `rpipe share publish` to push now. |
+| `fetch X: skipped, out of time` on the health line | The night's followed-feed downloads used their 10 minute budget (a slow host); that feed is fetched the next time. |
 | Health line says `errors: arxiv: arXiv API returned HTTP 5xx` (or a timeout) | arXiv (or Hugging Face) was down. The digest was built from the other source. Re-run later: `run` is safe to repeat. |
 | Health line says `seeds: no paper found for 0000.00001, ...` | Those seed ids are not real arXiv papers, for example a mistyped id. Remove it with `rpipe profile remove-seed` and add the right one with `rpipe profile add-seed` (`rpipe profile show` numbers the seeds). Ranking continues using your topics and any seeds that did resolve. |
 | Health line says `seeds: could not fetch ...: <reason>` | The seed lookup failed (network). Ranking used the seeds it already had; it retries next run. |

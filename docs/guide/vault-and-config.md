@@ -44,6 +44,11 @@ The pipeline currently writes `vault.sqlite` (which also holds full texts and su
 | `llm_cli_path` | empty | Full path of the subscription CLI (such as `claude`), so the nightly timer finds it. Recorded by `rpipe model setup`. |
 | `sources` | `arxiv, hf_daily` | Paper sources collected from, in order; at least one, no repeats. Change with `rpipe sources list`, `enable NAME`, `disable NAME`. See `sources.md`, `plugins.md`. |
 | `night_deadline` | `"07:00"` | Morning time (24-hour, local) by which reruns of cut papers must finish, or `off` for no reruns. After it the nightly run also starts no new request from the request list. Normal papers always run. Change with `rpipe schedule set-deadline HH:MM` or `off`. The command writes it quoted; a hand-written unquoted `23:00` or `7:00` also works. A missing key means `07:00`. See "The morning deadline" in `scheduling.md`. |
+| `share_enabled` | `false` | Whether this vault publishes its shared feed so other people can follow it. Off until you turn it on. Set by `rpipe share setup` (turns it on) and `rpipe share stop` (turns it off); the feed itself is described in the sharing guide once it exists. |
+| `share_display_name` | empty | The name readers see for your feed: 1 to 60 characters on one line. Set by `rpipe share setup` and `rpipe share set-name`. |
+| `share_handle` | empty | Your GitHub login (letters, digits and hyphens, up to 39 characters), the handle others use to follow you. Set by `rpipe share setup`. |
+
+The three `share_*` keys are sharing settings (Phase 10). Nothing is shared until `share_enabled` is `true`, and you normally set them with commands rather than by hand: `rpipe share setup` asks for the display name and handle, `rpipe share set-name` changes the name, and `rpipe share stop` turns sharing off and keeps the name and handle. Each value is checked before the file is written, so a bad name or handle leaves the file unchanged.
 
 When either is `auto`, the choice is remembered in `cache/llm_fit.json` (the chosen model and context, keyed by the Ollama address and every installed model's name and digest, the Ollama version, the memory-related server settings and the GPUs). It is safe to delete; the next run probes again. `rpipe model fit` rewrites it.
 
@@ -154,4 +159,4 @@ uv run pytest tests/test_vault.py tests/test_init_wizard.py -q
 
 ## Where the code is
 
-`src/research_pipeline/vault.py` (layout, `resolve_vault`, loaders, `ConfigError`), `src/research_pipeline/gold.py` (the `gold/gold.json` file), `src/research_pipeline/cli.py` (`init`, `_wizard*`, and `_add_seed` shared with `rpipe profile add-seed`), `src/research_pipeline/defaults/` (templates), `tests/test_vault.py`, `tests/test_init_wizard.py`.
+`src/research_pipeline/vault.py` (layout, `resolve_vault`, loaders, `ConfigError`), `src/research_pipeline/models.py` (the `Config` fields and the share name and handle checks), `src/research_pipeline/profile_edit.py` (`set_share`), `src/research_pipeline/gold.py` (the `gold/gold.json` file), `src/research_pipeline/cli.py` (`init`, `_wizard*`, and `_add_seed` shared with `rpipe profile add-seed`), `src/research_pipeline/defaults/` (templates), `tests/test_vault.py`, `tests/test_init_wizard.py`.

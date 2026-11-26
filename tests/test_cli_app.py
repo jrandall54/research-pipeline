@@ -77,6 +77,7 @@ def test_app_install_writes_unit_and_prints_address(fake):
     assert "http://100.64.0.5:8002/" in res.output
     assert "Add to Home Screen" in res.output
     assert ["systemctl", "--user", "enable", "--now", service.SERVICE_NAME] in calls
+    assert calls[-1] == ["systemctl", "--user", "restart", service.SERVICE_NAME]
 
 
 def test_app_install_tailscale_down_refuses(fake, monkeypatch):

@@ -35,7 +35,14 @@ def test_install_probes_before_writing_then_enables(tmp_path):
     assert path == tmp_path / "u" / service.SERVICE_NAME and path.exists()
     assert calls == [["systemctl", "--user", "show-environment"],
                      ["systemctl", "--user", "daemon-reload"],
-                     ["systemctl", "--user", "enable", "--now", service.SERVICE_NAME]]
+                     ["systemctl", "--user", "enable", "--now", service.SERVICE_NAME],
+                     ["systemctl", "--user", "restart", service.SERVICE_NAME]]
+
+
+def test_install_restart_failure_says_files_left(tmp_path):
+    with pytest.raises(schedule.ScheduleError, match="left in place"):
+        service.install(tmp_path / "v", "/bin/rpipe", "127.0.0.1", 8002, tmp_path / "u",
+                        lambda c: 1 if "restart" in c else 0)
 
 
 def test_install_failed_probe_writes_nothing(tmp_path):

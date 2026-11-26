@@ -56,7 +56,10 @@ def install(vault: Path, rpipe_cmd: str, host: str, port: int, unit_dir: Path, r
     path = unit_dir / SERVICE_NAME
     path.write_text(text)
     for cmd in (["systemctl", "--user", "daemon-reload"],
-                ["systemctl", "--user", "enable", "--now", SERVICE_NAME]):
+                ["systemctl", "--user", "enable", "--now", SERVICE_NAME],
+                # `enable --now` leaves a running unit alone; restart so a reinstall with a new
+                # host or port takes effect.
+                ["systemctl", "--user", "restart", SERVICE_NAME]):
         code = runner(cmd)
         if code != 0:
             raise ScheduleError(

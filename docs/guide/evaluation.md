@@ -25,15 +25,16 @@ Add this paper? [Y/n]: y
 Fact 1: Finds adversarial suffixes automatically by greedy and gradient-based search
 Fact 2: The suffixes found on open models transfer to closed models such as ChatGPT
 Fact 3 (blank line to finish):
-Saved with 2 fact(s); 3 or more make a better test (rpipe gold add-fact).
-Added 2307.15043: Universal and Transferable Adversarial Attacks ...
+! Saved with 2 fact(s); 3 or more make a better test (rpipe gold add-fact).
+✓ Added 2307.15043: Universal and Transferable Adversarial Attacks ...
 ```
 
 Afterwards `rpipe gold list` shows the numbers that `edit-fact` and `remove-fact` use (illustrative output):
 
 ```
 $ rpipe gold list
-Gold set: 1/10 papers
+
+── Gold set: 1/10 papers ───────────────────────────────────────────────────────
 
 2307.15043  Universal and Transferable Adversarial Attacks on Aligned Language Models
   1. Finds adversarial suffixes automatically by greedy and gradient-based search
@@ -109,7 +110,7 @@ Keep, edit or drop? [k/e/d]: e
 New text (empty keeps the draft): Suffixes transfer to ChatGPT, Bard and Claude.
 Key facts a correct summary must get right (specific and checkable).
 Fact 1:
-Added 2307.15043 with 2 fact(s).
+✓ Added 2307.15043 with 2 fact(s).
 ```
 
 **Why it's built this way.** Writing good facts from scratch is the part people skip; reviewing drafts is quicker and still puts your judgement in the key. Facts are saved only after the whole review of that paper, so an interrupt never leaves half a paper. The paper text goes to Anthropic (see "The judge"), which is why the command says so each time. Rejected for this command: saving drafts unreviewed (the key would then be graded by the same kind of model that writes the summaries). The next section, `gold auto`, makes that trade deliberately and labels the result.

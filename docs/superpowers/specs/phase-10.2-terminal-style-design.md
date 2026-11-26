@@ -1,6 +1,6 @@
 # Phase 10.2 — A cleaner terminal look (design)
 
-> **Phase 10.2** · Status: in progress · Plan: [phase-10.2-terminal-style.md](../plans/phase-10.2-terminal-style.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+> **Phase 10.2** · Status: merged · Plan: [phase-10.2-terminal-style.md](../plans/phase-10.2-terminal-style.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 Date: 2026-11-26. Owner request after Phase 10.1: "Can you clean up the formatting in the terminal to make it more pretty? It's kind of clunky looking at the moment."
 

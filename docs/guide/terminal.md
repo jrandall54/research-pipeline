@@ -58,6 +58,18 @@ Worked example: `rpipe profile show | cat` is not a terminal, so it prints `â”€â
 
 **Warnings on stderr.** `warn(text, err=True)` sends the line to stderr. The run uses it for "unknown categories" and for the "another run holds the lock" message, so a script reading stdout never sees them.
 
+## What stays plain
+
+Some output is deliberately not styled, because it is data that people copy, pipe or read line by line, or because it is a one-line answer where a mark adds nothing:
+
+- **Data listings:** `rpipe runs` rows, `rpipe feedback` rows (the votes, saved papers and counts under their headers), `rpipe show` and the review screen's paper text (title, id, summary, link), `rpipe gold list` / `suggest` / `edit-fact` fact lists, the `rpipe eval grade` paper and summary text, `rpipe eval report`, `rpipe model catalog show` rows and the catalog diff lines, `rpipe shelf list` rows, `rpipe sources` rows, `rpipe profile show` numbered lists, the numbered pick lists (`_pick_index`, the model pick menus), `rpipe share following` lines.
+- **Text meant to be copied:** `$ command` lines and the indented command lines of `rpipe model tune`, the manual instructions and drop-in contents, `rpipe schedule show` unit text (`# name` plus the systemd file), the `Serving ... at http://...` line of `rpipe app`.
+- **Short answers and cancellations:** `Cancelled. Nothing was changed.`, `Not saved.`, `Nothing was created or changed.`, `Nothing was deleted or changed.`, `Nothing to review.`, `Nothing left to grade.`, `The catalog is already up to date`, `... is already in your profile`, `No feeds found.`, `You follow nobody yet.`, `Following: nobody yet`, and the lines of the form `Summarizing N paper(s); ...`, `Found N of M proposed papers`, `Saved what you entered so far`. They are answers, not events.
+- **Stderr progress lines** (`_progress`, `  line`): the live progress display owns those.
+- **`NO_MODEL`:** the same sentence is also an error message, so it prints as text.
+
+The share commands follow the same rules as the rest: `rpipe share status` prints `Publishing: on as '...'` in bold with `fields` rows under it and bulleted followed feeds; `rpipe share browse` prints each person as a bold name line plus two dimmed lines, and every untrusted field (display name, handle, topics, feed errors) goes through `clean_text` before it is styled.
+
 ## Why it's built this way
 
 - **Colour only on a terminal.** Escape codes in a pipe, a log file or the systemd journal are unreadable noise (`\x1b[32m...`). Checking `isatty` is the standard fix, and `NO_COLOR` (see no-color.org) is the standard opt-out.
@@ -77,5 +89,5 @@ Worked example: `rpipe profile show | cat` is not a terminal, so it prints `â”€â
 ## Where the code is
 
 - `src/research_pipeline/term.py`: the helpers. It is in the composition group (see [architecture.md](architecture.md)); it imports only `typer` and the standard library.
-- `src/research_pipeline/cli.py`: `_fail`, the init wizard, the `profile` and `model` commands call it. The run, collect, triage, summarize, digest, requests, shelf, schedule, app and sources commands and the whole `model` group (scan, recommend, setup, tune, fit, bench) use it too. The share, gold, eval and catalog groups move over in the next task.
+- `src/research_pipeline/cli.py`: `_fail`, the init wizard, the `profile` and `model` commands call it. The run, collect, triage, summarize, digest, requests, shelf, schedule, app and sources commands, the whole `model` group (scan, recommend, setup, tune, fit, bench, catalog), vote/save/feedback/review, and the share, gold and eval groups use it too.
 - `tests/test_term.py`: no escape codes off a terminal, colour on one, `NO_COLOR`, header width, alignment, errors to stderr.

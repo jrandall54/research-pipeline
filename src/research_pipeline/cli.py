@@ -1537,8 +1537,8 @@ app.add_typer(gold_app, name="gold")
 
 def _ask_facts() -> list[str]:
     """Read key facts one per line until a blank line. Ctrl-C/EOF aborts before anything is saved."""
-    typer.echo("Key facts a correct summary must get right (specific and checkable).")
-    typer.echo("Type one per line; press Enter on an empty line to finish. Aim for 3 or more.")
+    term.hint("Key facts a correct summary must get right (specific and checkable).\n"
+              "Type one per line; press Enter on an empty line to finish. Aim for 3 or more.")
     facts: list[str] = []
     while True:
         line = profile_edit.normalise_text(_prompt(f"Fact {len(facts) + 1}", default="", show_default=False))
@@ -1567,7 +1567,7 @@ def gold_add(
             except ValueError as exc:
                 raise _fail(str(exc)) from exc
             if kind == "id" and has_gold(existing, value):
-                typer.echo(f"{value} is already in your gold set. Add facts with: rpipe gold add-fact {value} \"...\"")
+                term.warn(f"{value} is already in your gold set. Add facts with: rpipe gold add-fact {value} \"...\"")
                 return
             arxiv = make_arxiv(ctx.config)
             try:
@@ -1587,16 +1587,16 @@ def gold_add(
                 typer.echo("Cancelled. Nothing was changed.")
                 return
             if has_gold(existing, chosen.id):
-                typer.echo(f"{chosen.id} is already in your gold set.")
+                term.warn(f"{chosen.id} is already in your gold set.")
                 return
             facts = _ask_facts()
             if not facts:
-                typer.echo("At least one key fact is needed, so nothing was saved. Run the command again.")
+                term.warn("At least one key fact is needed, so nothing was saved. Run the command again.")
                 return
             if len(facts) < 3:
-                typer.echo(f"Saved with {len(facts)} fact(s); 3 or more make a better test (rpipe gold add-fact).")
+                term.warn(f"Saved with {len(facts)} fact(s); 3 or more make a better test (rpipe gold add-fact).")
             add_gold(ctx.vault, GoldPaper(paper_id=chosen.id, title=chosen.title, key_facts=facts))
-            typer.echo(f"Added {chosen.id}: {chosen.title}")
+            term.ok(f"Added {chosen.id}: {chosen.title}")
 
 
 @gold_app.command("list")
@@ -1605,7 +1605,7 @@ def gold_list(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     with _clean_errors():
         papers = load_gold(ctx.vault)
-    typer.echo(f"Gold set: {len(papers)}/{GOLD_TARGET} papers")
+    term.header(f"Gold set: {len(papers)}/{GOLD_TARGET} papers")
     for p in papers:
         mark = "  (unreviewed: drafted by Claude)" if p.unreviewed else ""
         typer.echo(f"\n{profile_edit.normalise_text(p.paper_id)}  {profile_edit.normalise_text(p.title)}{mark}")
@@ -1624,15 +1624,15 @@ def gold_suggest(
         with _clean_errors():
             picks = suggest_papers(ctx.conn, load_gold(ctx.vault), count)
         if not picks:
-            typer.echo(
+            term.warn(
                 "No summarized papers with full text yet — run `rpipe run` first, "
                 "or add papers by hand with `rpipe gold add`."
             )
             return
-        typer.echo(f"{len(picks)} suggested paper(s), shortest to longest:")
+        term.header(f"{len(picks)} suggested paper(s), shortest to longest:")
         for s in picks:
             typer.echo(f"  {s.paper_id}  ~{s.tokens} tokens  {profile_edit.normalise_text(s.title)}")
-        typer.echo("Pick the ones you know well, then: rpipe gold draft ID ...")
+        term.hint("Pick the ones you know well, then: rpipe gold draft ID ...")
 
 
 @gold_app.command("auto")
@@ -1652,13 +1652,13 @@ def gold_auto(
             existing = load_gold(ctx.vault)
             wanted = count if count is not None else GOLD_TARGET - len(existing)
             if wanted <= 0:
-                typer.echo(f"The gold set already has {len(existing)} papers; nothing to add. Use --count N to add more.")
+                term.warn(f"The gold set already has {len(existing)} papers; nothing to add. Use --count N to add more.")
                 return
             picks = suggest_papers(ctx.conn, existing, wanted)
         if not picks:
-            typer.echo("No summarized papers with full text yet: run `rpipe run` first, or add papers by hand with `rpipe gold add`.")
+            term.warn("No summarized papers with full text yet: run `rpipe run` first, or add papers by hand with `rpipe gold add`.")
             return
-        typer.echo(
+        term.hint(
             "The paper text is sent to Claude to draft the facts. Nothing is reviewed: every paper is saved as unreviewed, "
             "so the scores only compare runs with each other."
         )
@@ -1683,7 +1683,7 @@ def gold_auto(
                     break
                 except (LlmError, SourceError) as exc:
                     handle.step(pick.paper_id, current=number, outcome="failed", detail=str(exc))
-        typer.echo(f"Added {added} paper(s), all unreviewed. See them with `rpipe gold list`; replace any later with `rpipe gold remove ID` then `rpipe gold draft ID`.")
+        term.ok(f"Added {added} paper(s), all unreviewed. See them with `rpipe gold list`; replace any later with `rpipe gold remove ID` then `rpipe gold draft ID`.")
 
 
 @gold_app.command("draft")
@@ -1701,11 +1701,11 @@ def gold_draft(
             raise _fail(f"The judge is not available: {exc}") from exc
         with _clean_errors():
             existing = load_gold(ctx.vault)
-        typer.echo("The paper text is sent to Claude to draft the facts. You review every one before it is saved.")
+        term.hint("The paper text is sent to Claude to draft the facts. You review every one before it is saved.")
         for number, paper_id in enumerate(ids, 1):
             paper_id = paper_id.strip()
             if has_gold(existing, paper_id):
-                typer.echo(f"{paper_id} is already in your gold set. Add facts with: rpipe gold add-fact {paper_id} \"...\"")
+                term.warn(f"{paper_id} is already in your gold set. Add facts with: rpipe gold add-fact {paper_id} \"...\"")
                 continue
             try:
                 # The stage covers only the waiting work; review prompts happen after it closes.
@@ -1726,26 +1726,26 @@ def gold_draft(
             except judge.JudgeUnavailable as exc:
                 raise _fail(f"The judge is not available: {exc}") from exc
             except (LlmError, SourceError) as exc:
-                typer.echo(f"Could not draft facts for {paper_id}: {exc}. Add it by hand with `rpipe gold add {paper_id}`.")
+                term.warn(f"Could not draft facts for {paper_id}: {exc}. Add it by hand with `rpipe gold add {paper_id}`.")
                 continue
             if drafted is None:
-                typer.echo(f"No paper found for {paper_id} on arXiv.")
+                term.warn(f"No paper found for {paper_id} on arXiv.")
                 continue
             if not drafted:
-                typer.echo(f"There is no HTML full text for {paper_id}; add it by hand with `rpipe gold add {paper_id}`.")
+                term.warn(f"There is no HTML full text for {paper_id}; add it by hand with `rpipe gold add {paper_id}`.")
                 continue
             title = found[0].title
             try:
                 facts = _review_drafted(drafted, profile_edit.normalise_text(title))
             except (typer.Abort, KeyboardInterrupt, EOFError):
-                typer.echo(f"\nStopped. Nothing was saved for {paper_id}.")
+                term.warn(f"\nStopped. Nothing was saved for {paper_id}.")
                 return
             if not facts:
-                typer.echo(f"No facts kept, so nothing was saved for {paper_id}.")
+                term.warn(f"No facts kept, so nothing was saved for {paper_id}.")
                 continue
             add_gold(ctx.vault, GoldPaper(paper_id=found[0].id, title=title, key_facts=facts))
             existing = load_gold(ctx.vault)
-            typer.echo(f"Added {paper_id} with {len(facts)} fact(s).")
+            term.ok(f"Added {paper_id} with {len(facts)} fact(s).")
 
 
 def _review_drafted(drafted: list[str], title: str) -> list[str]:
@@ -1775,7 +1775,7 @@ def gold_remove(
     with _clean_errors():
         if not remove_gold(ctx.vault, paper_id):
             raise _fail(f"{paper_id} is not in your gold set.")
-    typer.echo(f"Removed {paper_id}.")
+    term.ok(f"Removed {paper_id}.")
 
 
 @gold_app.command("add-fact")
@@ -1792,7 +1792,7 @@ def gold_add_fact(
     with _clean_errors():
         if not add_fact(ctx.vault, paper_id, fact):
             raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
-    typer.echo(f"Added a fact to {paper_id}.")
+    term.ok(f"Added a fact to {paper_id}.")
 
 
 def _pick_fact(vault: Path, paper_id: str | None, number: int | None, verb: str) -> tuple[str, int, str]:
@@ -1836,7 +1836,7 @@ def gold_edit_fact(
             raise _fail(str(exc)) from exc
         if old is None:
             raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
-    typer.echo(f"Updated fact {number} of {paper_id}.")
+    term.ok(f"Updated fact {number} of {paper_id}.")
 
 
 @gold_app.command("remove-fact")
@@ -1859,7 +1859,7 @@ def gold_remove_fact(
             raise _fail(str(exc)) from exc
         if removed is None:
             raise _fail(f"{paper_id} is not in your gold set. Add it first: rpipe gold add {paper_id}")
-    typer.echo(f"Removed fact {number} of {paper_id}.")
+    term.ok(f"Removed fact {number} of {paper_id}.")
 
 
 eval_app = typer.Typer(help="Check summary accuracy against your gold set: run, grade, report.", no_args_is_help=True)
@@ -1893,7 +1893,7 @@ def eval_run(
         if not papers:
             raise _fail("Your gold set is empty. Add papers you know well with `rpipe gold add` first.")
         if len(papers) < GOLD_TARGET:
-            typer.echo(f"Warning: the gold set has {len(papers)} papers; {GOLD_TARGET} make a fair test (rpipe gold add).")
+            term.warn(f"The gold set has {len(papers)} papers; {GOLD_TARGET} make a fair test (rpipe gold add).")
         pipeline = build_pipeline(ctx.config)
         eval_judge: LLM | None = None
         if use_judge:
@@ -1901,7 +1901,7 @@ def eval_run(
                 eval_judge = pipeline.make_judge()
             except judge.JudgeUnavailable as exc:
                 raise _fail(f"The judge is not available: {exc}") from exc
-            typer.echo("The paper text is sent to Claude to grade the summaries.")
+            term.hint("The paper text is sent to Claude to grade the summaries.")
         try:
             llm = _ready_llm(pipeline)
         except Exception as exc:  # noqa: BLE001
@@ -1915,9 +1915,9 @@ def eval_run(
 
         today = date.today()
         if eval_exists(ctx.vault, today):
-            typer.echo(f"Replacing today's earlier eval ({today.isoformat()}); its grades are cleared.")
+            term.warn(f"Replacing today's earlier eval ({today.isoformat()}); its grades are cleared.")
             if has_judged_run(ctx.vault, today):
-                typer.echo("Kept today's earlier judged run as the baseline for the comparison.")
+                term.hint("Kept today's earlier judged run as the baseline for the comparison.")
         typer.echo(f"Summarizing {len(papers)} paper(s); this can take a while...")
         with _clean_errors():
             with _reporter() as reporter:
@@ -1926,11 +1926,11 @@ def eval_run(
                     diagrams=ctx.config.diagrams)
                 md = run_eval(ctx.vault, llm, pipeline.fulltext_fetcher, llm.num_ctx, today, abstract_for,
                               reporter=reporter, judge=eval_judge, mode=read_mode, diagrams=diagrams)
-        typer.echo(f"Report written: {md}")
+        term.ok(f"Report written: {md}")
         if eval_judge:
-            typer.echo("Next: rpipe eval report")
+            term.hint("Next: rpipe eval report")
         else:
-            typer.echo("Next: rpipe eval grade, then rpipe eval report (or re-run with --judge to have Claude grade)")
+            term.hint("Next: rpipe eval grade, then rpipe eval report (or re-run with --judge to have Claude grade)")
 
 
 @eval_app.command("grade")
@@ -1945,7 +1945,7 @@ def eval_grade(vault: VaultOption = None) -> None:
     if not todo:
         typer.echo("Nothing left to grade. See the result with: rpipe eval report")
         return
-    typer.echo(f"Grading eval {day.isoformat()}: {len(todo)} paper(s) to go. Ctrl-C stops; grades given are kept.")
+    term.header(f"Grading eval {day.isoformat()}: {len(todo)} paper(s) to go. Ctrl-C stops; grades given are kept.")
     try:
         for e in todo:
             assert e.summary is not None
@@ -1960,14 +1960,14 @@ def eval_grade(vault: VaultOption = None) -> None:
                 answer = _prompt("Is this summary accurate? [y/n]").strip().lower()
                 if answer in ("y", "n"):
                     break
-                typer.echo("Please answer y or n.")
+                term.warn("Please answer y or n.")
             note = _prompt("Note (optional)", default="", show_default=False).strip()
             with _clean_errors():
                 save_grade(ctx.vault, day, Grade(paper_id=e.paper_id, accurate=answer == "y", note=note))
     except (typer.Abort, KeyboardInterrupt, EOFError):
-        typer.echo("\nStopped. Grades already given are saved; run `rpipe eval grade` to continue.")
+        term.warn("\nStopped. Grades already given are saved; run `rpipe eval grade` to continue.")
         return
-    typer.echo("\nAll graded. See the result with: rpipe eval report")
+    term.ok("\nAll graded. See the result with: rpipe eval report")
 
 
 @eval_app.command("report")
@@ -2026,10 +2026,10 @@ def model_show(vault: VaultOption = None) -> None:
             term.warn(f"last choice: unknown. Ollama did not answer in time: {exc}")
             return
         if last is None:
-            typer.echo("last choice: not probed yet for these settings and installed models; "
-                       "it is probed on next use (or now with `rpipe model fit`)")
+            term.hint("last choice: not probed yet for these settings and installed models; "
+                      "it is probed on next use (or now with `rpipe model fit`)")
         else:
-            typer.echo(f"last choice: {last.model} with a context of {last.num_ctx} tokens")
+            term.hint(f"last choice: {last.model} with a context of {last.num_ctx} tokens")
 
 
 @model_app.command("set")
@@ -2067,13 +2067,13 @@ def model_set_embedding(
     with _clean_errors():
         profile_edit.set_embedding_model(ctx.vault, name)
     term.ok(f"embedding model is now {name.strip()}.")
-    typer.echo(
+    term.hint(
         "The next run downloads the model (the first download can take a while; progress is shown) "
         "and re-embeds your shelf, seed papers and the papers still waiting to be ranked, because "
         "vectors from different models cannot be compared. Papers ranked earlier are not re-embedded, "
         "so your past votes and saves stop boosting rankings until you switch back."
     )
-    typer.echo("To go back: rpipe model set-embedding BAAI/bge-small-en-v1.5")
+    term.hint("To go back: rpipe model set-embedding BAAI/bge-small-en-v1.5")
 
 
 @model_app.command("set-backend")
@@ -2884,12 +2884,12 @@ def catalog_show(vault: VaultOption = None) -> None:
     """List the candidate models, grouped by the size of computer they suit."""
     ctx = _open(vault)
     cat = catalog_mod.load_catalog(ctx.vault)
-    typer.echo(f"Model catalog version {cat.version} (updated {cat.updated}), {len(cat.entries)} models")
+    term.header(f"Model catalog version {cat.version} (updated {cat.updated}), {len(cat.entries)} models")
     for band in catalog_mod.BANDS:
         rows = [e for e in cat.entries if band in e.bands]
         if not rows:
             continue
-        typer.echo(f"\n{band}")
+        typer.echo("\n" + term.strong(band))
         for e in rows:
             typer.echo(f"  {e.pull} — {e.family}, {_model_kind(e)}, {e.quant}, {e.download_gb:g} GB, "
                        f"trained context {e.trained_ctx:,}")
@@ -2918,7 +2918,7 @@ def catalog_update(vault: VaultOption = None) -> None:
         typer.echo("Not saved.")
         return
     catalog_mod.save_fetched(ctx.vault, text)
-    typer.echo(f"Saved to {ctx.vault / 'cache' / catalog_mod.FETCHED_NAME}")
+    term.ok(f"Saved to {ctx.vault / 'cache' / catalog_mod.FETCHED_NAME}")
 
 
 @model_app.command("setup")
@@ -3030,7 +3030,7 @@ def vote(
         raise _fail(str(exc)) from exc
     finally:
         ctx.conn.close()
-    typer.echo(f"Recorded vote {direction} for {pid}." if direction != "clear" else f"Cleared vote for {pid}.")
+    term.ok(f"Recorded vote {direction} for {pid}." if direction != "clear" else f"Cleared vote for {pid}.")
 
 
 def _save_command(saved: bool) -> None:
@@ -3048,7 +3048,7 @@ def _save_command(saved: bool) -> None:
             raise _fail(str(exc)) from exc
         finally:
             ctx.conn.close()
-        typer.echo(f"{'Saved' if saved else 'Unsaved'} {pid}.")
+        term.ok(f"{'Saved' if saved else 'Unsaved'} {pid}.")
 
     command.__doc__ = f"{word.capitalize()} a paper."
     app.command(word)(command)
@@ -3068,17 +3068,17 @@ def feedback(vault: VaultOption = None) -> None:
         waiting = len(library_api.later_queue(ctx.conn))
     finally:
         ctx.conn.close()
-    typer.echo("Votes")
+    term.header("Votes")
     if not votes:
         typer.echo("  No votes yet. Try `rpipe vote ID up`.")
     for v in votes:
         typer.echo(f"  {'up  ' if v.vote > 0 else 'down'}  {v.paper_id}  {v.title or '(unknown paper)'}")
-    typer.echo("Saved")
+    term.header("Saved")
     if not saves:
         typer.echo("  No saved papers yet. Try `rpipe save ID`.")
     for p in saves:
         typer.echo(f"  {p.id}  {p.title or '(unknown paper)'}")
-    typer.echo("Review later")
+    term.header("Review later")
     if waiting:
         typer.echo(f"  {waiting} {'paper' if waiting == 1 else 'papers'} waiting. Run `rpipe review --later`.")
     else:
@@ -3089,7 +3089,8 @@ _REVIEW_KEYS = {"u": "up", "d": "down", "s": "skip", "q": "quit"}
 
 
 def _show_paper(paper: library_api.PaperView, header: str) -> None:
-    typer.echo(f"\n{header}\n")
+    term.header(header)
+    typer.echo("")
     typer.echo(paper.title)
     typer.echo(f"id: {paper.id}")
     if paper.triage_reasons:
@@ -3134,7 +3135,7 @@ def review(
                     answer = _prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
                     if answer in _REVIEW_KEYS:
                         break
-                    typer.echo("Please answer u, d, s or q.")
+                    term.warn("Please answer u, d, s or q.")
                 if answer == "q":
                     break
                 if answer == "s":
@@ -3147,7 +3148,7 @@ def review(
         except (typer.Abort, KeyboardInterrupt, EOFError):
             aborted = True
         left = len(library_api.later_queue(ctx.conn) if later else library_api.review_queue(ctx.conn))
-        typer.echo(f"Voted {voted}, skipped {skipped} this session. {left} left in the queue.")
+        term.ok(f"Voted {voted}, skipped {skipped} this session. {left} left in the queue.")
         if aborted:
             raise typer.Abort()
     finally:
@@ -3703,7 +3704,7 @@ def share_setup(vault: VaultOption = None) -> None:
             try:
                 handle = share_github.login(runner)
             except share_github.GithubError:
-                typer.echo("You need to sign in to GitHub first. Follow the steps below.")
+                term.warn("You need to sign in to GitHub first. Follow the steps below.")
                 with _waiting_for_you():
                     code = _gh_login_interactive()
                 if code != 0:
@@ -3721,7 +3722,7 @@ def share_setup(vault: VaultOption = None) -> None:
                 default = r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else handle
             name = _prompt("Display name shown to people who follow you", default=default[:60],
                            value_proc=_name_for_prompt)
-            typer.echo(PUBLIC_WARNING)
+            term.warn(PUBLIC_WARNING)
             if not _confirm("Publish your feed?"):
                 typer.echo("Nothing was created or changed.")
                 return
@@ -3756,8 +3757,8 @@ def share_setup(vault: VaultOption = None) -> None:
         except share_github.GithubError as exc:
             raise _fail(str(exc)) from exc
         _restart_app_if_installed()
-        typer.echo(f"Your feed is live: {address}")
-        typer.echo("It updates every night. Others can follow it with `rpipe share follow " + handle + "`.")
+        term.ok(f"Your feed is live: {address}")
+        typer.echo("  It updates every night. Others can follow it with `rpipe share follow " + handle + "`.")
 
 
 @share_app.command("status")
@@ -3766,26 +3767,27 @@ def share_status(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     cfg = ctx.config
     if cfg.share_enabled and cfg.share_handle:
-        typer.echo(f"Publishing: on as '{cfg.share_display_name}'")
-        typer.echo(f"  Address: {share_publish.feed_url(cfg.share_handle)}")
+        typer.echo(term.strong(f"Publishing: on as '{cfg.share_display_name}'"))
+        rows = [("Address", share_publish.feed_url(cfg.share_handle))]
         clone = _clone_dir(ctx.vault)
         if (clone / ".git").exists():
             r = _share_runner().run(["git", "log", "-1", "--format=%cI"], cwd=clone)
             if r.returncode == 0 and r.stdout.strip():
-                typer.echo(f"  Last local commit: {r.stdout.strip()[:19].replace('T', ' ')}")
+                rows.append(("Last local commit", r.stdout.strip()[:19].replace("T", " ")))
         last = list_runs(ctx.conn, 1)
         if last and last[0]["finished_at"]:
             bad = [e for e in json.loads(last[0]["errors"] or "[]") if e.startswith("sharing:")]
-            typer.echo(f"  Last night's push: {bad[0] if bad else 'ok'}")
+            rows.append(("Last night's push", bad[0] if bad else "ok"))
+        term.fields(rows)
     else:
-        typer.echo("Publishing: off (start with `rpipe share setup`)")
+        typer.echo(term.strong("Publishing: off") + " (start with `rpipe share setup`)")
     feeds = library_api.follows(ctx.conn)
     if not feeds:
         typer.echo("Following: nobody yet (find feeds with `rpipe share browse`)")
         return
-    typer.echo(f"Following {len(feeds)}:")
+    typer.echo(term.strong(f"Following {len(feeds)}:"))
     for f in feeds:
-        typer.echo("  " + _follow_line(f))
+        term.bullet(_follow_line(f))
 
 
 def _follow_line(f: library_api.FollowView) -> str:
@@ -3815,7 +3817,8 @@ def share_publish_now(vault: VaultOption = None) -> None:
                                        handle=ctx.config.share_handle, name=ctx.config.share_display_name)
         except share_github.GithubError as exc:
             raise _fail(str(exc)) from exc
-        typer.echo("Pushed your feed." if result == "pushed" else "Nothing changed since the last push.")
+        (term.ok if result == "pushed" else typer.echo)(
+            "Pushed your feed." if result == "pushed" else "Nothing changed since the last push.")
 
 
 @share_app.command("set-name")
@@ -3829,7 +3832,7 @@ def share_set_name(
         profile_edit.set_share(ctx.vault, display_name=name)
     name = check_share_name(name)
     if not (ctx.config.share_enabled and ctx.config.share_handle):
-        typer.echo(f"Display name set to '{name}'. It is used when you run `rpipe share setup`.")
+        term.ok(f"Display name set to '{name}'. It is used when you run `rpipe share setup`.")
         return
     profile = _load_profile(ctx)
     with _pipeline_lock(ctx, "rpipe share set-name"):
@@ -3839,7 +3842,7 @@ def share_set_name(
                               handle=ctx.config.share_handle, name=name)
         except share_github.GithubError as exc:
             raise _fail(f"Name saved, but publishing failed (tonight's run will retry): {exc}") from exc
-    typer.echo(f"Display name changed to '{name}' and published.")
+    term.ok(f"Display name changed to '{name}' and published.")
     _restart_app_if_installed()
 
 
@@ -3865,8 +3868,8 @@ def share_stop(
                 if not share_github.has_delete_scope(runner):
                     # Interactive (a one-time code, a browser sign-in): run on the terminal, not
                     # captured, with the vault lock let go of while it waits for you.
-                    typer.echo("GitHub needs your OK to delete repositories. A code is shown below and a "
-                               "browser sign-in may open; follow the steps there.")
+                    term.warn("GitHub needs your OK to delete repositories. A code is shown below and a "
+                              "browser sign-in may open; follow the steps there.")
                     with _waiting_for_you():
                         code = _gh_refresh_interactive()
                     if code != 0:
@@ -3884,10 +3887,10 @@ def share_stop(
         profile_edit.set_share(ctx.vault, enabled=False)
     _restart_app_if_installed()
     if delete:
-        typer.echo("Deleted your rpipe-feed repository and stopped publishing.")
+        term.ok("Deleted your rpipe-feed repository and stopped publishing.")
     else:
-        typer.echo("Stopped publishing and left the directory. Your repository is kept; "
-                   "the old address still works and says you stopped. Run `rpipe share setup` to start again.")
+        term.ok("Stopped publishing and left the directory. Your repository is kept; "
+                "the old address still works and says you stopped. Run `rpipe share setup` to start again.")
 
 
 @share_app.command("browse")
@@ -3902,7 +3905,7 @@ def share_browse(
         with _share_http() as http, _reporter() as reporter:
             _count, errors = share_directory.refresh(ctx.conn, http, reporter)
     for e in errors:
-        typer.echo(f"  warning: {e}", err=True)
+        term.warn(clean_text(str(e)), err=True)
     entries = library_api.directory(ctx.conn, profile.topics, ctx.config.share_handle)
     if search:
         q = search.strip().lower()
@@ -3915,7 +3918,7 @@ def share_browse(
     for e in entries:
         typer.echo(_browse_entry(e, mine))
         typer.echo("")
-    typer.echo("Follow one with `rpipe share follow HANDLE`.")
+    term.hint("Follow one with `rpipe share follow HANDLE`.")
 
 
 BROWSE_TOPICS_SHOWN = 3
@@ -3928,7 +3931,7 @@ def _browse_entry(e: "library_api.DirectoryEntryView", mine: set[str]) -> str:
     list never turns the listing into a wall of text.
     """
     tag = "  (you)" if e.is_you else "  (following)" if e.following else ""
-    head = typer.style(clean_text(e.display_name), bold=True) + f"  @{clean_text(e.handle)}{tag}"
+    head = term.strong(clean_text(e.display_name)) + f"  @{clean_text(e.handle)}{tag}"
     stats = f"about {e.posts_per_day:g} papers a day"
     if not e.is_you:
         stats += f" · {e.shared_topics} topic{'' if e.shared_topics == 1 else 's'} in common"
@@ -3937,7 +3940,7 @@ def _browse_entry(e: "library_api.DirectoryEntryView", mine: set[str]) -> str:
     shown = ", ".join(topics[:BROWSE_TOPICS_SHOWN]) or "no topics"
     if len(topics) > BROWSE_TOPICS_SHOWN:
         shown += f", +{len(topics) - BROWSE_TOPICS_SHOWN} more"
-    return f"{head}\n  {stats}\n  {shown}"
+    return f"{head}\n{term.dim('  ' + stats)}\n{term.dim('  ' + shown)}"
 
 
 @share_app.command("follow")
@@ -3955,10 +3958,10 @@ def share_follow(
         except ValueError as exc:
             raise _fail(str(exc)) from exc
     if result.error:
-        typer.echo(f"Following {target.strip()}, but the first fetch failed: {result.error}. "
-                   "`rpipe share fetch` tries again.", err=True)
+        term.warn(f"Following {target.strip()}, but the first fetch failed: {result.error}. "
+                  "`rpipe share fetch` tries again.", err=True)
         return
-    typer.echo(f"Following {target.strip()}: {result.new_posts} posts downloaded.")
+    term.ok(f"Following {target.strip()}: {result.new_posts} posts downloaded.")
 
 
 @share_app.command("unfollow")
@@ -3968,7 +3971,7 @@ def share_unfollow(handle: Annotated[str, typer.Argument(help="Their handle, as 
     ctx = _open(vault)
     feed = _follow_by_handle(ctx, handle)
     library_api.unfollow(ctx.conn, feed.feed_id)
-    typer.echo(f"Stopped following {clean_text(feed.display_name)} (@{clean_text(feed.handle)}).")
+    term.ok(f"Stopped following {clean_text(feed.display_name)} (@{clean_text(feed.handle)}).")
 
 
 @share_app.command("following")
@@ -3993,9 +3996,9 @@ def share_fetch_now(vault: VaultOption = None) -> None:
             return
         with _share_http() as http, _reporter() as reporter:
             counts, errors = share_fetch.fetch_all(ctx.conn, http, reporter)
-    typer.echo(f"Fetched {counts['followed_feeds']} feeds, {counts['followed_new']} new posts.")
+    term.ok(f"Fetched {counts['followed_feeds']} feeds, {counts['followed_new']} new posts.")
     for e in errors:
-        typer.echo(f"  error: {e}", err=True)
+        term.error(clean_text(str(e)))
 
 
 @mix_app.command("add")
@@ -4004,7 +4007,7 @@ def share_mix_add(handle: Annotated[str, typer.Argument(help="Their handle.")], 
     ctx = _open(vault)
     feed = _follow_by_handle(ctx, handle)
     library_api.set_in_mix(ctx.conn, feed.feed_id, True)
-    typer.echo(f"{clean_text(feed.display_name)} is now in Mix.")
+    term.ok(f"{clean_text(feed.display_name)} is now in Mix.")
 
 
 @mix_app.command("remove")
@@ -4013,4 +4016,4 @@ def share_mix_remove(handle: Annotated[str, typer.Argument(help="Their handle.")
     ctx = _open(vault)
     feed = _follow_by_handle(ctx, handle)
     library_api.set_in_mix(ctx.conn, feed.feed_id, False)
-    typer.echo(f"{clean_text(feed.display_name)} is no longer in Mix.")
+    term.ok(f"{clean_text(feed.display_name)} is no longer in Mix.")

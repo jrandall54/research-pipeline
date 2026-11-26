@@ -1,6 +1,6 @@
 # Phase 10.2 — A cleaner terminal look: Implementation Plan
 
-> **Phase 10.2** · Status: in progress · Design: [phase-10.2-terminal-style-design.md](../specs/phase-10.2-terminal-style-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+> **Phase 10.2** · Status: merged · Design: [phase-10.2-terminal-style-design.md](../specs/phase-10.2-terminal-style-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 **Goal:** Every `rpipe` command uses one consistent look, from one style module (the design's "The look" table): bold cyan rule headers, dim explanations, `›` before prompts, `✓` / `!` / `✗` result marks, aligned key-value lines.
 
@@ -60,35 +60,35 @@ Implement styling as `typer.style(...)` only when `use_colour()` is true, so the
 
 **Files:** create `src/research_pipeline/term.py` and `tests/test_term.py`; modify `cli.py` (`_fail`, `_step`, `_wizard*`, the `profile` group, the `model` group, and the interactive helpers they share, such as `_ask` and the seed look-up/confirm flow) and `tests/test_architecture.py`; add `docs/guide/terminal.md`; update the samples in `docs/guide/vault-and-config.md` and `docs/guide/profile.md`.
 
-- [ ] Tests first, in `tests/test_term.py`:
+- [x] Tests first, in `tests/test_term.py`:
   - `test_plain_when_not_tty`: each helper's output has no `\x1b`.
   - `test_colour_when_tty`: monkeypatch `use_colour` to return True, then `ok` output contains `\x1b[`.
   - `test_no_color_env`: `NO_COLOR=1` with a fake tty gives `use_colour() is False`.
   - `test_header_width`: with a 40-column terminal the rule line is exactly 40 characters; with 200 columns it is 80.
   - `test_fields_align`: the values start in the same column.
   - `test_error_to_stderr`.
-- [ ] The wizard uses `step(n, 5, name)` and `hint(...)` for each explainer.
-- [ ] The categories menu uses the `✓` style rows: a ticked row shows a green `✓`, an unticked row shows a blank mark and is dimmed, and the `Also selected:` line is kept.
-- [ ] "Added topic: …" and similar lines use `ok`. Prompts go through `term.prompt` / `term.confirm`. `profile show` uses `header` and `bullet`/numbered lists plus `fields`.
-- [ ] Ending: "All set. Next:" becomes `header("All set")`, then the commands with `cmd()`, aligned.
-- [ ] Update `test_init_wizard.py` and `test_categories.py` assertions where the marks change (`[x]` becomes `✓`).
-- [ ] Commit: `feat: term.py styles; init, profile and model commands use it (Phase 10.2)`.
+- [x] The wizard uses `step(n, 5, name)` and `hint(...)` for each explainer.
+- [x] The categories menu uses the `✓` style rows: a ticked row shows a green `✓`, an unticked row shows a blank mark and is dimmed, and the `Also selected:` line is kept.
+- [x] "Added topic: …" and similar lines use `ok`. Prompts go through `term.prompt` / `term.confirm`. `profile show` uses `header` and `bullet`/numbered lists plus `fields`.
+- [x] Ending: "All set. Next:" becomes `header("All set")`, then the commands with `cmd()`, aligned.
+- [x] Update `test_init_wizard.py` and `test_categories.py` assertions where the marks change (`[x]` becomes `✓`).
+- [x] Commit: `feat: term.py styles; init, profile and model commands use it (Phase 10.2)`.
 
 ### Task 2: run, status, schedule, app, sources, requests, shelf
 
 **Files:** modify `cli.py` (those groups, the end-of-run summary and health lines, the "Next steps" outside a terminal); update the tests asserting their text; update the samples in `docs/guide/running.md`, `docs/guide/app.md` and the other guide pages that quote this output.
 
-- [ ] `status` and the run summary use `header` and `fields`.
-- [ ] Problems use `warn`.
-- [ ] Install/uninstall results use `ok`.
-- [ ] Add `test_run_output_plain_when_piped`.
-- [ ] Commit: `feat: run, status, schedule, app, sources, requests and shelf use term.py (Phase 10.2)`.
+- [x] `status` and the run summary use `header` and `fields`.
+- [x] Problems use `warn`.
+- [x] Install/uninstall results use `ok`.
+- [x] Add `test_run_output_plain_when_piped`.
+- [x] Commit: `feat: run, status, schedule, app, sources, requests and shelf use term.py (Phase 10.2)`.
 
 ### Task 3: share, gold, eval, catalog and anything left
 
 **Files:** modify `cli.py` (the remaining groups); update `_browse_entry`, keeping `clean_text` on every untrusted field before styling; update the tests and the samples in `docs/guide/sharing.md`, `docs/guide/` for gold and eval, and `README.md` if it shows output.
 
-- [ ] Sweep with `grep -n "typer.echo" src/research_pipeline/cli.py`. Every remaining plain echo is either converted or intentionally plain (data output such as `rpipe model catalog show` tables, ids, paths meant for scripts).
-- [ ] Record those intentional ones in `docs/guide/terminal.md` under "What stays plain".
-- [ ] Update the ROADMAP row (Phase 10.2) and this plan's status.
-- [ ] Commit: `feat: share, gold, eval and catalog use term.py (Phase 10.2)`.
+- [x] Sweep with `grep -n "typer.echo" src/research_pipeline/cli.py`. Every remaining plain echo is either converted or intentionally plain (data output such as `rpipe model catalog show` tables, ids, paths meant for scripts).
+- [x] Record those intentional ones in `docs/guide/terminal.md` under "What stays plain".
+- [x] Update the ROADMAP row (Phase 10.2) and this plan's status.
+- [x] Commit: `feat: share, gold, eval and catalog use term.py (Phase 10.2)`.

@@ -41,6 +41,7 @@ from research_pipeline import (
     share_fetch,
     share_github,
     share_publish,
+    term,
 )
 from research_pipeline import serve as serve_mod
 from research_pipeline.backends.claude_code import LOGIN_HINT, find_claude, logged_in, resolve_model
@@ -268,16 +269,16 @@ def init(
         init_vault(path)
     except SchemaTooNewError as exc:
         raise _fail(str(exc)) from exc
-    typer.echo(f"Vault ready at {path}")
+    term.ok(f"Vault ready at {path}")
     for name in ("config.yaml", "profile.yaml"):
         typer.echo(f"  {name}: {'kept existing' if name in existed else 'created'}")
     typer.echo("  vault.sqlite, raw/, markdown/, summaries/, my_work/, gold/, digests/, cache/ ready")
     if not _is_tty():
-        typer.echo("\nNext steps:")
-        typer.echo("  rpipe model setup       choose how summaries are written (run in a terminal)")
-        typer.echo("  rpipe profile add-seed <arXiv link, id or title>   add papers you like")
-        typer.echo("  rpipe profile show      check your profile (rpipe profile --help changes it)")
-        typer.echo(NEXT_COMMANDS)
+        term.header("Next steps")
+        typer.echo(f"  {term.cmd('rpipe model setup')}       choose how summaries are written (run in a terminal)")
+        typer.echo(f"  {term.cmd('rpipe profile add-seed')} <arXiv link, id or title>   add papers you like")
+        typer.echo(f"  {term.cmd('rpipe profile show')}      check your profile (rpipe profile --help changes it)")
+        _next_commands()
         return
     try:
         _wizard(path, fresh_profile="profile.yaml" not in existed, fresh_config="config.yaml" not in existed)
@@ -294,7 +295,7 @@ class _Context:
 
 
 def _fail(message: str) -> typer.Exit:
-    typer.echo(message, err=True)
+    term.error(message.removeprefix("Error: "))
     return typer.Exit(code=1)
 
 
@@ -573,13 +574,13 @@ def _waiting_for_you() -> Iterator[None]:
 def _prompt(*args, **kwargs):
     """`typer.prompt` that lets go of the pipeline lock while waiting (see `_waiting_for_you`)."""
     with _waiting_for_you():
-        return typer.prompt(*args, **kwargs)
+        return term.prompt(*args, **kwargs)
 
 
 def _confirm(*args, **kwargs) -> bool:
     """`typer.confirm` that lets go of the pipeline lock while waiting (see `_waiting_for_you`)."""
     with _waiting_for_you():
-        return typer.confirm(*args, **kwargs)
+        return term.confirm(*args, **kwargs)
 
 
 @app.command()
@@ -1051,16 +1052,19 @@ def profile_show(vault: VaultOption = None) -> None:
     profile = _load_profile(ctx)
     titles = _seed_titles(ctx.vault)
     seeds = [f"{s}  {titles.get(s, '(title not cached)')}" for s in profile.seeds]
-    typer.echo(f"Topics:\n{_numbered(profile.topics)}")
-    typer.echo(f"Seeds:\n{_numbered(seeds)}")
-    typer.echo(f"Followed authors:\n{_numbered(profile.followed_authors)}")
-    typer.echo(f"Keywords:\n{_numbered(profile.keywords)}")
-    typer.echo(f"Top N: {profile.top_n}")
-    typer.echo(f"Feedback half-life: {profile.feedback_halflife_days:g} days")
-    typer.echo(f"arXiv categories: {_categories_text(ctx.config.arxiv_categories)}")
+    for title, items in (("Topics", profile.topics), ("Seeds", seeds),
+                         ("Followed authors", profile.followed_authors), ("Keywords", profile.keywords)):
+        term.header(title)
+        typer.echo(_numbered(items))
+    term.header("Settings")
+    term.fields([
+        ("Top N", str(profile.top_n)),
+        ("Feedback half-life", f"{profile.feedback_halflife_days:g} days"),
+        ("arXiv categories", _categories_text(ctx.config.arxiv_categories)),
+    ])
     bad = categories.unknown(ctx.config.arxiv_categories)
     if bad:
-        typer.echo(f"unknown categories: {', '.join(bad)}")
+        term.warn(f"unknown categories: {', '.join(bad)}")
 
 
 def _categories_text(cats: list[str]) -> str:
@@ -1114,17 +1118,26 @@ SEEDS_TIP = (
     'Tip: add more any time with rpipe profile add-seed. "More like this" in the app also '
     "nudges ranking, but fades over weeks; seeds don't."
 )
-NEXT_COMMANDS = (
-    "  rpipe run               collect today's papers, rank them and summarize the top ones\n"
-    "                          (the first run can take an hour or more with a local model)\n"
-    "  rpipe schedule install  do that every night by itself\n"
-    "  rpipe app install       read your feed on your phone and desktop\n"
-    "  rpipe share setup       optional: publish your feed so others can follow it"
+_NEXT_ROWS = (
+    ("rpipe run", "collect today's papers, rank them and summarize the top ones",
+     "(the first run can take an hour or more with a local model)"),
+    ("rpipe schedule install", "do that every night by itself", ""),
+    ("rpipe app install", "read your feed on your phone and desktop", ""),
+    ("rpipe share setup", "optional: publish your feed so others can follow it", ""),
 )
 
 
+def _next_commands() -> None:
+    """The what-to-do-next list: commands in cyan, descriptions lined up."""
+    width = max(len(c) for c, _, _ in _NEXT_ROWS) + 2
+    for command, text, more in _NEXT_ROWS:
+        typer.echo(f"  {term.cmd(command)}{' ' * (width - len(command))}{text}")
+        if more:
+            typer.echo(f"  {' ' * width}{more}")
+
+
 def _step(n: int, name: str) -> None:
-    typer.echo(f"\nStep {n} of 5: {name}")
+    term.step(n, 5, name)
 
 
 def _a(word: str) -> str:
@@ -1137,7 +1150,10 @@ def _add_command(kind: str, add: Callable[[Path, str], bool]) -> None:
         with _clean_errors():
             changed = add(ctx.vault, text)
         shown = profile_edit.normalise_text(text)
-        typer.echo(f"Added {kind}: {shown}" if changed else f'"{shown}" is already in your profile ({kind}s).')
+        if changed:
+            term.ok(f"Added {kind}: {shown}")
+        else:
+            typer.echo(f'"{shown}" is already in your profile ({kind}s).')
 
     command.__doc__ = f"Add {_a(kind)} to your profile."
     profile_app.command(f"add-{kind}")(command)
@@ -1152,7 +1168,7 @@ def _remove_command(kind: str, remove: Callable[[Path, str], bool]) -> None:
         with _clean_errors():
             changed = remove(ctx.vault, text_or_number)
         if changed:
-            typer.echo(f"Removed {kind}: {text_or_number.strip()}")
+            term.ok(f"Removed {kind}: {text_or_number.strip()}")
         else:
             typer.echo(f'"{text_or_number.strip()}" is not in your profile ({kind}s). Nothing was changed.')
 
@@ -1201,6 +1217,11 @@ def _close(source: object) -> None:
     close = getattr(source, "close", None)
     if callable(close):
         close()
+
+
+def _show_result(message: str) -> None:
+    """Print the outcome of `_add_seed`: a green tick when a seed was added, plain otherwise."""
+    (term.ok if message.startswith("Added ") else typer.echo)(message)
 
 
 class _SeedProblem(Exception):
@@ -1255,7 +1276,7 @@ def profile_add_seed(
     ctx = _open(vault)
     arxiv = make_arxiv(ctx.config)
     try:
-        typer.echo(_add_seed(ctx.vault, arxiv, text, yes))
+        _show_result(_add_seed(ctx.vault, arxiv, text, yes))
     except _SeedProblem as exc:
         raise _fail(str(exc)) from exc
     finally:
@@ -1282,13 +1303,13 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
             typer.echo(NO_MODEL)
             return False
         if getattr(llm, "local", True) is not True:
-            typer.echo(
+            term.warn(
                 f"Your description will be sent to {llm.name} (model {llm.model_name}) to suggest topics."
             )
         with _reporter() as reporter, stage(reporter, "suggest", label="asking the model for topics and papers"):
             proposal = onboarding.propose(llm, description)  # no prompt while this reporter is open
     except (LlmError, OSError) as exc:
-        typer.echo(f"{LLM_DOWN} ({exc})")
+        term.warn(f"{LLM_DOWN} ({exc})")
         return False
     current = load_profile(vault / "profile.yaml").topics
     was_template = [profile_edit.normalise_text(t).casefold() for t in current] == [t.casefold() for t in DEFAULT_TOPICS]
@@ -1310,16 +1331,16 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
             try:
                 changed = profile_edit.add_topic(vault, t)
                 added.add(t.casefold())
-                typer.echo(f"Added topic: {t}" if changed else f"{t} is already in your profile.")
+                term.ok(f"Added topic: {t}") if changed else typer.echo(f"{t} is already in your profile.")
             except (ValueError, ConfigError, OSError) as exc:
-                typer.echo(f"Skipped: {exc}")
+                term.warn(f"Skipped: {exc}")
     if was_template and added:  # your own topics replace the template examples, as in the wizard
         for example in DEFAULT_TOPICS:
             if example.casefold() not in added:
                 try:
                     profile_edit.remove_topic(vault, example)
                 except (ValueError, ConfigError, OSError) as exc:
-                    typer.echo(f"Skipped removing example topic: {exc}")
+                    term.warn(f"Skipped removing example topic: {exc}")
     if not proposal.seed_queries:
         return True
     arxiv = make_arxiv(config)
@@ -1328,16 +1349,16 @@ def _suggest_flow(vault: Path, config: Config, description: str, yes: bool) -> b
             with _reporter() as reporter:
                 resolved = onboarding.resolve_seeds(proposal.seed_queries, arxiv, reporter=reporter)
         except SourceError as exc:
-            typer.echo(f"Could not reach arXiv: {exc}. No seeds were added.")
+            term.warn(f"Could not reach arXiv: {exc}. No seeds were added.")
             return True
         found = [m for _, m in resolved if m is not None]
         typer.echo(f"Found {len(found)} of {len(resolved)} proposed papers on arXiv (the rest were dropped).")
         for meta in found:
             if yes or _confirm(f"Add seed {_describe(meta)}?", default=True):
                 try:
-                    typer.echo(_add_seed(vault, arxiv, meta.id, yes=True))
+                    _show_result(_add_seed(vault, arxiv, meta.id, yes=True))
                 except _SeedProblem as exc:
-                    typer.echo(f"Skipped: {exc}")
+                    term.warn(f"Skipped: {exc}")
     finally:
         _close(arxiv)
     return True
@@ -1371,7 +1392,7 @@ def profile_set_top_n(
     ctx = _open(vault)
     with _clean_errors():
         profile_edit.set_top_n(ctx.vault, n)
-    typer.echo(f"top_n is now {n}.")
+    term.ok(f"top_n is now {n}.")
 
 
 @profile_app.command("set-feedback-halflife")
@@ -1383,7 +1404,7 @@ def profile_set_feedback_halflife(
     ctx = _open(vault)
     with _clean_errors():
         profile_edit.set_feedback_halflife(ctx.vault, days)
-    typer.echo(f"feedback_halflife_days is now {float(days):g}.")
+    term.ok(f"feedback_halflife_days is now {float(days):g}.")
 
 
 @profile_app.command("set-categories")
@@ -1408,7 +1429,7 @@ def profile_set_categories(
     with _clean_errors():
         profile_edit.set_categories(ctx.vault, categories)
     cleaned = ["all" if c.strip().lower() == "all" else c.strip() for c in categories]
-    typer.echo(f"arXiv categories are now: {_categories_text(cleaned)}")
+    term.ok(f"arXiv categories are now: {_categories_text(cleaned)}")
 
 
 # ---------------------------------------------------------------- shelf commands
@@ -1974,31 +1995,34 @@ def model_show(vault: VaultOption = None) -> None:
     """Show the backend and which model (and server) are configured."""
     ctx = _open(vault)
     cfg = ctx.config
-    typer.echo(f"backend: {cfg.llm_backend}")
+    term.header("Summary model")
+    rows = [("backend", cfg.llm_backend)]
     if cfg.llm_backend == "none":
+        term.fields(rows)
         typer.echo("No summary model: digests list abstracts only. Choose one with `rpipe model setup`.")
         return
-    typer.echo(f"model: {cfg.llm_model}")
-    typer.echo(f"summarize mode: {cfg.summarize_mode} (change with `rpipe model set-mode`)")
-    typer.echo(f"diagrams: {cfg.diagrams} (change with `rpipe model set-diagrams`)")
-    if cfg.summarize_mode == "auto":
-        typer.echo(f"  auto: split when the model is not fully in GPU memory or the context is "
-                   f"below {SPLIT_BELOW_CTX} tokens (Ollama); whole otherwise")
+    rows += [
+        ("model", cfg.llm_model),
+        ("summarize mode", f"{cfg.summarize_mode} (change with `rpipe model set-mode`)"),
+        ("diagrams", f"{cfg.diagrams} (change with `rpipe model set-diagrams`)"),
+        ("effort", cfg.llm_effort if cfg.llm_backend == "claude-code"
+         else f"{cfg.llm_effort} (only applies to the claude-code backend)"),
+    ]
     if cfg.llm_backend == "claude-code":
-        typer.echo(f"effort: {cfg.llm_effort}")
-    else:
-        typer.echo(f"effort: {cfg.llm_effort} (only applies to the claude-code backend)")
+        rows.append(("claude", cfg.llm_cli_path or "found on PATH when used"))
+    if cfg.llm_backend == "ollama":
+        rows += [("server", cfg.llm_url), ("context window (num_ctx)", str(cfg.llm_num_ctx))]
+    term.fields(rows)
+    if cfg.summarize_mode == "auto":
+        term.hint(f"auto: split when the model is not fully in GPU memory or the context is "
+                  f"below {SPLIT_BELOW_CTX} tokens (Ollama); whole otherwise")
     if cfg.llm_backend != "ollama":
-        if cfg.llm_backend == "claude-code":
-            typer.echo(f"claude: {cfg.llm_cli_path or 'found on PATH when used'}")
         return
-    typer.echo(f"server: {cfg.llm_url}")
-    typer.echo(f"context window (num_ctx): {cfg.llm_num_ctx}")
     if cfg.llm_model == "auto" or cfg.llm_num_ctx == "auto":
         try:
             last = ollama_fit.cached_fit(cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx)
         except ollama_fit.ProbeTimeout as exc:
-            typer.echo(f"last choice: unknown. Ollama did not answer in time: {exc}")
+            term.warn(f"last choice: unknown. Ollama did not answer in time: {exc}")
             return
         if last is None:
             typer.echo("last choice: not probed yet for these settings and installed models; "
@@ -2016,7 +2040,7 @@ def model_set(
     ctx = _open(vault)
     with _clean_errors():
         profile_edit.set_llm_model(ctx.vault, name)
-    typer.echo(f"model is now {name.strip()}. Check it works with `rpipe model check`.")
+    term.ok(f"model is now {name.strip()}. Check it works with `rpipe model check`.")
 
 
 @model_app.command("set-effort")
@@ -2029,7 +2053,7 @@ def model_set_effort(
     with _clean_errors():
         profile_edit.set_llm_effort(ctx.vault, level)
     note = "" if ctx.config.llm_backend == "claude-code" else " (saved, but only the claude-code backend uses it)"
-    typer.echo(f"effort is now {level.strip().lower()}{note}.")
+    term.ok(f"effort is now {level.strip().lower()}{note}.")
 
 
 @model_app.command("set-embedding")
@@ -2041,7 +2065,7 @@ def model_set_embedding(
     ctx = _open(vault)
     with _clean_errors():
         profile_edit.set_embedding_model(ctx.vault, name)
-    typer.echo(f"embedding model is now {name.strip()}.")
+    term.ok(f"embedding model is now {name.strip()}.")
     typer.echo(
         "The next run downloads the model (the first download can take a while; progress is shown) "
         "and re-embeds your shelf, seed papers and the papers still waiting to be ranked, because "
@@ -2082,7 +2106,7 @@ def model_set_backend(
     with _clean_errors():
         profile_edit.set_llm_backend(ctx.vault, name, known, cli_path)
     note = "; model reset to auto" if changed else "; model unchanged"
-    typer.echo(f"backend is now {name}{note}. Check it with `rpipe model check`.")
+    term.ok(f"backend is now {name}{note}. Check it with `rpipe model check`.")
 
 
 @model_app.command("set-url")
@@ -2095,7 +2119,7 @@ def model_set_url(
     _ollama_only(ctx.config, "set-url")
     with _clean_errors():
         profile_edit.set_llm_url(ctx.vault, url)
-    typer.echo(f"server is now {url.strip()}. Check it works with `rpipe model check`.")
+    term.ok(f"server is now {url.strip()}. Check it works with `rpipe model check`.")
 
 
 @model_app.command("set-context")
@@ -2108,8 +2132,8 @@ def model_set_context(
     _ollama_only(ctx.config, "set-context")
     with _clean_errors():
         profile_edit.set_llm_num_ctx(ctx.vault, n)
-    typer.echo("context window is now auto." if n.strip().lower() == "auto"
-               else f"context window is now {int(n)} tokens.")
+    term.ok("context window is now auto." if n.strip().lower() == "auto"
+            else f"context window is now {int(n)} tokens.")
 
 
 @model_app.command("set-mode")
@@ -2123,9 +2147,9 @@ def model_set_mode(
         profile_edit.set_summarize_mode(ctx.vault, mode)
     stored = load_config(ctx.vault / "config.yaml").summarize_mode
     if stored == "auto":
-        typer.echo("summarize mode is now auto: each run picks split or whole (see `rpipe model show`).")
+        term.ok("summarize mode is now auto: each run picks split or whole (see `rpipe model show`).")
     else:
-        typer.echo(f"summarize mode is now {stored}.")
+        term.ok(f"summarize mode is now {stored}.")
 
 
 @model_app.command("set-diagrams")
@@ -2139,9 +2163,9 @@ def model_set_diagrams(
         profile_edit.set_diagrams(ctx.vault, setting)
     stored = load_config(ctx.vault / "config.yaml").diagrams
     if stored == "auto":
-        typer.echo("diagrams is now auto: drawn unless the model runs on the CPU only (see `rpipe model show`).")
+        term.ok("diagrams is now auto: drawn unless the model runs on the CPU only (see `rpipe model show`).")
     else:
-        typer.echo(f"diagrams is now {stored}.")
+        term.ok(f"diagrams is now {stored}.")
 
 
 @model_app.command("fit")
@@ -2380,16 +2404,16 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
         if not _confirm("Add more topics?", default=False):
             return
     else:
-        typer.echo(TOPICS_HELP)
+        term.hint(TOPICS_HELP)
     examples = list(DEFAULT_TOPICS) if is_template else []
     entered: set[str] = set()
     while text := _ask("Topic (blank to finish)"):
         try:
             profile_edit.add_topic(vault, text)
         except (ValueError, ConfigError, OSError) as exc:
-            typer.echo(f"Skipped: {exc}")
+            term.warn(f"Skipped: {exc}")
             continue
-        typer.echo(f"Added topic: {profile_edit.normalise_text(text)}")
+        term.ok(f"Added topic: {profile_edit.normalise_text(text)}")
         entered.add(profile_edit.normalise_text(text).casefold())
         # Once you enter a topic of your own, template examples you did not type are dropped.
         # A topic you typed is never removed, even if it matches an example.
@@ -2401,7 +2425,7 @@ def _wizard_topics(vault: Path, fresh_profile: bool) -> None:
             try:
                 profile_edit.remove_topic(vault, example)
             except (ValueError, ConfigError, OSError) as exc:
-                typer.echo(f"Skipped removing example topic: {exc}")
+                term.warn(f"Skipped removing example topic: {exc}")
         examples = [e for e in examples if e.casefold() in entered]
 
 
@@ -2412,37 +2436,41 @@ def _wizard_categories(vault: Path, config: Config, fresh_config: bool) -> None:
         typer.echo(f"arXiv categories: {_categories_text(config.arxiv_categories)}")
         if not _confirm("Change categories?", default=False):
             return
-    typer.echo(CATEGORY_HELP)
+    term.hint(CATEGORY_HELP)
     typer.echo("")
     for i, (code, text) in enumerate(categories.COMMON, 1):
-        typer.echo(f"  [{'x' if code in ticked else ' '}] {i:>2}. {code:<8} {text}")
+        row = f"{i:>2}  {code:<8} {text}"
+        if code in ticked:
+            typer.echo(f"  {term.tick()}  {row}")
+        else:
+            typer.echo(term.dim(f"     {row}"))
     extra = [c for c in config.arxiv_categories if c not in dict(categories.COMMON)]
     if extra:
         typer.echo(f"Also selected: {_categories_text(extra)}")
     typer.echo("")
-    typer.echo(CATEGORY_PROMPT_HELP)
+    term.hint(CATEGORY_PROMPT_HELP)
     entered = _prompt("Categories", default=current)
     try:
         cats = categories.parse_choice(entered, config.arxiv_categories)
         if cats != config.arxiv_categories:
             profile_edit.set_categories(vault, cats)
     except (ValueError, ConfigError, OSError) as exc:
-        typer.echo(f"Skipped: {exc}")
+        term.warn(f"Skipped: {exc}")
 
 
 def _wizard_seeds(vault: Path, config: Config) -> None:
-    typer.echo(SEEDS_HELP)
+    term.hint(SEEDS_HELP)
     arxiv = make_arxiv(config)  # one client for the whole run, so lookups stay 3 s apart
     try:
         while text := _ask("Paper link, arXiv id or title (blank to finish)"):
             try:
-                typer.echo(_add_seed(vault, arxiv, text))
+                _show_result(_add_seed(vault, arxiv, text))
             except _SeedProblem as exc:
-                typer.echo(f"Skipped: {exc}")
+                term.warn(f"Skipped: {exc}")
     finally:
         _close(arxiv)
     if len(load_profile(vault / "profile.yaml").seeds) < 3:
-        typer.echo(SEEDS_TIP)
+        term.hint(SEEDS_TIP)
 
 
 def _describe_machine(info) -> None:
@@ -2784,9 +2812,9 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
     info = detect_machine(config)
     _describe_machine(info)
     rec = recommend(info, catalog_mod.load_catalog(vault))
-    typer.echo(f"\nRecommended: {rec.backend}")
+    term.header(f"Recommended: {rec.backend}")
     for reason in rec.reasons:
-        typer.echo(f"  - {reason}")
+        term.bullet(reason)
     options = [rec.backend, *rec.alternatives]
     labels = {"ollama": "a model on this computer (Ollama)", "claude-code": "Claude Code (your login)",
               "none": "no summaries (abstracts only)"}  # all three are always offered
@@ -2807,7 +2835,7 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
             _setup_claude(vault, config, info, known)
         else:
             profile_edit.set_llm_backend(vault, "none", known)
-            typer.echo("No summary model: digests list each paper's abstract instead of a summary. "
+            term.ok("No summary model: digests list each paper's abstract instead of a summary. "
                        "Change this any time with `rpipe model setup`.")
     except (ValueError, ConfigError, OSError) as exc:
         raise _fail(str(exc)) from exc
@@ -2818,16 +2846,16 @@ def _check_backend(vault: Path) -> bool:
     """Test the saved backend and say whether it is ready."""
     config = load_config(vault / "config.yaml")
     if config.llm_backend == "none":
-        typer.echo("Ready: abstracts-only mode needs nothing else.")
+        term.ok("Ready: abstracts-only mode needs nothing else.")
         return True
     try:
         with _reporter() as reporter, stage(reporter, "model check") as handle:
             llm = build_llm(config, vault, log=handle.note)
             line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
     except (LlmError, OSError, ValueError) as exc:
-        typer.echo(f"Not ready yet: {exc}\nFix it, then run rpipe model setup")
+        term.warn(f"Not ready yet: {exc}\nFix it, then run rpipe model setup")
         return False
-    typer.echo(f"Ready: {line}")
+    term.ok(f"Ready: {line}")
     return True
 
 
@@ -2899,22 +2927,22 @@ def _wizard_describe(vault: Path, config: Config) -> None:
     if config.llm_backend == "none":
         typer.echo(NO_MODEL)
         return
-    typer.echo(DESCRIBE_HELP)
+    term.hint(DESCRIBE_HELP)
     description = _ask("Describe your research in a few sentences (Enter to skip)")
     if not description:
         return
     try:
         _suggest_flow(vault, config.model_copy(update={"vault_path": vault}), description, False)
     except ValueError as exc:
-        typer.echo(f"Skipped: {exc}")
+        term.warn(f"Skipped: {exc}")
 
 
 def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
     """Interactive setup. Every answer is saved as soon as it is confirmed."""
     try:
-        typer.echo(OPENING)
+        term.hint(OPENING)
         _step(1, "Summaries")
-        typer.echo(SUMMARIES_HELP)
+        term.hint(SUMMARIES_HELP)
         # The backend comes first: the describe step below already calls the model.
         _wizard_backend(vault, offer_keep=not fresh_config)
         config = load_config(vault / "config.yaml")
@@ -2927,10 +2955,10 @@ def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
         _wizard_seeds(vault, load_config(vault / "config.yaml"))
     except ConfigError as exc:
         raise _fail(str(exc)) from exc
-    typer.echo("")
     profile_show(vault)
-    typer.echo("\nAll set. Next:")
-    typer.echo(NEXT_COMMANDS)
+    term.header("All set")
+    typer.echo("Next:")
+    _next_commands()
 
 
 # --- feedback: votes and saves -------------------------------------------------

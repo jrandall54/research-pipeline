@@ -58,7 +58,8 @@ New to the project? Read in this order:
 20. [architecture.md](architecture.md): how the code is organised: the pipeline, the app and the composition layer, the rules between them (checked by tests), and `library_api.py`, the app's one door into the database
 21. [app.md](app.md): `rpipe app`, the private web app: the server, the host and same-origin guard
 22. [sharing.md](sharing.md): sharing your feed with other rpipe users (Phase 10): what is published, how it is published and followed
-23. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
+23. [terminal.md](terminal.md): how `rpipe` output looks (Phase 10.2): the style vocabulary in `term.py`, colour only on a terminal, `NO_COLOR`
+24. [glossary.md](glossary.md): plain-word definitions of terms (keep it open while you read)
 
 Just want to use it? Follow the quickstart in the top-level `README.md` (install, `rpipe init`, `rpipe run`, `rpipe schedule install`), then read [running.md](running.md), then [profile.md](profile.md) for setting up your profile.
 
@@ -100,6 +101,7 @@ Just want to use it? Follow the quickstart in the top-level `README.md` (install
 - `ollama_tune.py`: the settings and commands behind `rpipe model tune` ([hardware.md](hardware.md), Server settings).
 - `run_lock.py`: stops two pipeline commands working on one vault at once, and records which one holds the lock.
 - `progress.py`: progress events (data objects) that stages emit instead of printing; no package imports, so it can be shared.
+- `term.py`: the terminal styles (headers, marks, dim hints, aligned fields) every command prints through; see [terminal.md](terminal.md).
 - `progress_render.py`: turns progress events into stderr output (a live spinner on a terminal, plain lines otherwise); see [running.md](running.md).
 - `categories.py`: the list of real arXiv category codes and the did-you-mean check ([profile.md](profile.md)).
 - `defaults/`: the packaged starting `profile.yaml`, `config.yaml` and `model_catalog.yaml` (the models `rpipe model recommend` can suggest).

@@ -241,7 +241,7 @@ def test_model_set_url_and_context(vault):
     loaded = load_config(cfg)
     assert (loaded.llm_url, loaded.llm_num_ctx) == ("http://gpu-box:11434", 16384)
     out = model(vault, "show").output
-    assert "gpu-box" in out and "16384" in out and "model:" in out
+    assert "gpu-box" in out and "16384" in out and "model " in out
 
 
 def test_model_set_url_and_context_reject_bad_values(vault):
@@ -292,7 +292,7 @@ def test_model_show_reports_unknown_choice_when_probing_times_out(vault, monkeyp
     res = model(vault, "show")
     assert res.exit_code == 0
     # The configured settings are printed first; the timeout only replaces the last-choice line.
-    assert res.output.index("model: auto") < res.output.index("server:") < res.output.index("context window")
+    assert res.output.index("model  ") < res.output.index("server  ") < res.output.index("context window")
     assert "last choice: unknown. Ollama did not answer in time" in res.output
 
 

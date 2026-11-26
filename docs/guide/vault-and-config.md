@@ -87,7 +87,7 @@ Seed ids may be written with or without quotes (`2301.10000` or `"2301.10000"`);
 A sample session (new vault; `>` marks what you type):
 
 ```
-Vault ready at /home/you/research-vault
+✓ Vault ready at /home/you/research-vault
   config.yaml: created
   profile.yaml: created
   vault.sqlite, raw/, markdown/, summaries/, my_work/, gold/, digests/, cache/ ready
@@ -96,57 +96,59 @@ Proposed topics:
   1. prompt injection attacks on LLM agents
   2. agent sandboxing
 Add topic 'prompt injection attacks on LLM agents'? [Y/n]: > y
-Added topic: prompt injection attacks on LLM agents
+✓ Added topic: prompt injection attacks on LLM agents
 Add topic 'agent sandboxing'? [Y/n]: > n
 Found 1 of 1 proposed papers on arXiv (the rest were dropped).
 Add seed Universal and Transferable Adversarial Attacks on Aligned Language Models (Andy Zou, 2023)? [Y/n]: > y
-Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
+✓ Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
 
-Step 3 of 5: Topics
-Topics are short phrases for what you want to read about. Every new paper is compared
-with each topic, and the closest matches rank highest. Specific phrases work better
-than broad fields: "prompt injection attacks on LLM agents" beats "security".
-5 to 15 topics is plenty; near-duplicates add nothing, so use one per idea.
-Topic (blank to finish): > 
+── Step 3 of 5 · Topics ────────────────────────────────────────────────────────
+  Topics are short phrases for what you want to read about. Every new paper is compared
+  with each topic, and the closest matches rank highest. Specific phrases work better
+  than broad fields: "prompt injection attacks on LLM agents" beats "security".
+  5 to 15 topics is plenty; near-duplicates add nothing, so use one per idea.
+› Topic (blank to finish): > 
 
-Step 4 of 5: arXiv categories
+── Step 4 of 5 · arXiv categories ──────────────────────────────────────────────
 arXiv (arxiv.org) is the free site where most computer-science and AI research appears
 first. Every paper is filed under subject categories, and rpipe only collects papers
 from the categories you pick here; your topics then rank what was collected. Pick the
 areas your topics fall in. More categories means more papers to sort (slower, a bit
 noisier); too few means good papers are never seen.
 
-  [ ]  1. cs.AI   Artificial intelligence (general)
-  [x]  2. cs.LG   Machine learning
-  [x]  3. cs.CL   Language and LLMs
+      1  cs.AI    Artificial intelligence (general)
+  ✓   2  cs.LG    Machine learning
+  ✓   3  cs.CL    Language and LLMs
   ...
-  [ ] 17. stat.ML Statistical machine learning
+     17  stat.ML  Statistical machine learning
 
 Type the numbers you want, separated by commas (e.g. 1,2,5), or arXiv codes, or all
 for every computer-science category. Press Enter to keep the ticked ones.
 Change it any time with rpipe profile set-categories. Full list: https://arxiv.org/category_taxonomy
-Categories [cs.LG, cs.CL, cs.CR, cs.OS, cs.SE]: > 
+› Categories [cs.LG, cs.CL, cs.CR, cs.OS, cs.SE]: > 
 
-Step 5 of 5: Seed papers
+── Step 5 of 5 · Seed papers ───────────────────────────────────────────────────
 A seed paper is an example of exactly the kind of paper you want more of. You don't
 need to have read it; it just has to be on target. New papers are compared with each
 seed's title and abstract, which says far more than a short topic, so seeds are the
 strongest way to sharpen your feed. Paste an arXiv link, its id (e.g. 2307.15043) or
 its title; I look it up and you confirm. 3 to 10 is a good start.
-Paper link, arXiv id or title (blank to finish): > https://arxiv.org/abs/2307.15043
+› Paper link, arXiv id or title (blank to finish): > https://arxiv.org/abs/2307.15043
 Universal and Transferable Adversarial Attacks on Aligned Language Models (Andy Zou, 2023)
-Add this paper? [Y/n]: > y
-Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
-Paper link, arXiv id or title (blank to finish): > 
+› Add this paper? [Y/n]: > y
+✓ Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
+› Paper link, arXiv id or title (blank to finish): > 
 Tip: add more any time with rpipe profile add-seed. "More like this" in the app also nudges ranking, but fades over weeks; seeds don't.
 
-Topics:
+── Topics ─────────────────────────────────────────────────────────────────────
   1. prompt injection attacks on LLM agents
-Seeds:
+
+── Seeds ──────────────────────────────────────────────────────────────────────
   1. 2307.15043  Universal and Transferable Adversarial Attacks on Aligned Language Models
 ...
 
-All set. Next:
+── All set ────────────────────────────────────────────────────────────────────
+Next:
   rpipe run               collect today's papers, rank them and summarize the top ones
                           (the first run can take an hour or more with a local model)
   rpipe schedule install  do that every night by itself

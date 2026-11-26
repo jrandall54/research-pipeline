@@ -121,9 +121,12 @@ Model commands (`rpipe model setup`, `rpipe model set-backend NAME`, `rpipe mode
 
 ```
 $ uv run rpipe model show
-model: auto
-server: http://localhost:11434
-context window (num_ctx): auto
+
+── Summary model ───────────────────────────────────────────────────────────────
+  backend                   ollama
+  model                     auto
+  server                    http://localhost:11434
+  context window (num_ctx)  auto
 last choice: not probed yet; runs on first use, or `rpipe model fit`
 $ uv run rpipe model fit
 Probing Ollama: this loads and unloads models and can take a few minutes.

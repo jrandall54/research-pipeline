@@ -34,7 +34,7 @@ Install hints shown when Ollama is missing (`OLLAMA_INSTALL`): Linux `curl -fsSL
 3. **If you pick `ollama`.** Ollama missing: the install command for your OS is printed and you are asked "Installed it? Check again"; yes re-detects, no moves on (the final check will then say what is missing). If the recommendation proposed a model: the download size and the free disk where Ollama keeps models are shown (`download X GB; free disk where Ollama keeps models: Y GB`); if X + 2 GB is more than Y the download is refused (`not enough free disk`), otherwise "Download NAME now (X GB)? [y/N]" (default no; the same check and question as `rpipe model recommend`), with progress on stderr while it downloads (a live bar that follows the download percent on a terminal; in a log, `model pull…`, a line about every 10% such as `  qwen3:14b 43%`, then `model pull done (...)`). The final check prints `model check…` / `model check done (...)` on stderr before the `Ready:` line. Then the backend is saved.
 4. **If you pick `claude-code`.** Not logged in: "Run `claude` once in a terminal and log in, then come back", with the same re-check loop. Then it explains the trade: paper text goes to Anthropic, about 30 calls a night come out of your plan's usage quota, your shelf (`my_work/`) never leaves the machine, and `haiku` uses less quota than `sonnet`. You pick `sonnet` (default), `haiku` or `opus`. The backend is saved with the path of the `claude` program, so the nightly timer finds it even though it has no `~/.local/bin` on its PATH.
 5. **If you pick `none`.** Saved; digests show abstracts only.
-6. **The final check.** The saved backend is built and tested exactly as a run would. `Ready: <what was checked>` means done. `Not ready yet: <reason>` plus "Fix it, then run rpipe model setup" means your choice is saved but something is missing; the command exits 1. `none` is always ready.
+6. **The final check.** The saved backend is built and tested exactly as a run would. `✓ Ready: <what was checked>` means done. `! Not ready yet: <reason>` plus "Fix it, then run rpipe model setup" means your choice is saved but something is missing; the command exits 1. `none` is always ready.
 
 Worked transcripts (abridged):
 
@@ -45,50 +45,50 @@ What I found on this computer:
   graphics card: RTX 5070 Ti, 16.0 GB of GPU memory
   Ollama: installed, running; no models pulled yet
   Claude Code: not found
-Recommended: ollama
-  - RTX 5070 Ti has 16.0 GB of GPU memory, enough to run a model locally
+── Recommended: ollama ─────────────────────────────────────────────────────────
+  • RTX 5070 Ti has 16.0 GB of GPU memory, enough to run a model locally
   1. a model on this computer (Ollama)  [recommended]
   2. Claude Code (your login)
   3. no summaries (abstracts only)
-Choice [1]:
+› Choice [1]:
 download 12 GB; free disk where Ollama keeps models: 120 GB
-Download hf.co/unsloth/Qwen3.6-27B-GGUF:UD-IQ3_XXS now (12 GB)? [y/N]: y
+› Download hf.co/unsloth/Qwen3.6-27B-GGUF:UD-IQ3_XXS now (12 GB)? [y/N]: y
   pulling manifest ... downloading 42% ... success
-Ready: Ollama is running at http://localhost:11434 and model ... is installed.
+✓ Ready: Ollama is running at http://localhost:11434 and model ... is installed.
 ```
 
 ```
 $ rpipe model setup                              # no GPU, logged in to Claude Code
-Recommended: claude-code
-  - no GPU was found, but you are logged in to Claude Code
+── Recommended: claude-code ────────────────────────────────────────────────────
+  • no GPU was found, but you are logged in to Claude Code
   1. Claude Code (your login)  [recommended]
   2. a model on this computer (Ollama)
   3. no summaries (abstracts only)
-Choice [1]:
+› Choice [1]:
 With Claude Code, the text of each paper is sent to Anthropic ... about 30 calls ...
-Model (sonnet, haiku or opus) [sonnet]: haiku
-Ready: Claude Code is logged in at /home/you/.local/bin/claude and model haiku answered.
+› Model (sonnet, haiku or opus) [sonnet]: haiku
+✓ Ready: Claude Code is logged in at /home/you/.local/bin/claude and model haiku answered.
 ```
 
 ```
 $ rpipe model setup                              # no GPU, no login, 16 GB of memory
-Recommended: ollama
-  - no GPU found; a small model runs on the CPU overnight (slow)
+── Recommended: ollama ─────────────────────────────────────────────────────────
+  • no GPU found; a small model runs on the CPU overnight (slow)
   1. a model on this computer (Ollama)  [recommended]
   ...
 download 5.2 GB; free disk where Ollama keeps models: 120 GB
-Download qwen3:8b now (5.2 GB)? [y/N]: y
+› Download qwen3:8b now (5.2 GB)? [y/N]: y
 Model qwen3:8b and a context of 32,768 tokens are both pinned: the automatic choice (auto) only accepts models that sit fully in GPU memory, and this one does not.
 ```
 
 ```
 $ rpipe model setup                              # no GPU, no login, too little memory
-Recommended: none
+── Recommended: none ───────────────────────────────────────────────────────────
   1. no summaries (abstracts only)  [recommended]
   2. a model on this computer (Ollama)
   3. Claude Code (your login)
-Choice [1]:
-Ready: abstracts-only mode needs nothing else.
+› Choice [1]:
+✓ Ready: abstracts-only mode needs nothing else.
 ```
 
 Without a terminal the command refuses ("rpipe model setup is interactive; use `rpipe model set-backend NAME` in scripts"). The scriptable equivalents are `rpipe model set-backend`, `set` and `check` ([llm.md](llm.md)).

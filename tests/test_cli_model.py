@@ -171,9 +171,14 @@ def test_summarize_eval_and_suggest_refuse_under_none(vault):
         assert NO_MODEL in result.output, args
 
 
+def _squash(text: str) -> str:
+    """Collapse the padding `term.fields` puts between a key and its value."""
+    return "\n".join(" ".join(line.split()) for line in text.splitlines())
+
+
 def test_model_show_first_line_names_backend(vault):
     set_config(vault, llm_backend="none")
-    assert run(vault, "model", "show").output.splitlines()[0] == "backend: none"
+    assert "backend none" in _squash(run(vault, "model", "show").output)
 
 
 def test_suggest_announces_non_local_backend(vault, monkeypatch):
@@ -282,12 +287,12 @@ def test_set_effort_accepts_capitals_and_spaces(vault):
 
 def test_model_show_lists_effort_under_claude_code(vault):
     set_config(vault, llm_backend="claude-code", llm_effort="medium")
-    assert "effort: medium" in run(vault, "model", "show").output
+    assert "effort medium" in _squash(run(vault, "model", "show").output)
 
 
 def test_model_show_says_effort_only_applies_to_claude_code(vault):
     out = run(vault, "model", "show").output  # default backend ollama
-    assert "effort: low (only applies to the claude-code backend)" in out
+    assert "effort low (only applies to the claude-code backend)" in _squash(out)
 
 
 def test_claude_code_factory_passes_effort(vault, monkeypatch):
@@ -432,13 +437,13 @@ def test_set_mode_works_for_claude_code(vault):
 
 def test_model_show_prints_summarize_mode(vault):
     out = run(vault, "model", "show").output
-    assert "summarize mode: auto" in out
+    assert "summarize mode auto" in _squash(out)
     assert ("auto: split when the model is not fully in GPU memory or the context is below "
             f"{SPLIT_BELOW_CTX} tokens (Ollama); whole otherwise") in out
     set_config(vault, llm_backend="claude-code")
     run(vault, "model", "set-mode", "whole")
     out = run(vault, "model", "show").output
-    assert "summarize mode: whole" in out
+    assert "summarize mode whole" in _squash(out)
 
 
 def test_model_set_diagrams_command(vault):
@@ -454,4 +459,4 @@ def test_model_set_diagrams_command(vault):
 
 
 def test_model_show_prints_diagrams_line(vault):
-    assert "diagrams: auto (change with `rpipe model set-diagrams`)" in run(vault, "model", "show").output
+    assert "diagrams auto (change with `rpipe model set-diagrams`)" in _squash(run(vault, "model", "show").output)

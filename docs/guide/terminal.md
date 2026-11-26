@@ -21,7 +21,7 @@ Every `rpipe` command prints through one small set of styles, so the output look
 | Section header | blank line, then `── Title ───…` in bold cyan | `header(title)`, `step(n, total, name)` |
 | Explanation text | dim, indented 2 | `hint(text)` |
 | Success | green `✓` | `ok(text)` |
-| Warning | yellow `!` | `warn(text)` |
+| Warning | yellow `!` | `warn(text)`, `warn(text, err=True)` for stderr |
 | Error (stderr) | red `✗` | `error(text)` (used by `_fail`) |
 | Prompt | bold `›` | `prompt(...)`, `confirm(...)` |
 | `key  value` lines | key dim, values lined up | `fields(rows)` |
@@ -37,7 +37,26 @@ Phase 10.2 changed only how text looks. The sentences are the same ones as befor
 3. The marks `✓ ! ✗ › • ─` are ordinary characters, so they print either way. Only the colour is conditional.
 4. `header` reads the terminal width with `shutil.get_terminal_size((80, 24))` and draws the rule `min(80, width)` columns wide, so a narrow window never wraps it.
 
-Worked example: `rpipe profile show | cat` and the nightly `rpipe run` under systemd are not terminals, so they print `── Topics ───…` and `✓ ...` with no escape codes at all. The same command on your screen prints the header in bold cyan.
+Worked example: `rpipe profile show | cat` is not a terminal, so it prints `── Topics ───…` with no escape codes at all; the same command on your screen prints the header in bold cyan. The nightly `rpipe run` under systemd is not a terminal either, so its end-of-run summary is plain text for the journal:
+
+```
+✓ Digest written to <vault>/digests/2026-11-21.md
+  inserted       339
+  updated        11
+  triaged        15
+  skipped        324
+```
+
+(`✓` and the two-space indent are ordinary characters; there is no `\x1b` anywhere. A test pins this: `test_run_output_plain_when_piped`.)
+
+**Messages with several lines.** `ok`, `warn` and `error` indent every line after the first by two spaces, so a second line sits under the text and not under the mark:
+
+```
+! Not ready yet: model not installed
+  Fix it, then run rpipe model setup
+```
+
+**Warnings on stderr.** `warn(text, err=True)` sends the line to stderr. The run uses it for "unknown categories" and for the "another run holds the lock" message, so a script reading stdout never sees them.
 
 ## Why it's built this way
 
@@ -58,5 +77,5 @@ Worked example: `rpipe profile show | cat` and the nightly `rpipe run` under sys
 ## Where the code is
 
 - `src/research_pipeline/term.py`: the helpers. It is in the composition group (see [architecture.md](architecture.md)); it imports only `typer` and the standard library.
-- `src/research_pipeline/cli.py`: `_fail`, the init wizard, the `profile` and `model` commands call it. Other command groups move over in later Phase 10.2 tasks.
+- `src/research_pipeline/cli.py`: `_fail`, the init wizard, the `profile` and `model` commands call it. The run, collect, triage, summarize, digest, requests, shelf, schedule, app and sources commands and the whole `model` group (scan, recommend, setup, tune, fit, bench) use it too. The share, gold, eval and catalog groups move over in the next task.
 - `tests/test_term.py`: no escape codes off a terminal, colour on one, `NO_COLOR`, header width, alignment, errors to stderr.

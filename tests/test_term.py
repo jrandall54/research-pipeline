@@ -109,3 +109,13 @@ def test_fail_goes_to_stderr_with_exit_1(tmp_path):
     result = CliRunner().invoke(cli.app, ["profile", "show", "--vault", str(tmp_path / "none")])
     assert result.exit_code == 1
     assert "✗ No vault found" in result.stderr and "\x1b" not in result.stderr
+
+
+def test_continuation_lines_align_under_the_text(capsys):
+    term.ok("first\nsecond")
+    term.warn("a\nb\n\nc")
+    term.error("x\ny")
+    term.warn("to stderr", err=True)
+    cap = capsys.readouterr()
+    assert cap.out == "✓ first\n  second\n! a\n  b\n\n  c\n"
+    assert cap.err == "✗ x\n  y\n! to stderr\n"

@@ -40,18 +40,21 @@ Worked transcripts (abridged):
 
 ```
 $ rpipe model setup                              # 16 GB NVIDIA card, Ollama running, no models
-What I found on this computer:
-  system: Linux, 32 GB of memory
-  graphics card: RTX 5070 Ti, 16.0 GB of GPU memory
-  Ollama: installed, running; no models pulled yet
-  Claude Code: not found
+
+── What I found on this computer ───────────────────────────────────────────────
+  system         Linux, 32 GB of memory
+  graphics card  RTX 5070 Ti, 16.0 GB of GPU memory
+  Ollama         installed, running; no models pulled yet
+  Claude Code    not found
 ── Recommended: ollama ─────────────────────────────────────────────────────────
   • RTX 5070 Ti has 16.0 GB of GPU memory, enough to run a model locally
+
+── Choose how summaries are written ────────────────────────────────────────────
   1. a model on this computer (Ollama)  [recommended]
   2. Claude Code (your login)
   3. no summaries (abstracts only)
 › Choice [1]:
-download 12 GB; free disk where Ollama keeps models: 120 GB
+  download 12 GB; free disk where Ollama keeps models: 120 GB
 › Download hf.co/unsloth/Qwen3.6-27B-GGUF:UD-IQ3_XXS now (12 GB)? [y/N]: y
   pulling manifest ... downloading 42% ... success
 ✓ Ready: Ollama is running at http://localhost:11434 and model ... is installed.
@@ -76,9 +79,9 @@ $ rpipe model setup                              # no GPU, no login, 16 GB of me
   • no GPU found; a small model runs on the CPU overnight (slow)
   1. a model on this computer (Ollama)  [recommended]
   ...
-download 5.2 GB; free disk where Ollama keeps models: 120 GB
+  download 5.2 GB; free disk where Ollama keeps models: 120 GB
 › Download qwen3:8b now (5.2 GB)? [y/N]: y
-Model qwen3:8b and a context of 32,768 tokens are both pinned: the automatic choice (auto) only accepts models that sit fully in GPU memory, and this one does not.
+✓ Model qwen3:8b and a context of 32,768 tokens are both pinned: the automatic choice (auto) only accepts models that sit fully in GPU memory, and this one does not.
 ```
 
 ```

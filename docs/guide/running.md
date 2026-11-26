@@ -82,11 +82,16 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 ```
 $ uv run rpipe summarize
-Summarized:
-  fetched=3, summarized=3, abstract_only=0, body_cut=0, summary_failed=0
+
+── Summarized ──────────────────────────────────────────────────────────────────
+  fetched         3
+  summarized      3
+  abstract_only   0
+  body_cut        0
+  summary_failed  0
 ```
 
-Illustrative output; your numbers will differ. The candidates are tried in order of parameter count, so an older but larger model (here `coder-16b`, 15.7B) can win over newer 14B ones; pin the one you prefer with `rpipe model set NAME`. The progress lines go to stderr, the final line to stdout. The context is the measured maximum (20480 here) less a 1024-token safety margin.
+Illustrative output; your numbers will differ. The candidates are tried in order of parameter count, so an older but larger model (here `coder-16b`, 15.7B) can win over newer 14B ones; pin the one you prefer with `rpipe model set NAME`. The progress lines go to stderr, the final summary to stdout. The context is the measured maximum (20480 here) less a 1024-token safety margin.
 
 **Catching up: `rpipe summarize --backlog` and `rpipe summarize ID...`**
 
@@ -252,14 +257,14 @@ You asked for them with:
 
 ```
 $ rpipe requests add 2611.25005
-Request 7: summarize 2611.25005.
-It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+✓ Request 7: summarize 2611.25005.
+  It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
 $ rpipe requests add "https://arxiv.org/abs/2611.30001v2"
-Request 8: summarize 2611.30001.
-It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+✓ Request 8: summarize 2611.30001.
+  It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
 $ rpipe requests add 2611.25005
-Request 7 to summarize 2611.25005 is already waiting; nothing new was added.
-It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+! Request 7 to summarize 2611.25005 is already waiting; nothing new was added.
+  It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
 ```
 
 The third line asked again for a paper that was still waiting, so it got request 7 back instead of a second copy.
@@ -274,14 +279,17 @@ Row 7 is `done` (1 try). Row 8 is `pending` with 1 try and the 503 as its error;
 
 ```
 $ rpipe requests add 2611.30001
-Request 8 to summarize 2611.30001 is already waiting; nothing new was added.
-It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+! Request 8 to summarize 2611.30001 is already waiting; nothing new was added.
+  It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
 $ rpipe requests list
 8  pending  summarize  2611.30001  1  2026-11-23T09:12:40+00:00  arXiv returned 503
 7  done     summarize  2611.25005  1  2026-11-23T09:12:02+00:00
 $ rpipe requests run
-Requests:
-  requests_done=1, requests_failed=0, requests_waiting=0
+
+── Requests ────────────────────────────────────────────────────────────────────
+  requests_done     1
+  requests_failed   0
+  requests_waiting  0
 ```
 
 `rpipe requests add PAPER` (not locked, no model) finds the paper the way `rpipe vote` does (`_resolve_paper`: an id in any spelling such as `2611.25005v2`, `arXiv:2611.25005` or an arxiv.org URL, else part of the title, with a numbered list to pick from when several titles match), then calls `library_api.request(conn, "summarize", {"paper_id": ...})`. It prints the request id and when it will run. If the same paper is already waiting (or being worked on) it says `already waiting` and gives that request's id; a paper not in your vault gives `No paper in your vault matches '...'. ... Nothing was changed.` and exit 1, with no row added. It only adds one row, a single short write, so it runs safely beside the nightly job. `rpipe requests list` (not locked, no model) prints every request newest first: id, status, kind, paper id, tries, when it was asked, and the last error if any; `No requests.` when there are none. `rpipe requests run` takes the pipeline lock, so a pipeline command started meanwhile is told `rpipe requests run is already working on <vault>; nothing was started.`; it needs a model (exit 1 with the `none` backend, or when the model is unavailable), says `No requests waiting.` and stops if no request can still run, else picks the reading mode like `rpipe summarize` and drains with progress.
@@ -304,15 +312,23 @@ This is a real run on a clean vault (profile: LLM security topics, four well-kno
 
 ```
 $ uv run rpipe run
-Digest written to <vault>/digests/2026-11-21.md
-  inserted=339, updated=11, unchanged=0, source_errors=0, triaged=15, skipped=324, embedded=339
+✓ Digest written to <vault>/digests/2026-11-21.md
+  inserted       339
+  updated        11
+  unchanged      0
+  source_errors  0
+  triaged        15
+  skipped        324
+  embedded       339
 ```
+
+The summary is one `key  value` row per count (the `term.fields` helper, see `terminal.md`); under a pipe or the systemd journal it is the same text with no colour codes. Errors, if any, follow as `✗ message` lines on stderr.
 
 It took about 13 seconds with the model already downloaded (about 2 minutes the very first time, which includes the model download and a cold start). Where the time goes:
 
-1. **collect** fetches the newest arXiv papers across the configured categories, in pages of 100 spaced 3 seconds apart because of arXiv's rate limit. It stops after the first page that contains a paper already in the vault, or at `arxiv_max_results` (default 1000), whichever comes first. (This sample run predates that rule and used a fixed limit of 300, so it fetched 3 pages.) It also fetches about 50 Hugging Face Daily Papers. `inserted=339` papers were new; `updated=11` papers appeared in both sources, so the second source merged upvotes and repos into the first source's row.
+1. **collect** fetches the newest arXiv papers across the configured categories, in pages of 100 spaced 3 seconds apart because of arXiv's rate limit. It stops after the first page that contains a paper already in the vault, or at `arxiv_max_results` (default 1000), whichever comes first. (This sample run predates that rule and used a fixed limit of 300, so it fetched 3 pages.) It also fetches about 50 Hugging Face Daily Papers. `inserted` (339) papers were new; `updated` (11) papers appeared in both sources, so the second source merged upvotes and repos into the first source's row.
 2. **seeds**: the four seed ids were not in the database, so one arXiv request fetched their abstracts and saved them to `<vault>/cache/seeds.json`. A second run makes no seed request.
-3. **triage** embedded all 339 papers (`embedded=339`; stored vectors are reused on later nights), scored them, kept 15 and skipped 324.
+3. **triage** embedded all 339 papers (`embedded` 339; stored vectors are reused on later nights), scored them, kept 15 and skipped 324.
 4. **summarize** (added in Phase 2, after this sample run was taken, so its counts and time are not in the numbers above) fetched each kept paper's arXiv HTML, asked the local model for a cited summary and critique, and moved the paper to `summarized`. It is by far the slowest stage: expect on the order of a minute per paper on a laptop-class GPU.
 5. **digest** wrote the file and marked the papers `in_digest`.
 

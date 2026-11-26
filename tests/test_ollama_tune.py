@@ -133,7 +133,7 @@ def test_tune_stops_at_failed_command(env):
 def test_tune_warns_on_host_mismatch(env):
     env.mp.setattr(cli, "_scan_server", lambda url: server({"OLLAMA_HOST": "127.0.0.1:11436"}, host_matches=False))
     result = tune(env, input="\n")
-    assert "Warning" in result.output
+    assert "! changing the service would not change the server rpipe uses." in result.output
     assert env.calls == []
 
 

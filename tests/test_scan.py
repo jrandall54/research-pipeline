@@ -1,5 +1,6 @@
 """Machine scan: CPU, memory, disk, every GPU, and the Ollama server's own settings. Fully offline."""
 import math
+import re
 from pathlib import Path
 
 import httpx
@@ -208,9 +209,10 @@ def test_model_scan_command_prints_sections(tmp_path, monkeypatch):
                           cpu=CpuInfo(16, ["avx2"]), ram_free_gb=20.0, disk_free_gb=300.0, ollama=server)
     monkeypatch.setattr(cli, "detect_machine", lambda config: machine)
     out = CliRunner().invoke(cli.app, ["model", "scan", "--vault", str(vault)]).output
-    for text in ("GPU", "memory", "CPU", "Ollama", "flash attention: on (set in kv-cache.conf)",
-                 "free disk", "q8_0", "parallel slots: 1", "port 11436 but rpipe talks to localhost:11434"):
+    for text in ("GPU", "memory", "CPU", "Ollama", "free disk", "q8_0", "port 11436 but rpipe talks to localhost:11434"):
         assert text in out
+    assert re.search(r"flash attention\s+on \(set in kv-cache.conf\)", out)
+    assert re.search(r"parallel slots\s+1", out)
 
 
 def test_machine_key_collects_version_settings_and_gpus(monkeypatch):
@@ -260,7 +262,7 @@ def test_scan_display_treats_true_as_flash_on(tmp_path, monkeypatch):
                           ollama_models=[], claude_path=None, claude_logged_in=False, ollama=server)
     monkeypatch.setattr(cli, "detect_machine", lambda config: machine)
     out = CliRunner().invoke(cli.app, ["model", "scan", "--vault", str(vault)]).output
-    assert "flash attention: on" in out
+    assert re.search(r"flash attention\s+on", out)
 
 
 def test_nvidia_na_free_memory_is_unknown():

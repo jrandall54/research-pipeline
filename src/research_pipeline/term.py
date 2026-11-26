@@ -60,16 +60,23 @@ def hint(text: str) -> None:
         typer.echo(dim("  " + line) if line else "")
 
 
+def _align(text: str) -> str:
+    """Indent the continuation lines of a multi-line message so they sit under the text, not the mark."""
+    first, *rest = text.split("\n")
+    return "\n".join([first, *(("  " + line) if line else "" for line in rest)])
+
+
 def ok(text: str) -> None:
-    typer.echo(f"{tick()} {text}")
+    typer.echo(f"{tick()} {_align(text)}")
 
 
-def warn(text: str) -> None:
-    typer.echo(f"{_style('!', fg='yellow')} {text}")
+def warn(text: str, err: bool = False) -> None:
+    """`! text`; `err=True` sends it to stderr (for warnings a script should not read as output)."""
+    typer.echo(f"{_style('!', err=err, fg='yellow')} {_align(text)}", err=err)
 
 
 def error(text: str) -> None:
-    typer.echo(f"{_style('✗', err=True, fg='red')} {text}", err=True)
+    typer.echo(f"{_style('✗', err=True, fg='red')} {_align(text)}", err=True)
 
 
 def bullet(text: str, indent: int = 2) -> None:

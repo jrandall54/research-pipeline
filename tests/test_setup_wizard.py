@@ -91,7 +91,7 @@ def test_declining_pull_saves_choice_but_not_ready(vault, monkeypatch):
     assert "Not ready yet: model not installed" in result.output and "rpipe model setup" in result.output
     lines = result.output.splitlines()
     assert "! Not ready yet: model not installed" in lines
-    assert "Fix it, then run rpipe model setup" in lines
+    assert "  Fix it, then run rpipe model setup" in lines
     assert "\\n" not in result.output
     assert "" in lines and any(ln.startswith("── Recommended: ollama ") for ln in lines)
 

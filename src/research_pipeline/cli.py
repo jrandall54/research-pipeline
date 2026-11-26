@@ -513,9 +513,9 @@ def _require_model(config: Config) -> None:
 
 
 def _report(counts: dict[str, int], errors: list[str]) -> None:
-    typer.echo("  " + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    term.fields([(k, str(v)) for k, v in counts.items()])
     for e in errors:
-        typer.echo(f"  error: {e}", err=True)
+        term.error(e)
 
 
 RUN_LOCKED_EXIT = 75  # EX_TEMPFAIL: "try again later"; the next night proceeds normally
@@ -530,7 +530,7 @@ def _take(lock: VaultLock, again: bool = False) -> None:
         lock.acquire()
     except RunLocked as exc:
         started = "nothing further was started" if again else "nothing was started"
-        typer.echo(f"{exc}; {started}. Wait for it to finish (see `rpipe runs`).", err=True)
+        term.warn(f"{exc}; {started}. Wait for it to finish (see `rpipe runs`).", err=True)
         raise typer.Exit(code=RUN_LOCKED_EXIT) from exc
 
 
@@ -595,8 +595,8 @@ def _run_locked(ctx: _Context) -> None:
     profile = _load_profile(ctx)
     bad_categories = categories.unknown(ctx.config.arxiv_categories)
     if bad_categories:
-        typer.echo(
-            f"warning: unknown categories: {', '.join(bad_categories)} "
+        term.warn(
+            f"unknown categories: {', '.join(bad_categories)} "
             "(fix with `rpipe profile set-categories`)",
             err=True,
         )
@@ -730,9 +730,9 @@ def _run_locked(ctx: _Context) -> None:
                 if not in_flight:
                     raise  # nothing else went wrong, so this failure is the story
                 # Never let this mask the original error that is already propagating.
-                typer.echo(f"warning: could not record the run: {exc}", err=True)
+                term.warn(f"could not record the run: {exc}", err=True)
     if out is not None:
-        typer.echo(f"Digest written to {out}")
+        term.ok(f"Digest written to {out}")
     _report(counts, errors)
     if crashed:
         raise typer.Exit(code=1)
@@ -775,7 +775,7 @@ def runs(
     ctx = _open(vault)
     rows = list_runs(ctx.conn, limit)
     if not rows:
-        typer.echo("No runs yet. Run `rpipe run`.")
+        term.hint("No runs yet. Run `rpipe run`.")
         return
     for row in rows:
         typer.echo(format_run(row))
@@ -808,7 +808,7 @@ def collect(vault: VaultOption = None) -> None:
         pipeline = build_pipeline(ctx.config)
         with _reporter() as reporter:
             counts, errors = run_collect(ctx.conn, pipeline.sources, reporter=reporter)
-        typer.echo("Collected:")
+        term.header("Collected")
         _report(counts, [*pipeline.startup_errors, *errors])
 
 
@@ -827,7 +827,7 @@ def triage(vault: VaultOption = None) -> None:
             counts = run_triage(
                 ctx.conn, embedder, profile, seeds, use_shelf=True, reporter=reporter
             )
-        typer.echo("Triaged:")
+        term.header("Triaged")
         _report(counts, errors)
 
 
@@ -872,9 +872,9 @@ def summarize(
             total = count_missing_summary(ctx.conn, today) if backlog else 0
             if not normal and not total:
                 if backlog:
-                    typer.echo("Nothing to summarize: no papers in past digests are missing a summary, and no triaged papers or today's digest papers are waiting either.")
+                    term.hint("Nothing to summarize: no papers in past digests are missing a summary, and no triaged papers or today's digest papers are waiting either.")
                 else:
-                    typer.echo("Nothing to summarize: no triaged papers, and today's digest has none missing a summary. Run `rpipe run` or `rpipe triage` first.")
+                    term.hint("Nothing to summarize: no triaged papers, and today's digest has none missing a summary. Run `rpipe run` or `rpipe triage` first.")
                 return
         try:
             llm = _ready_llm(pipeline)
@@ -885,9 +885,9 @@ def summarize(
         cap = (limit or 10) if backlog else None
         if backlog:
             if total:
-                typer.echo(f"Backlog: {min(cap, total)} of {total} papers missing a summary (newest first; raise --limit for more)")
+                term.hint(f"Backlog: {min(cap, total)} of {total} papers missing a summary (newest first; raise --limit for more)")
             else:
-                typer.echo("No older digest papers are missing a summary.")
+                term.hint("No older digest papers are missing a summary.")
         done = ListReporter()
         with _reporter() as live:
             # Reruns follow tonight unless the deadline is off, so the same fallback rule as `run`.
@@ -899,7 +899,7 @@ def summarize(
                 reporter=_Tee(live, done), refetch=refetch,
                 mode=mode, fallback_above=fallback_above, diagrams=diagrams,
             )
-        typer.echo("Summarized:")
+        term.header("Summarized")
         _report(counts, errors)
         _refresh_hint(
             ctx.conn, [e.label for e in done.events if e.kind == "step" and e.outcome == "done"], today
@@ -919,9 +919,9 @@ def _refresh_hint(conn: sqlite3.Connection, paper_ids: list[str], today: date) -
         )
     ]
     if dates:
-        typer.echo("Older digests do not show new summaries until you refresh them:")
+        term.warn("Older digests do not show new summaries until you refresh them:")
         for d in dates:
-            typer.echo(f"  rpipe digest --date {d}")
+            term.bullet(term.cmd(f"rpipe digest --date {d}"))
 
 
 @app.command()
@@ -939,7 +939,7 @@ def digest(
         except ValueError as exc:
             raise _fail(f"--date must be YYYY-MM-DD, got {date_!r}") from exc
         out = write_digest(ctx.conn, ctx.vault, day, f"Digest {day.isoformat()}: written from stored papers (no collection run)")
-        typer.echo(f"Digest written to {out}")
+        term.ok(f"Digest written to {out}")
 
 
 # ---------------------------------------------------------------- request list
@@ -967,11 +967,11 @@ def requests_add(
     finally:
         ctx.conn.close()
     if rid in before:
-        typer.echo(f"Request {rid} to summarize {pid} is already waiting; nothing new was added.")
+        term.warn(f"Request {rid} to summarize {pid} is already waiting; nothing new was added.")
     else:
-        typer.echo(f"Request {rid}: summarize {pid}.")
-    typer.echo("It runs during tonight's `rpipe run`, or now with `rpipe requests run`. "
-               "`rpipe requests list` shows how it went.")
+        term.ok(f"Request {rid}: summarize {pid}.")
+    term.hint("It runs during tonight's `rpipe run`, or now with `rpipe requests run`. "
+              "`rpipe requests list` shows how it went.")
 
 
 @requests_app.command("run")
@@ -982,7 +982,7 @@ def requests_run(vault: VaultOption = None) -> None:
         _require_model(ctx.config)
         pending = runnable_requests(ctx.conn)
         if not pending:
-            typer.echo("No requests waiting. `rpipe requests list` shows earlier ones.")
+            term.hint("No requests waiting. `rpipe requests list` shows earlier ones.")
             return
         pipeline = build_pipeline(ctx.config)
         try:
@@ -998,7 +998,7 @@ def requests_run(vault: VaultOption = None) -> None:
                 ctx.conn, llm, pipeline.fulltext_fetcher, llm.num_ctx,
                 reporter=reporter, mode=mode, fallback_above=fallback_above, diagrams=diagrams,
             )
-        typer.echo("Requests:")
+        term.header("Requests")
         _report(counts, errors)
 
 
@@ -1008,7 +1008,7 @@ def requests_list(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     rows = requests_by_status(ctx.conn, "pending", "running", "done", "failed")
     if not rows:
-        typer.echo("No requests.")
+        term.hint("No requests.")
         return
     for row in reversed(rows):
         paper = json.loads(row["payload"]).get("paper_id", "-")
@@ -1193,9 +1193,9 @@ def _describe(meta: PaperMeta) -> str:
 
 def _pick_index(labels: list[str]) -> int | None:
     """Show a numbered list and ask for a choice; return the 0-based index, or None for cancel."""
-    for i, label in enumerate(labels, 1):
-        typer.echo(f"  {i}. {label}")
     n = len(labels)
+    for i, label in enumerate(labels, 1):
+        typer.echo(f"  {str(i).rjust(len(str(n)))}. {label}")
     pick = _prompt(f"Pick 1-{n} or 0 to cancel", type=int)
     if not 0 <= pick <= n:
         raise _SeedProblem(f"{pick} is not between 0 and {n}. Nothing was changed.")
@@ -1473,7 +1473,7 @@ def shelf_add(
             embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
         with _clean_errors():
             item = library_api.shelf_add(ctx.conn, ctx.vault / "my_work", embedder, source)
-        typer.echo(f"Added '{item.name}' to your shelf. Papers close to it will now rank higher.")
+        term.ok(f"Added '{item.name}' to your shelf. Papers close to it will now rank higher.")
 
 
 @shelf_app.command("list")
@@ -1482,11 +1482,12 @@ def shelf_list(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     items = library_api.shelf_items(ctx.conn)
     if not items:
-        typer.echo('Your shelf is empty. Add a note or file with: rpipe shelf add "your idea" (or a .md/.txt path).')
+        term.hint('Your shelf is empty. Add a note or file with: rpipe shelf add "your idea" (or a .md/.txt path).')
         return
-    typer.echo(f"Shelf: {_item_count(len(items), 'item')}")
+    term.header(f"Shelf: {_item_count(len(items), 'item')}")
+    width = max(len(item.name) for item in items)
     for item in items:
-        typer.echo(f"  {item.name}  {_item_count(item.chunks, 'chunk')}  added {item.added_at[:10]}")
+        typer.echo(f"  {item.name.ljust(width)}  {_item_count(item.chunks, 'chunk')}  added {item.added_at[:10]}")
 
 
 @shelf_app.command("remove")
@@ -1503,9 +1504,9 @@ def shelf_remove(
     except ValueError as exc:
         raise _fail(str(exc)) from exc
     if len(moved) > 1:
-        typer.echo(f"Removed '{name}'. Moved {len(moved)} files to my_work/.removed/: {', '.join(moved)}.")
+        term.ok(f"Removed '{name}'. Moved {len(moved)} files to my_work/.removed/: {', '.join(moved)}.")
     else:
-        typer.echo(f"Removed '{name}'. The file is in my_work/.removed/ if you want it back.")
+        term.ok(f"Removed '{name}'. The file is in my_work/.removed/ if you want it back.")
 
 
 @shelf_app.command("sync")
@@ -1516,12 +1517,12 @@ def shelf_sync(vault: VaultOption = None) -> None:
         with _reporter() as reporter:
             embedder = _embedder(build_pipeline(ctx.config), ctx.config.embedding_model, reporter=reporter)
             res = library_api.shelf_sync(ctx.conn, ctx.vault / "my_work", embedder, reporter=reporter)
-        typer.echo(f"Shelf synced: {len(res.added)} added, {len(res.updated)} updated, {len(res.removed)} removed.")
+        term.ok(f"Shelf synced: {len(res.added)} added, {len(res.updated)} updated, {len(res.removed)} removed.")
         for label, names in (("Added", res.added), ("Updated", res.updated), ("Removed", res.removed)):
             if names:
-                typer.echo(f"  {label}: {', '.join(names)}")
+                term.bullet(f"{label}: {', '.join(names)}")
         if res.ignored:
-            typer.echo(
+            term.warn(
                 f"Ignored {len(res.ignored)} file(s): {', '.join(res.ignored)}. "
                 "Only .md and .txt files directly in my_work/ are indexed "
                 "(if a .md and a .txt share a name, the .md is used)."
@@ -2177,17 +2178,17 @@ def model_fit(vault: VaultOption = None) -> None:
         _ollama_only(cfg, "fit")
         try:
             if cfg.llm_model != "auto" and cfg.llm_num_ctx != "auto":
-                typer.echo(f"pinned: {cfg.llm_model} at {cfg.llm_num_ctx} tokens (nothing to probe)")
-                typer.echo(build_llm(cfg, ctx.vault).check())
+                term.ok(f"pinned: {cfg.llm_model} at {cfg.llm_num_ctx} tokens (nothing to probe)")
+                term.ok(build_llm(cfg, ctx.vault).check())
                 return
-            typer.echo("Probing Ollama: this loads and unloads models and can take a few minutes.")
+            term.hint("Probing Ollama: this loads and unloads models and can take a few minutes.")
             with _reporter() as reporter, stage(reporter, "model fit") as handle:
                 fit = ollama_fit.resolve(
                     cfg.llm_url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True, log=handle.note,
                 )
         except (LlmError, OSError, ValueError) as exc:
             raise _fail(str(exc)) from exc
-        typer.echo(f"Using model {fit.model} with a context of {fit.num_ctx} tokens")
+        term.ok(f"Using model {fit.model} with a context of {fit.num_ctx} tokens")
 
 
 @model_app.command("bench")
@@ -2215,17 +2216,17 @@ def _fit_cached(cfg: Config, vault: Path) -> bool:
 def _measure_speed(vault: Path, conn: sqlite3.Connection, cfg: Config) -> None:
     """Time the configured Ollama model, save the result and print it (raises LlmError on failure)."""
     if cfg.llm_num_ctx == "auto" and not _fit_cached(cfg, vault):
-        typer.echo("The context that fits is not measured yet, so this first measures the context that fits "
-                   "(it loads and unloads models and can take up to 15 minutes), then the speed.")
-    typer.echo("Measuring speed: this loads the model and takes about 1-3 minutes on a GPU, "
-               "up to 5 on a CPU.")
+        term.hint("The context that fits is not measured yet, so this first measures the context that fits "
+                  "(it loads and unloads models and can take up to 15 minutes), then the speed.")
+    term.hint("Measuring speed: this loads the model and takes about 1-3 minutes on a GPU, "
+              "up to 5 on a CPU.")
     with _reporter() as reporter, stage(reporter, "model bench") as handle:
         fit = ollama_fit.resolve(cfg.llm_url, vault, cfg.llm_model, cfg.llm_num_ctx, log=handle.note)
         tokens = bench_mod.median_paper_tokens(conn)
         handle.note(f"timing {fit.model} at {fit.num_ctx} tokens")
         result = bench_mod.run_bench(cfg.llm_url, fit.model, fit.num_ctx, tokens)
     bench_mod.save_bench(vault, result)
-    typer.echo(
+    term.ok(
         f"{fit.model}: reads {result.read_tps:.0f} tokens/s, writes {result.write_tps:.0f} tokens/s; "
         f"about {result.seconds_per_paper:.0f} s per paper ({result.paper_tokens:,}-token paper), "
         f"about {result.seconds_per_paper * 15 / 60:.0f} min for 15 papers"
@@ -2244,9 +2245,9 @@ def _run_plan(commands: list[list[str]], undo_hint: bool = False) -> bool:
     for i, argv in enumerate(commands):
         typer.echo(f"$ {' '.join(argv)}")
         if ollama_tune.run_tty(argv) != 0:
-            typer.echo(f"Failed: {' '.join(argv)}. The commands after it did not run.")
+            term.warn(f"Failed: {' '.join(argv)}. The commands after it did not run.")
             if undo_hint and i > 0:
-                typer.echo(f"To undo: {ollama_tune.UNDO_COMMAND}")
+                term.hint(f"To undo: {ollama_tune.UNDO_COMMAND}")
             return False
     return True
 
@@ -2259,25 +2260,25 @@ def _wait_for_ollama(url: str) -> bool:
 
 def _tune_undo(url: str) -> None:
     if not ollama_tune.DROPIN.exists():
-        typer.echo(f"Nothing to undo: {ollama_tune.DROPIN} does not exist.")
+        term.hint(f"Nothing to undo: {ollama_tune.DROPIN} does not exist.")
         return
     server = _scan_server(url)
     note = ollama_tune.host_note(server, url)
     if note:
-        typer.echo(note)
+        term.warn(note)
     wait_url = ollama_tune.service_url(server, url)
     commands = ollama_tune.undo_commands()
-    typer.echo("This removes only rpipe's own settings file; other files are untouched. Commands:")
+    term.hint("This removes only rpipe's own settings file; other files are untouched. Commands:")
     for argv in commands:
         typer.echo("  " + " ".join(argv))
     if not _confirm("Undo now?", default=False):
-        typer.echo("Nothing was changed.")
+        term.hint("Nothing was changed.")
         return
     if not _run_plan(commands):
         raise typer.Exit(code=1)
     if not _wait_for_ollama(wait_url):
         raise _fail("Ollama did not answer after the restart; check `systemctl status ollama`")
-    typer.echo("Done: rpipe's settings are removed and Ollama is running again.")
+    term.ok("Done: rpipe's settings are removed and Ollama is running again.")
 
 
 @model_app.command("tune")
@@ -2299,25 +2300,26 @@ def model_tune(
             server = _scan_server(url)
         note = ollama_tune.host_note(server, url)
         if note:
-            typer.echo(note)
+            term.warn(note)
         settings = ollama_tune.advise(server)
         if not settings:
-            typer.echo("Ollama already has the recommended settings; nothing to change.")
+            term.ok("Ollama already has the recommended settings; nothing to change.")
             for key in (ollama_tune.FLASH, ollama_tune.KV_TYPE, ollama_tune.PARALLEL):
                 if key in server.env:
                     source = setting_source(server, key)
-                    typer.echo(f"  {key}={server.env[key]}" + (f" (set in {source})" if source else ""))
+                    term.bullet(f"{key}={server.env[key]}" + (f" (set in {source})" if source else ""))
             return
         if server.how != "systemd":
             typer.echo(ollama_tune.manual_instructions(server, settings))
             return
         if server.host_matches is False:
-            typer.echo("Warning: changing the service would not change the server rpipe uses.")
+            term.warn("changing the service would not change the server rpipe uses.")
             if not _confirm("Continue anyway?", default=False):
-                typer.echo("Nothing was changed.")
+                term.hint("Nothing was changed.")
                 return
         for s in settings:
-            typer.echo(f"{s.name}: {s.current or 'not set'} -> {s.value}\n  what: {s.what}\n  why: {s.why}")
+            typer.echo(f"{term.strong(s.name)}: {s.current or 'not set'} -> {s.value}")
+            term.hint(f"what: {s.what}\nwhy: {s.why}")
         written = ollama_tune.owned(server)
         content = ollama_tune.render_dropin(written)
         tmp_dir = Path(tempfile.mkdtemp())
@@ -2329,9 +2331,9 @@ def model_tune(
                        f"later re-tune never drops one set earlier):\n{content}\nCommands (sudo will ask for your password):")
             for argv in commands:
                 typer.echo("  " + " ".join(argv))
-            typer.echo(f"To undo later: {ollama_tune.UNDO_COMMAND}")
+            term.hint(f"To undo later: {ollama_tune.UNDO_COMMAND}")
             if not _confirm("Apply?", default=False):
-                typer.echo("Nothing was changed.")
+                term.hint("Nothing was changed.")
                 return
             before = None
             if cfg.llm_backend == "ollama" and server.host_matches is not False:
@@ -2351,13 +2353,13 @@ def model_tune(
         if missing:
             raise _fail("restarted, but these are not live: " + ", ".join(s.name for s in missing)
                         + f". To undo: {ollama_tune.UNDO_COMMAND}")
-        typer.echo("All settings are live: " + ", ".join(f"{s.name}={s.value}" for s in written))
+        term.ok("All settings are live: " + ", ".join(f"{s.name}={s.value}" for s in written))
         if server.host_matches is False:
-            typer.echo("Skipping the context re-measure: it would measure the server rpipe uses, "
-                       "which is not the service that changed.")
+            term.hint("Skipping the context re-measure: it would measure the server rpipe uses, "
+                      "which is not the service that changed.")
             return
         if cfg.llm_backend == "ollama":
-            typer.echo("Re-measuring the context that fits (this probes the GPU and can take a few minutes).")
+            term.hint("Re-measuring the context that fits (this probes the GPU and can take a few minutes).")
             try:
                 with _reporter() as reporter, stage(reporter, "model fit") as handle:
                     fit = ollama_fit.resolve(url, ctx.vault, cfg.llm_model, cfg.llm_num_ctx, force=True,
@@ -2365,7 +2367,7 @@ def model_tune(
             except (LlmError, OSError, ValueError) as exc:
                 raise _fail(str(exc)) from exc
             old = f"{before.num_ctx:,}" if before else "not measured before"
-            typer.echo(f"context: {old} -> {fit.num_ctx:,} tokens ({fit.model})")
+            term.ok(f"context: {old} -> {fit.num_ctx:,} tokens ({fit.model})")
 
 
 @model_app.command("check")
@@ -2378,7 +2380,7 @@ def model_check(vault: VaultOption = None) -> None:
             with _reporter() as reporter, stage(reporter, "model check") as handle:
                 llm = build_llm(ctx.config, ctx.vault, log=handle.note)
                 line = llm.check() if hasattr(llm, "check") else f"{llm.name} backend is configured."
-            typer.echo(line)
+            term.ok(line)
         except (LlmError, OSError, ValueError) as exc:
             raise _fail(str(exc)) from exc
 
@@ -2473,61 +2475,67 @@ def _wizard_seeds(vault: Path, config: Config) -> None:
         term.hint(SEEDS_TIP)
 
 
-def _describe_machine(info) -> None:
-    typer.echo("What I found on this computer:")
-    typer.echo(f"  system: {info.os}" + (f", {info.ram_gb:.0f} GB of memory" if info.ram_gb else ""))
+def _machine_rows(info) -> list[tuple[str, str]]:
+    rows = [("system", f"{info.os}" + (f", {info.ram_gb:.0f} GB of memory" if info.ram_gb else ""))]
     if info.gpu is None:
-        typer.echo("  graphics card: no GPU found")
+        rows.append(("graphics card", "no GPU found"))
     else:
-        typer.echo(f"  graphics card: {info.gpu.name}, {info.gpu.vram_gb:.1f} GB of GPU memory")
+        rows.append(("graphics card", f"{info.gpu.name}, {info.gpu.vram_gb:.1f} GB of GPU memory"))
     if not info.ollama_installed:
-        typer.echo("  Ollama: not installed")
+        rows.append(("Ollama", "not installed"))
     else:
         models = ", ".join(info.ollama_models) or "no models pulled yet"
-        typer.echo(f"  Ollama: installed, {'running' if info.ollama_running else 'not running'}; {models}")
+        rows.append(("Ollama", f"installed, {'running' if info.ollama_running else 'not running'}; {models}"))
     if info.ram_free_gb is not None:
-        typer.echo(f"  memory free right now: {info.ram_free_gb:.0f} GB")
+        rows.append(("memory free right now", f"{info.ram_free_gb:.0f} GB"))
     if info.cpu is not None:
-        typer.echo(f"  CPU: {info.cpu.threads} threads, vector instructions: {', '.join(info.cpu.vector) or 'none found'}")
+        rows.append(("CPU", f"{info.cpu.threads} threads, vector instructions: {', '.join(info.cpu.vector) or 'none found'}"))
     if info.disk_free_gb is not None:
-        typer.echo(f"  free disk where Ollama keeps models: {info.disk_free_gb:.0f} GB")
+        rows.append(("free disk where Ollama keeps models", f"{info.disk_free_gb:.0f} GB"))
     if info.claude_path is None:
-        typer.echo("  Claude Code: not found")
+        rows.append(("Claude Code", "not found"))
     else:
-        typer.echo(f"  Claude Code: found at {info.claude_path}, "
-                   f"{'logged in' if info.claude_logged_in else 'not logged in'}")
+        rows.append(("Claude Code", f"found at {info.claude_path}, "
+                     f"{'logged in' if info.claude_logged_in else 'not logged in'}"))
+    return rows
 
 
-def _describe_ollama_server(server, llm_url: str) -> None:
-    """Plain-words lines about how the Ollama server runs and its performance settings."""
+def _describe_machine(info, extra: list[tuple[str, str]] | None = None) -> None:
+    term.header("What I found on this computer")
+    term.fields([*_machine_rows(info), *(extra or [])])
+
+
+def _ollama_server_rows(server, llm_url: str) -> tuple[list[tuple[str, str]], list[str]]:
+    """(fields rows, notes) about how the Ollama server runs and its performance settings."""
     how = {"systemd": "a system service (systemd)", "systemd-user": "a user service (systemd --user)",
            "manual": "started by hand (ollama serve)", "docker": "in Docker", "app": "the Ollama app",
            "unknown": "not found running"}[server.how]
-    typer.echo(f"  Ollama server: version {server.version or 'unknown'}, {how}")
+    rows = [("Ollama server", f"version {server.version or 'unknown'}, {how}")]
     if server.how not in ("systemd", "systemd-user"):
-        typer.echo("  (rpipe can only read the server settings of a systemd service)")
-        return
+        return rows, ["(rpipe can only read the server settings of a systemd service)"]
 
     def source(key: str) -> str:
         found = setting_source(server, key)
         return f" (set in {found})" if found else ""
 
+    notes: list[str] = []
     flash = server.env.get("OLLAMA_FLASH_ATTENTION")
-    typer.echo("  flash attention: " + (f"on{source('OLLAMA_FLASH_ATTENTION')}" if flash_on(flash) else "off"))
-    typer.echo(f"  context memory type (KV cache): {server.env.get('OLLAMA_KV_CACHE_TYPE', 'f16 (default)')}"
-               + (source("OLLAMA_KV_CACHE_TYPE") if "OLLAMA_KV_CACHE_TYPE" in server.env else ""))
-    typer.echo(f"  parallel slots: {server.env.get('OLLAMA_NUM_PARALLEL', 'automatic (default)')}")
+    rows.append(("flash attention", f"on{source('OLLAMA_FLASH_ATTENTION')}" if flash_on(flash) else "off"))
+    rows.append(("context memory type (KV cache)", server.env.get("OLLAMA_KV_CACHE_TYPE", "f16 (default)")
+                 + (source("OLLAMA_KV_CACHE_TYPE") if "OLLAMA_KV_CACHE_TYPE" in server.env else "")))
+    rows.append(("parallel slots", server.env.get("OLLAMA_NUM_PARALLEL", "automatic (default)")))
     if server.proxied:
         try:
             proxy_port = urlparse(llm_url).port or DEFAULT_OLLAMA_PORT
         except ValueError:
             proxy_port = DEFAULT_OLLAMA_PORT
-        typer.echo(f"  rpipe reaches this Ollama through a pass-through proxy on port {proxy_port} "
-                   "(same models): its settings apply.")
+        notes.append(f"rpipe reaches this Ollama through a pass-through proxy on port {proxy_port} "
+                     "(same models): its settings apply.")
     if server.host_matches is False:
         port = server.env.get("OLLAMA_HOST", "").rpartition(":")[2]
-        typer.echo(f"  note: the Ollama service listens on port {port} but rpipe talks to "
-                   f"{llm_url.split('://')[-1]}; settings rpipe changes would go to the service, not the server rpipe uses")
+        notes.append(f"note: the Ollama service listens on port {port} but rpipe talks to "
+                     f"{llm_url.split('://')[-1]}; settings rpipe changes would go to the service, not the server rpipe uses")
+    return rows, notes
 
 
 @model_app.command("scan")
@@ -2536,11 +2544,16 @@ def model_scan(vault: VaultOption = None) -> None:
     ctx = _open(vault)
     with _reporter() as reporter, stage(reporter, "scan", label="this computer"):
         info = detect_machine(ctx.config)
-    _describe_machine(info)
+    extra: list[tuple[str, str]] = []
     if len(info.gpus) > 1:
-        typer.echo("  all GPUs: " + "; ".join(f"{g.name} ({g.vram_gb:.1f} GB)" for g in info.gpus))
+        extra.append(("all GPUs", "; ".join(f"{g.name} ({g.vram_gb:.1f} GB)" for g in info.gpus)))
+    notes: list[str] = []
     if info.ollama is not None:
-        _describe_ollama_server(info.ollama, ctx.config.llm_url)
+        server_rows, notes = _ollama_server_rows(info.ollama, ctx.config.llm_url)
+        extra += server_rows
+    _describe_machine(info, extra)
+    for note in notes:
+        term.hint(note)
 
 
 def _model_kind(e: catalog_mod.CatalogEntry) -> str:
@@ -2555,7 +2568,7 @@ def _machine_summary(info) -> None:
     if info.ram_free_gb is not None:
         mem += f" ({info.ram_free_gb:.0f} GB free now)"
     cpu = f", {info.cpu.threads} CPU threads" if info.cpu is not None else ""
-    typer.echo(f"this computer: {info.os}, {mem}{cpu}")
+    rows = [("this computer", f"{info.os}, {mem}{cpu}")]
     vram = recommender.total_vram(info)
     if vram == 0:
         gpu = "no GPU found"
@@ -2563,23 +2576,24 @@ def _machine_summary(info) -> None:
         gpu = " + ".join(f"{g.name} ({g.vram_gb:.1f} GB)" for g in info.gpus) + f" = {vram:.1f} GB"
     else:
         gpu = f"{(info.gpu or info.gpus[0]).name}, {vram:.1f} GB"
-    typer.echo(f"GPU: {gpu} (size class: {recommender.band_for(info)})")
+    rows.append(("GPU", f"{gpu} (size class: {recommender.band_for(info)})"))
     if not info.ollama_installed:
-        ollama = "Ollama: not installed"
+        ollama = "not installed"
     else:
         count = len(_generation_models(info.ollama_models))
-        ollama = (f"Ollama: {'running' if info.ollama_running else 'not running'}, "
+        ollama = (f"{'running' if info.ollama_running else 'not running'}, "
                   f"{count} text model{'s' if count != 1 else ''} installed")
     disk = f"; free disk for models: {info.disk_free_gb:.0f} GB" if info.disk_free_gb is not None else ""
-    typer.echo(ollama + disk)
+    rows.append(("Ollama", ollama + disk))
+    term.fields(rows, indent=0)
 
 
 def _pin_off_gpu(vault: Path, name: str) -> None:
     """Pin model and context for a model that runs (partly) outside the GPU."""
     profile_edit.set_llm_model(vault, name)
     profile_edit.set_llm_num_ctx(vault, recommender.CPU_CTX)
-    typer.echo(f"Model {name} and a context of {recommender.CPU_CTX:,} tokens are both pinned: the automatic "
-               "choice (auto) only accepts models that sit fully in GPU memory, and this one does not.")
+    term.ok(f"Model {name} and a context of {recommender.CPU_CTX:,} tokens are both pinned: the automatic "
+            "choice (auto) only accepts models that sit fully in GPU memory, and this one does not.")
 
 
 def _pick_candidate(count: int) -> int | None:
@@ -2590,7 +2604,7 @@ def _pick_candidate(count: int) -> int | None:
             return None
         if text.isdigit() and 1 <= int(text) <= count:
             return int(text) - 1
-        typer.echo(f"Enter a number from 1 to {count}, or just press Enter.")
+        term.warn(f"Enter a number from 1 to {count}, or just press Enter.")
 
 
 def _go_back_hint(backend: str, model: str, num_ctx: int | str) -> None:
@@ -2600,7 +2614,7 @@ def _go_back_hint(backend: str, model: str, num_ctx: int | str) -> None:
         steps = [f"rpipe model set-backend {backend}"]
         if backend != "none" and model != "auto":
             steps.append(f"rpipe model set {model}")
-    typer.echo("To go back: " + ", then ".join(steps))
+    term.hint("To go back: " + ", then ".join(steps))
 
 
 def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
@@ -2609,15 +2623,15 @@ def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
     True only when the model was downloaded; every other outcome is explained on screen.
     Used by `rpipe model recommend` and the setup walkthrough."""
     free = info.disk_free_gb
-    typer.echo(f"download {entry.download_gb:g} GB; free disk where Ollama keeps models: "
-               + (f"{free:.0f} GB" if free is not None else "unknown"))
+    term.hint(f"download {entry.download_gb:g} GB; free disk where Ollama keeps models: "
+              + (f"{free:.0f} GB" if free is not None else "unknown"))
     if free is not None and entry.download_gb + 2 > free:
-        typer.echo(f"not enough free disk: {entry.pull} needs {entry.download_gb:g} GB plus 2 GB to spare. "
-                   "Free some space or pick another model.")
+        term.warn(f"not enough free disk: {entry.pull} needs {entry.download_gb:g} GB plus 2 GB to spare. "
+                  "Free some space or pick another model.")
         return False
     if not info.ollama_running:
-        typer.echo("Ollama is not running, so nothing can be downloaded. Start it (or install it: "
-                   f"{OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}) and try again.")
+        term.warn("Ollama is not running, so nothing can be downloaded. Start it (or install it: "
+                  f"{OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}) and try again.")
         return False
     if not _confirm(f"Download {entry.pull} now ({entry.download_gb:g} GB)?", default=False):
         return False
@@ -2625,7 +2639,7 @@ def _download(cfg: Config, info, entry: catalog_mod.CatalogEntry) -> bool:
         with _reporter() as reporter, stage(reporter, "model pull", total=100, label=entry.pull) as handle:
             pull_model(cfg.llm_url, entry.pull, _pull_progress(handle, entry.pull))
     except LlmError as exc:
-        typer.echo(f"Download failed: {exc}")
+        term.warn(f"Download failed: {exc}")
         return False
     return True
 
@@ -2637,7 +2651,7 @@ def _note_call_limit(bench: bench_mod.Bench | None) -> None:
     seconds = bench.paper_tokens / bench.read_tps
     if seconds > CALL_TIMEOUT:
         limit = call_timeout(bench.num_ctx, bench)
-        typer.echo(
+        term.hint(
             f"Note: at the measured {bench.read_tps:.0f} tokens/s, reading a {bench.paper_tokens:,}-token "
             f"paper takes about {seconds:,.0f} s, longer than the usual {CALL_TIMEOUT:.0f}-second limit for "
             f"one model call. Because this speed was measured, calls to this model may take up to about "
@@ -2650,37 +2664,37 @@ def _use_candidate(ctx: _Context, info, cand: recommender.Candidate) -> None:
     cfg = ctx.config
     entry = cand.entry
     if not cand.installed and not _download(cfg, info, entry):
-        typer.echo("Nothing was changed.")
+        term.hint("Nothing was changed.")
         return
     previous = (cfg.llm_backend, cfg.llm_model, cfg.llm_num_ctx)
     try:
         if cfg.llm_backend != "ollama":
             profile_edit.set_llm_backend(ctx.vault, "ollama", set(registry.plugins(registry.BACKEND_GROUP)))
-            typer.echo(f"backend: {cfg.llm_backend} -> ollama")
+            term.ok(f"backend: {cfg.llm_backend} -> ollama")
         if cand.placement == "gpu":
             profile_edit.set_llm_model(ctx.vault, entry.pull)
             profile_edit.set_llm_num_ctx(ctx.vault, "auto")
-            typer.echo(f"model is now {entry.pull}; context: auto (the largest that fits, measured now)")
+            term.ok(f"model is now {entry.pull}; context: auto (the largest that fits, measured now)")
         else:
             _pin_off_gpu(ctx.vault, entry.pull)
     except (ValueError, ConfigError, OSError) as exc:
         raise _fail(str(exc)) from exc
     ok = True
     if cand.placement == "gpu":
-        typer.echo("Measuring the context that fits: this loads the model and can take a few minutes.")
+        term.hint("Measuring the context that fits: this loads the model and can take a few minutes.")
         try:
             with _reporter() as reporter, stage(reporter, "model fit") as handle:
                 fit = ollama_fit.resolve(cfg.llm_url, ctx.vault, entry.pull, "auto", force=True, log=handle.note)
-            typer.echo(f"measured: {fit.model} with a context of {fit.num_ctx:,} tokens")
+            term.ok(f"measured: {fit.model} with a context of {fit.num_ctx:,} tokens")
         except (LlmError, OSError, ValueError) as exc:
-            typer.echo(f"The fit failed: {exc}")
+            term.warn(f"The fit failed: {exc}")
             ok = False
     if ok and _confirm("Measure its speed now (about 1-5 minutes)?", default=False):
         new_cfg = load_config(ctx.vault / "config.yaml").model_copy(update={"vault_path": ctx.vault})
         try:
             _measure_speed(ctx.vault, ctx.conn, new_cfg)
         except (LlmError, OSError, ValueError) as exc:
-            typer.echo(f"Speed not measured: {exc}")
+            term.warn(f"Speed not measured: {exc}")
     _note_call_limit({_with_tag(k): b for k, b in bench_mod.load_benches(ctx.vault).items()}
                      .get(_with_tag(entry.pull)))
     _go_back_hint(*previous)
@@ -2702,50 +2716,52 @@ def model_recommend(vault: VaultOption = None) -> None:
         if info.ollama is not None and info.ollama.how != "unknown":
             note = ollama_tune.host_note(info.ollama, cfg.llm_url)
             if note:
-                typer.echo(note + " The context estimates below assume its default settings.")
+                term.warn(note + " The context estimates below assume its default settings.")
             settings = ollama_tune.advise(info.ollama)
             readable = info.ollama.how in ("systemd", "systemd-user") or bool(info.ollama.env)
             if settings and not readable:
-                typer.echo("\nrpipe cannot read this server's settings. If these are not set yet, they would fit "
-                           "a longer context in the same memory:")
+                term.header("Ollama settings")
+                term.hint("rpipe cannot read this server's settings. If these are not set yet, they would fit "
+                          "a longer context in the same memory:")
                 for st in settings:
-                    typer.echo(f"  {st.name}={st.value}: {st.what}")
-                typer.echo("Run rpipe model tune for how to set them")
+                    term.bullet(f"{st.name}={st.value}: {st.what}")
+                term.hint("Run rpipe model tune for how to set them")
             elif settings:
-                typer.echo("\nOllama settings that would fit a longer context in the same memory:")
+                term.header("Ollama settings")
+                term.hint("Ollama settings that would fit a longer context in the same memory:")
                 for st in settings:
-                    typer.echo(f"  {st.name}={st.value} (now: {st.current or 'not set'}): {st.what}")
-                typer.echo("Run rpipe model tune to apply them")
-        typer.echo("")
+                    term.bullet(f"{st.name}={st.value} (now: {st.current or 'not set'}): {st.what}")
+                term.hint("Run rpipe model tune to apply them")
         if candidates:
-            typer.echo("Models for this computer, best first:")
+            term.header("Models for this computer, best first")
+            width = len(str(len(candidates)))
             for i, cand in enumerate(candidates, 1):
-                typer.echo(f"  {i}. {cand.entry.pull} ({cand.entry.family}, {_model_kind(cand.entry)})")
+                typer.echo(f"  {str(i).rjust(width)}. {cand.entry.pull} ({cand.entry.family}, {_model_kind(cand.entry)})")
                 for reason in cand.reasons:
-                    typer.echo(f"     - {reason}")
+                    typer.echo(term.dim(f"  {' ' * width}  - {reason}"))
         else:
-            typer.echo("No model in the catalog fits this computer's GPU memory or its memory (RAM).")
+            term.warn("No model in the catalog fits this computer's GPU memory or its memory (RAM).")
         for name in recommender.uncatalogued(info, catalog):
-            typer.echo(f"installed, not in the catalog: {name} (rpipe model fit measures any installed model)")
+            term.hint(f"installed, not in the catalog: {name} (rpipe model fit measures any installed model)")
         if info.claude_logged_in:
-            typer.echo("cloud: Claude Code is logged in; rpipe model set-backend claude-code uses it")
+            term.hint("cloud: Claude Code is logged in; rpipe model set-backend claude-code uses it")
         if not candidates or not _is_tty():
             return
         try:
             pick = _pick_candidate(len(candidates))
             if pick is None:
-                typer.echo("Nothing was changed.")
+                term.hint("Nothing was changed.")
                 return
             _use_candidate(ctx, info, candidates[pick])
         except (typer.Abort, KeyboardInterrupt, EOFError):
-            typer.echo("\nStopped. Nothing further was changed.")
+            term.warn("\nStopped. Nothing further was changed.")
             raise typer.Exit(code=130) from None
 
 
 def _recheck(config: Config, info, problem: str, ok: Callable, question: str):
     """Show `problem` and re-detect the machine each time the user says they fixed it."""
     while not ok(info):
-        typer.echo(problem)
+        term.warn(problem)
         if not _confirm(question, default=False):
             break
         info = detect_machine(config)
@@ -2753,7 +2769,7 @@ def _recheck(config: Config, info, problem: str, ok: Callable, question: str):
 
 
 def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> None:
-    info = _recheck(config, info, f"Ollama is not installed. Install it yourself with:\n  {OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}",
+    info = _recheck(config, info, f"Ollama is not installed. Install it yourself with:\n{OLLAMA_INSTALL.get(info.os, OLLAMA_INSTALL['Windows'])}",
                     lambda i: i.ollama_installed, "Installed it? Check again")
     pulled = None
     if rec.pull is not None and rec.backend == "ollama" and info.ollama_installed:
@@ -2775,8 +2791,8 @@ def _setup_ollama(vault: Path, config: Config, info, rec, known: set[str]) -> No
     if usable is not None:
         _pin_off_gpu(vault, usable.entry.pull)
     else:
-        typer.echo("No model that runs on this computer is installed yet: "
-                   "run `rpipe model recommend` to pick and pin a model that runs on this computer.")
+        term.warn("No model that runs on this computer is installed yet: "
+                  "run `rpipe model recommend` to pick and pin a model that runs on this computer.")
 
 
 def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:
@@ -2784,7 +2800,7 @@ def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:
             if info.claude_path is None else
             "Claude Code is not logged in. Run `claude` once in a terminal and log in, then come back.")
     info = _recheck(config, info, hint, lambda i: i.claude_logged_in, "Logged in? Check again")
-    typer.echo(
+    term.hint(
         "With Claude Code, the text of each paper is sent to Anthropic to be summarised. A night uses "
         "about 30 calls from your plan's usage quota. Your shelf (my_work/) never leaves this machine. "
         "`haiku` uses less quota than `sonnet`; `opus` uses the most."
@@ -2795,7 +2811,7 @@ def _setup_claude(vault: Path, config: Config, info, known: set[str]) -> None:
             resolve_model(model)
             break
         except ValueError as exc:
-            typer.echo(str(exc))
+            term.warn(str(exc))
     profile_edit.set_llm_backend(vault, "claude-code", known, info.claude_path)
     profile_edit.set_llm_model(vault, model)
 
@@ -2818,14 +2834,14 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
     options = [rec.backend, *rec.alternatives]
     labels = {"ollama": "a model on this computer (Ollama)", "claude-code": "Claude Code (your login)",
               "none": "no summaries (abstracts only)"}  # all three are always offered
-    typer.echo("\nChoose how summaries are written:")
+    term.header("Choose how summaries are written")
     for i, name in enumerate(options, 1):
         typer.echo(f"  {i}. {labels.get(name, name)}" + ("  [recommended]" if i == 1 else ""))
     while True:
         pick = _prompt("Choice", default=1, type=int)
         if 1 <= pick <= len(options):
             break
-        typer.echo(f"Enter a number from 1 to {len(options)}.")
+        term.warn(f"Enter a number from 1 to {len(options)}.")
     choice = options[pick - 1]
     known = set(registry.plugins(registry.BACKEND_GROUP))
     try:
@@ -2836,7 +2852,7 @@ def _wizard_backend(vault: Path, offer_keep: bool = False) -> bool:
         else:
             profile_edit.set_llm_backend(vault, "none", known)
             term.ok("No summary model: digests list each paper's abstract instead of a summary. "
-                       "Change this any time with `rpipe model setup`.")
+                    "Change this any time with `rpipe model setup`.")
     except (ValueError, ConfigError, OSError) as exc:
         raise _fail(str(exc)) from exc
     return _check_backend(vault)
@@ -3233,8 +3249,8 @@ def _warn_backend(vault: Path) -> None:
         if hasattr(llm, "check"):
             llm.check()
     except (LlmError, OSError, ValueError, ConfigError) as exc:
-        typer.echo(f"Warning: the summary backend is not ready ({exc}). Until it is, the nightly run "
-                   "writes abstracts only. Fix it with `rpipe model setup`.")
+        term.warn(f"the summary backend is not ready ({exc}). Until it is, the nightly run "
+                  "writes abstracts only. Fix it with `rpipe model setup`.")
 
 
 @schedule_app.command("show")
@@ -3277,9 +3293,9 @@ def schedule_set_deadline(
         profile_edit.set_night_deadline(path, value)
     stored = load_config(path / "config.yaml").night_deadline
     if stored == "off":
-        typer.echo("Reruns of cut papers are off; requested summaries run with no time limit.")
+        term.ok("Reruns of cut papers are off; requested summaries run with no time limit.")
     else:
-        typer.echo(f"Reruns of cut papers must finish by {stored}; no requested summary starts after it.")
+        term.ok(f"Reruns of cut papers must finish by {stored}; no requested summary starts after it.")
 
 
 @schedule_app.command("install")
@@ -3301,9 +3317,9 @@ def schedule_install(
     except schedule.ScheduleError as exc:
         raise _fail(str(exc)) from exc
     for f in written:
-        typer.echo(f"wrote {f}")
-    typer.echo(f"Scheduled: `rpipe run` every day at {time} for vault {path}.")
-    typer.echo(_LINGER_HINT)
+        term.ok(f"wrote {f}")
+    term.ok(f"Scheduled: `rpipe run` every day at {time} for vault {path}.")
+    term.hint(_LINGER_HINT)
     _warn_backend(path)
 
 
@@ -3317,7 +3333,7 @@ def schedule_status() -> None:
     except schedule.ScheduleError as exc:
         raise _fail(str(exc)) from exc
     if not enabled:
-        typer.echo("The nightly timer is not installed or not enabled. Run `rpipe schedule install` to set it up.")
+        term.warn("The nightly timer is not installed or not enabled. Run `rpipe schedule install` to set it up.")
 
 
 @schedule_app.command("remove")
@@ -3329,8 +3345,11 @@ def schedule_remove() -> None:
     except schedule.ScheduleError as exc:
         raise _fail(str(exc)) from exc
     for w in warnings:
-        typer.echo(f"warning: {w}", err=True)
-    typer.echo("\n".join(f"removed {f}" for f in removed) or "nothing was installed")
+        term.warn(w, err=True)
+    for f in removed:
+        term.ok(f"removed {f}")
+    if not removed:
+        term.hint("nothing was installed")
 
 
 @app.command("serve")
@@ -3414,7 +3433,7 @@ def _restart_app_if_installed() -> None:
         return
     try:
         if app_service.is_active(schedule.system_runner) and app_service.restart(schedule.system_runner):
-            typer.echo("Restarted the app so it shows the change.")
+            term.ok("Restarted the app so it shows the change.")
     except Exception:  # noqa: BLE001 - a restart problem must never fail a sharing command that worked
         return
 
@@ -3438,8 +3457,8 @@ def app_run(
 
     shown = f"[{bind}]" if ":" in bind else bind
     my_topics, share = _app_settings(ctx)
-    typer.echo(f"Your feed is at http://{shown}:{port}/ (only your own devices can reach it)")
-    typer.echo("Open exactly this address: a machine name such as name.tailnet.ts.net will not work.")
+    term.ok(f"Your feed is at http://{shown}:{port}/ (only your own devices can reach it)")
+    term.hint("Open exactly this address: a machine name such as name.tailnet.ts.net will not work.")
     uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind), f"http://{shown}:{port}/",
                                 my_topics=my_topics, share=share),
                 host=bind, port=port, log_level="warning")
@@ -3465,11 +3484,11 @@ def app_install(
         written = app_service.install(path, rpipe_cmd, bind, port, schedule.default_unit_dir(), schedule.system_runner)
     except schedule.ScheduleError as exc:
         raise _fail(str(exc)) from exc
-    typer.echo(f"wrote {written}")
-    typer.echo(f"The app is running. Open {app_service.address(written.parent)} on any device on your tailnet "
-               "(use the address with the number; a machine name will not work).")
-    typer.echo("On a phone, use the browser's Add to Home Screen to get an app icon.")
-    typer.echo(_LINGER_HINT)
+    term.ok(f"wrote {written}")
+    term.ok(f"The app is running. Open {app_service.address(written.parent)} on any device on your tailnet "
+            "(use the address with the number; a machine name will not work).")
+    term.hint("On a phone, use the browser's Add to Home Screen to get an app icon.")
+    term.hint(_LINGER_HINT)
 
 
 @app_app.command("uninstall")
@@ -3483,8 +3502,11 @@ def app_uninstall() -> None:
     except schedule.ScheduleError as exc:
         raise _fail(str(exc)) from exc
     for w in warnings:
-        typer.echo(f"warning: {w}", err=True)
-    typer.echo("\n".join(f"removed {f}" for f in removed) or "nothing was installed")
+        term.warn(w, err=True)
+    for f in removed:
+        term.ok(f"removed {f}")
+    if not removed:
+        term.hint("nothing was installed")
 
 
 @app_app.command("status")
@@ -3495,7 +3517,7 @@ def app_status() -> None:
     _need_linux("app")
     addr = app_service.address(schedule.default_unit_dir())
     if addr is None:
-        typer.echo("Not installed. Set it up with: rpipe app install")
+        term.warn("Not installed. Set it up with: rpipe app install")
         return
     _need_systemctl()
     try:
@@ -3503,9 +3525,9 @@ def app_status() -> None:
     except schedule.ScheduleError as exc:
         raise _fail(str(exc)) from exc
     if active:
-        typer.echo(f"Running at {addr}")
+        term.ok(f"Running at {addr}")
     else:
-        typer.echo("Installed but not running. Check: journalctl --user -u research-pipeline-app")
+        term.warn("Installed but not running. Check: journalctl --user -u research-pipeline-app")
 
 
 sources_app = typer.Typer(help="List, turn on and turn off paper sources.", no_args_is_help=True)
@@ -3516,24 +3538,27 @@ app.add_typer(sources_app, name="sources")
 def plugins() -> None:
     """List installed plug-ins (paper sources and model backends) and whether each loads."""
     for group in (registry.SOURCE_GROUP, registry.BACKEND_GROUP):
-        typer.echo(f"{group}:")
+        term.header(group)
         found = registry.plugins(group)
         if not found:
-            typer.echo("  (none)")
+            term.hint("(none)")
+        width = max((len(k) for k in found), default=0)
         for key, p in found.items():
-            typer.echo(f"  {key}  {p.origin}  {p.error or 'ok'}")
+            typer.echo(f"  {key.ljust(width)}  {p.origin}  {p.error or 'ok'}")
 
 
 @sources_app.command("list")
 def sources_list(vault: VaultOption = None) -> None:
     """Show every available source, whether it is on, where it comes from and any load error."""
     ctx = _open(vault)
-    for key, p in registry.plugins(registry.SOURCE_GROUP).items():
-        state = "on" if key in ctx.config.sources else "off"
-        typer.echo(f"{key}  {state}  {p.origin}  {p.error or 'ok'}")
-    for name in ctx.config.sources:
-        if name not in registry.plugins(registry.SOURCE_GROUP):
-            typer.echo(f"{name}  on  not installed")
+    found = registry.plugins(registry.SOURCE_GROUP)
+    missing = [n for n in ctx.config.sources if n not in found]
+    width = max((len(k) for k in [*found, *missing]), default=0)
+    for key, p in found.items():
+        state = "on " if key in ctx.config.sources else "off"
+        typer.echo(f"{key.ljust(width)}  {state}  {p.origin}  {p.error or 'ok'}")
+    for name in missing:
+        typer.echo(f"{name.ljust(width)}  on   not installed")
 
 
 @sources_app.command("set-max-results")
@@ -3545,7 +3570,7 @@ def sources_set_max_results(
     ctx = _open(vault)
     with _clean_errors():
         profile_edit.set_arxiv_max_results(ctx.vault, n)
-    typer.echo(f"arXiv fetches at most {n} papers per run.")
+    term.ok(f"arXiv fetches at most {n} papers per run.")
 
 
 @sources_app.command("enable")
@@ -3558,7 +3583,7 @@ def sources_enable(
     with _clean_errors():
         known = {k for k, p in registry.plugins(registry.SOURCE_GROUP).items() if p.factory}
         changed = profile_edit.enable_source(ctx.vault, name, known)
-    typer.echo(f"source {name.strip()} is now on." if changed else f"source {name.strip()} was already on.")
+    (term.ok if changed else term.hint)(f"source {name.strip()} is now on." if changed else f"source {name.strip()} was already on.")
 
 
 @sources_app.command("disable")
@@ -3570,7 +3595,7 @@ def sources_disable(
     ctx = _open(vault)
     with _clean_errors():
         changed = profile_edit.disable_source(ctx.vault, name)
-    typer.echo(f"source {name.strip()} is now off." if changed else f"source {name.strip()} was already off.")
+    (term.ok if changed else term.hint)(f"source {name.strip()} is now off." if changed else f"source {name.strip()} was already off.")
 
 
 # ---------------------------------------------------------------- share commands

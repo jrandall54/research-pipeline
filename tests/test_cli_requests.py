@@ -1,6 +1,7 @@
 """`rpipe run` drains the request list; `rpipe requests run|list`; request counts in the health line."""
 
 import json
+import re
 from datetime import date
 
 import pytest
@@ -142,7 +143,7 @@ def test_requests_run_drains(vault, monkeypatch):
     install(monkeypatch, AlwaysSummary([]))
     res = runner.invoke(cli.app, ["requests", "run", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
-    assert "requests_done=1" in res.output
+    assert re.search(r"requests_done\s+1", res.output)
     assert request_row(vault, rid)["status"] == "done"
 
 

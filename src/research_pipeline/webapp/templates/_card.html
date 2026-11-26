@@ -1,0 +1,28 @@
+<article class="card" id="paper-{{ c.id }}" data-paper-id="{{ c.id }}">
+  {% if c.topic %}<div class="topic" style="color: var(--topic-{{ c.topic_color }})">{{ c.topic }}</div>{% endif %}
+  <h2 class="card-title">{{ c.title }}</h2>
+  {% if c.one_line %}
+    <p class="one-line">{{ c.one_line }}</p>
+    <div class="read-more">
+      {% for label, f in [("The problem", c.problem), ("What they did", c.approach), ("What they found", c.results)] %}
+        {% if f %}<p class="field"><span class="field-label">{{ label }}</span>
+          {{ f[0] }}{% if f[1] %} <span class="tag mono">{{ f[1] }}</span>{% endif %}</p>{% endif %}
+      {% endfor %}
+    </div>
+  {% else %}
+    {# No summary yet: there is no problem/approach/results, so the abstract excerpt serves both depths. #}
+    <p class="one-line abstract">{{ c.abstract }}</p>
+    <div class="read-more"></div>
+    <div class="summarize" data-state="{{ c.summarize_state }}">
+      {% if c.summarize_state in ("pending", "running") %}
+        <span class="muted">Summary coming tonight</span>
+      {% elif c.summarize_state == "failed" %}
+        <span class="muted">Couldn't summarize this one</span>
+        <button type="button" class="btn" data-action="summarize" data-paper-id="{{ c.id }}">Try again</button>
+      {% else %}
+        <button type="button" class="btn" data-action="summarize" data-paper-id="{{ c.id }}">Summarize this</button>
+      {% endif %}
+    </div>
+  {% endif %}
+  {% if c.why %}<p class="why muted">Why you're seeing this: {{ c.why }}</p>{% endif %}
+</article>

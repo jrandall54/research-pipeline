@@ -39,5 +39,8 @@ def create_app(vault_db: Path, allowed_hosts: set[str]) -> FastAPI:
         refusal = guard.check(request, allowed_hosts)
         return refusal if refusal is not None else await call_next(request)
 
+    from research_pipeline.webapp import routes_feed  # imported here: it needs `templates` and `get_conn` above
+
+    app.include_router(routes_feed.router)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     return app

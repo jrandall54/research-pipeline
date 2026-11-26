@@ -357,3 +357,7 @@
 **Web app manifest** — a small JSON file (`manifest.webmanifest`) that tells a phone browser an app's name, icon and that it may open full-screen. It is what makes "Add to Home Screen" give you an icon that opens the feed like an app. See `app.md`.
 
 **Same-origin check** — the server refuses any request that changes something (anything but GET or HEAD) unless the browser says it came from a page on one of the server's own allowed addresses (the `Origin` or `Referer` header). It stops another website you have open from making your browser vote or save on your behalf (cross-site request forgery). See "Security" in `app.md`.
+
+**Section tag** — the small `§5.1` next to a line in a summary, saying which section of the paper that claim came from. A range (`§5.1–5.2`) means the claim draws on several consecutive sections; no tag means the stored sections had no number (for example "Abstract"). See "The feed" in `app.md`.
+
+**Skim / Read** — the two levels of detail on the feed. Skim shows title, one-line summary and why it was picked; Read adds the problem, what they did and what they found. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.

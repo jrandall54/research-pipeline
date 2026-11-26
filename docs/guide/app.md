@@ -4,7 +4,7 @@
 
 A private web app over your paper library: your feed of recent picks, saved papers and search, laid out for a phone (one column, bottom navigation) and for a desktop (sidebar). You open it from the home-screen icon on your phone or at an address in any browser on your tailnet. It reads and writes the same vault database the nightly pipeline uses, so a vote you tap in the morning shapes tonight's ranking.
 
-This page covers the server itself: how it is put together and how it protects itself. The screens (feed, paper, saved, search) are described as each is built; the design is in `docs/superpowers/specs/2026-11-25-app-project1-my-feed-design.md`.
+This page covers the server itself: how it is put together and how it protects itself. The screens (feed, paper, saved, search) are described as each is built; the feed is below; the design is in `docs/superpowers/specs/2026-11-25-app-project1-my-feed-design.md`.
 
 ## How it works
 
@@ -34,6 +34,38 @@ Fonts are self-hosted from `webapp/static/fonts/` (Literata 600 for titles, Inte
 - **One connection per request.** SQLite connections are cheap, and this avoids sharing one across threads. The app never takes the pipeline lock; each write is one `library_api` call.
 - **Self-hosted fonts instead of Google Fonts.** Works offline on the tailnet and sends no information outward.
 
+## The feed
+
+**What it does.** `GET /` shows the latest digest as cards in ranking order under a heading such as "Wednesday, Nov 25". `GET /day/2026-11-24` shows one earlier day (an unknown or malformed date is a 404 page). At the bottom, "Earlier days" links to the next older digest, one day per page. With no digest at all you see "No papers yet" and "Your first feed appears after the next nightly run."
+
+**How it works.** `routes_feed.py` asks `library_api` for the digest dates, the day's papers and each paper's summarize state, then hands every paper to `present.card`, which turns the data object into a flat `CardData` the template can print without logic:
+
+1. The stored reasons (`topic: agentic workflow (0.80)`, `HF upvotes: 56`) become reason objects (`library_api.plain_reasons`), and `why_sentence` joins them into one sentence: one reason `x.`, two `x and y.`, three or more `x, y, and z.` No reasons, no sentence.
+2. The topic label is the first topic reason with its first letter upper-cased. Its colour is `crc32(topic.lower()) % 8`, an index into the eight `--topic-N` colours, so "agentic workflow" is the same colour on every day and device.
+3. Each summary field (problem, approach, results) carries a section tag from `section_tag`: the first word of a section title counts as a number when it looks like `5.1`, `IV-B` or `A.1`; titles like "Abstract" are ignored. One number gives `§5.1`, several give `§5.1–5.2`.
+4. A digest paper with no summary stays in its ranked place as an abstract card: the first 300 characters of the abstract, cut at a word with "…", and a control that depends on the latest summarize request: none gives "Summarize this", pending or running gives "Summary coming tonight", failed gives "Couldn't summarize this one" and "Try again". The buttons carry `data-action="summarize"` and are wired up in a later task.
+
+Worked example: a paper with reasons `topic: agentic workflow (0.80)` and `HF upvotes: 56` is shown with the label "Agentic workflow" and "Why you're seeing this: you follow agentic workflow and 56 people upvoted it on Hugging Face."
+
+## Skim and Read
+
+Every card always contains the Skim fields (topic, title, one line, why) and, in a `<div class="read-more">`, the Read fields (problem, what they did, what they found, each with its section tag). The page's `<body data-depth="skim|read">` decides which show: CSS hides `.read-more` when it is `skim`. The Skim / Read buttons (`aria-pressed` marks the active one) are handled by `app.js`, which sets the attribute and saves the choice in the browser's `localStorage["depth"]`, wrapped in try/catch because private windows can refuse storage (the buttons then still work for that page). Without JavaScript the page stays in Skim. An unsummarized card has no problem/approach/results, so it shows the abstract excerpt at both depths.
+
+Why this way: the choice lives in the browser, not the database, because it is a per-device taste (a phone may want Skim, a desktop Read), and a CSS switch means no reload and no server round trip. Rejected: two separate pages (loses your place) and fetching the Read text on demand (needless delay for text already on the page).
+
+## Why you're seeing this
+
+Built from the stored reasons; unknown reason formats are skipped, never shown raw, and "disliked similar" is not shown at all (it lowered the score, and showing it would confuse).
+
+| Stored reason | Shown as |
+|---|---|
+| `topic: agentic workflow (0.80)` | you follow agentic workflow |
+| `liked similar: 2611.25905` | it resembles a paper you liked |
+| `HF upvotes: 56` | 56 people upvoted it on Hugging Face |
+| `followed author: X` | it's by X, whom you follow |
+| `keyword: X` | it mentions X |
+| `near your shelf: name` | it's close to "name" on your shelf |
+
 ## Security
 
 There is no login. The threat model is the one in [browsing.md](browsing.md): anyone who can reach the address can read and vote, and the address is only your own machine (localhost) or its Tailscale address, checked by the same allowlist as `rpipe serve` (`netguard`). The guard adds two checks that `rpipe serve` lacks:
@@ -55,4 +87,7 @@ Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static fi
 - `src/research_pipeline/webapp/guard.py`: `check`, the Host and same-origin checks.
 - `src/research_pipeline/webapp/templates/base.html`: the page frame and navigation.
 - `src/research_pipeline/webapp/static/`: `app.css` (palette, type, layout), `app.js`, `icon.svg`, `manifest.webmanifest`, `fonts/`.
-- `tests/test_webapp_server.py`.
+- `src/research_pipeline/webapp/present.py`: `why_sentence`, `topic_of`, `topic_color`, `section_tag`, `day_heading`, `card`/`CardData` (pure shaping).
+- `src/research_pipeline/webapp/routes_feed.py`: the `/` and `/day/{date}` routes.
+- `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`.
+- `tests/test_webapp_server.py`, `tests/test_webapp_present.py`, `tests/test_webapp_feed.py`.

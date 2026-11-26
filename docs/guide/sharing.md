@@ -119,6 +119,7 @@ Every GitHub operation goes through a small `Runner` (it runs one command and re
 - Rejected: publishing everything and filtering on the reader's side. Private reasons must never leave your machine in the first place.
 - Fetch the whole feed before storing anything, then store and commit once: a feed that breaks halfway leaves your database as it was, never half a feed. Rejected: storing as each archive arrives.
 - Redirects are followed by rpipe itself, one hop at a time, so every hop can be checked as https. Rejected: letting the HTTP library follow them (it would accept a redirect to plain `http`).
+- The fingerprint in `feed.json` is only a change marker (is this archive new to me?), not a security check; every download is validated by its own parse.
 - Archive addresses are built from the feed's folder and only for paths that match the published pattern, so a hostile feed cannot make rpipe fetch some other address. Private reasons must never leave your machine in the first place.
 
 ## How to run / check it

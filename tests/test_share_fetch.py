@@ -208,3 +208,41 @@ def test_fetch_progress_steps(conn, http):
     labels = [e.label for e in rep.events if e.kind == "step"]
     assert "fetching 1 of 2: Alex M." in labels and "fetching 2 of 2: Bob" in labels
     assert rep.events[0].kind == "start" and rep.events[-1].kind == "done"
+
+
+@respx.mock
+def test_malformed_redirect_fails_alone(conn, http):
+    upsert_follow(conn, FID, FEED, "alex", "Alex M.", [])
+    bad = "https://bob.github.io/rpipe-feed/"
+    upsert_follow(conn, "github:bob/rpipe-feed", bad + "feed.json", "bob", "Bob", [])
+    respx.get(FEED).respond(302, headers={"location": "https://[bad"})
+    serve(respx.mock, build(name="Bob"), base=bad)
+    counts, errors = sf.fetch_all(conn, http, None)
+    assert counts == {"followed_feeds": 2, "followed_new": 3}
+    assert len(errors) == 1 and errors[0].startswith("fetch Alex M.: ")
+    assert get_follow(conn, FID)["failures"] == 1
+    assert get_follow(conn, "github:bob/rpipe-feed")["failures"] == 0
+
+
+def test_unexpected_error_is_recorded_not_raised(conn, monkeypatch):
+    upsert_follow(conn, FID, FEED, "alex", "Alex", [])
+    monkeypatch.setattr(sf, "_download", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    r = sf.fetch_one(conn, FID, None)
+    assert r.error and "RuntimeError" in r.error and get_follow(conn, FID)["failures"] == 1
+
+
+@respx.mock
+def test_declared_oversize_is_refused_before_reading(http):
+    respx.get(FEED).respond(200, content=b"x", headers={"content-length": "999999999"})
+    with pytest.raises(sf.FetchFailed, match="too big"):
+        sf.get_limited(http, FEED, 100)
+
+
+@respx.mock
+def test_oversize_archive_fails_the_fetch(conn, http, monkeypatch):
+    serve(respx.mock, build())
+    monkeypatch.setattr(ff, "ARCHIVE_MAX_BYTES", 50)
+    upsert_follow(conn, FID, FEED, "alex", "Alex", [])
+    r = sf.fetch_one(conn, FID, http)
+    assert r.error and "too big" in r.error
+    assert conn.execute("SELECT COUNT(*) FROM followed_posts").fetchone()[0] == 0

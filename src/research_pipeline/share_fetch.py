@@ -68,7 +68,7 @@ def get_limited(http: httpx.Client, url: str, max_bytes: int) -> bytes:
                     location = r.headers.get("location")
                     if not location:
                         raise FetchFailed("it redirected without saying where")
-                    url = urljoin(url, location)
+                    url = urljoin(url, location)  # a malformed Location raises ValueError, caught below
                     continue
                 if r.status_code != 200:
                     raise FetchFailed(f"the server answered {r.status_code}")
@@ -81,8 +81,8 @@ def get_limited(http: httpx.Client, url: str, max_bytes: int) -> bytes:
                     if len(data) > max_bytes:
                         raise FetchFailed(f"it is too big (the limit is {max_bytes:,} bytes)")
                 return bytes(data)
-        except httpx.HTTPError as exc:
-            raise FetchFailed(f"couldn't reach it ({type(exc).__name__})") from exc
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+            raise FetchFailed(f"couldn't read it ({type(exc).__name__})") from exc
     raise FetchFailed("it redirected too many times")
 
 
@@ -134,6 +134,12 @@ def _download(row: sqlite3.Row, http: httpx.Client, st: StageHandle):
     return feed, list(by_id.values()), skipped, hashes
 
 
+def _failed(conn: sqlite3.Connection, feed_id: str, error: str) -> FetchResult:
+    record_fetch(conn, feed_id, ok=False, error=error)
+    conn.commit()
+    return FetchResult(0, 0, error)
+
+
 def _fetch(conn: sqlite3.Connection, feed_id: str, http: httpx.Client, st: StageHandle) -> FetchResult:
     row = get_follow(conn, feed_id)
     if row is None:
@@ -141,9 +147,9 @@ def _fetch(conn: sqlite3.Connection, feed_id: str, http: httpx.Client, st: Stage
     try:
         feed, posts, skipped, hashes = _download(row, http, st)
     except FetchFailed as exc:
-        record_fetch(conn, feed_id, ok=False, error=str(exc))
-        conn.commit()
-        return FetchResult(0, 0, str(exc))
+        return _failed(conn, feed_id, str(exc))
+    except Exception as exc:  # noqa: BLE001 - one odd feed must never stop the others
+        return _failed(conn, feed_id, f"unexpected error ({type(exc).__name__})")
     new = replace_followed_posts(conn, feed_id, posts)
     record_fetch(conn, feed_id, ok=True, error=None, display_name=feed.rpipe.display_name,
                  topics=feed.rpipe.topics, active=feed.rpipe.active, archive_hashes=hashes)

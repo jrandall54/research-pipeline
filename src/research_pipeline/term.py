@@ -8,6 +8,7 @@ always print. See docs/guide/terminal.md.
 import os
 import shutil
 import sys
+import textwrap
 from typing import Any
 
 import typer
@@ -42,17 +43,62 @@ def dim(text: str) -> str:
     return _style(text, dim=True)
 
 
+def width() -> int:
+    """The width to lay text out in: the terminal's, at most 80 columns."""
+    return min(MAX_WIDTH, shutil.get_terminal_size((MAX_WIDTH, 24)).columns)
+
+
+def _fill(line: str, room: int, indent: str) -> list[str]:
+    return textwrap.wrap(line, max(room, 20), break_long_words=False, break_on_hyphens=False,
+                         initial_indent=indent, subsequent_indent=indent) or [indent]
+
+
+def reflow(text: str, indent: int = 0) -> list[str]:
+    """Lines of `text`, each prefixed with `indent` spaces, fitted to the terminal.
+
+    On a terminal 80 columns or wider, or when every line already fits, the text is printed as
+    written (the copy is laid out for 80 columns). On a narrower terminal (a phone) the text is rewrapped instead, so the terminal
+    doesn't wrap each long line again into a ragged long-short pattern: consecutive lines join into
+    one paragraph; blank lines and lines starting with a space (lists, examples) keep their break.
+    """
+    pad = " " * indent
+    lines = text.split("\n")
+    room = width() - indent
+    if width() >= MAX_WIDTH or all(len(line) <= room for line in lines):
+        return [pad + line if line else "" for line in lines]
+    out: list[str] = []
+    para: list[str] = []
+
+    def flush() -> None:
+        if para:
+            out.extend(_fill(" ".join(para), room, pad))
+            para.clear()
+
+    for line in lines:
+        if not line.strip():
+            flush()
+            out.append("")
+        elif line.startswith(" "):
+            flush()
+            lead = len(line) - len(line.lstrip(" "))
+            out.extend(_fill(line.strip(), room - lead, pad + " " * lead))
+        else:
+            para.append(line.strip())
+    flush()
+    return out
+
+
 def header(title: str) -> None:
     """A blank line, then `── Title ───…` as wide as the terminal (at most 80 columns).
 
     A title too wide for the terminal is printed in full with no trailing rule: never cut text.
     """
-    width = min(MAX_WIDTH, shutil.get_terminal_size((MAX_WIDTH, 24)).columns)
+    cols = width()
     line = f"── {title} "
-    if len(line) > width:
+    if len(line) > cols:
         line = f"── {title}"
     else:
-        line += "─" * (width - len(line))
+        line += "─" * (cols - len(line))
     typer.echo("\n" + _style(line, bold=True, fg="cyan"))
 
 
@@ -61,15 +107,15 @@ def step(n: int, total: int, name: str) -> None:
 
 
 def hint(text: str) -> None:
-    """Explanatory text: dim, every line indented 2."""
-    for line in text.splitlines() or [""]:
-        typer.echo(dim("  " + line) if line else "")
+    """Explanatory text: dim, every line indented 2, rewrapped on a narrow terminal."""
+    for line in reflow(text, 2) or [""]:
+        typer.echo(dim(line) if line else "")
 
 
 def _align(text: str) -> str:
     """Indent the continuation lines of a multi-line message so they sit under the text, not the mark."""
-    first, *rest = text.split("\n")
-    return "\n".join([first, *(("  " + line) if line else "" for line in rest)])
+    lines = reflow(text, 2)
+    return "\n".join([lines[0][2:], *lines[1:]])
 
 
 def _marked(mark: str, text: str, err: bool = False) -> None:
@@ -102,8 +148,13 @@ def fields(rows: list[tuple[str, str]], indent: int = 2) -> None:
     if not rows:
         return
     pad = max(len(k) for k, _ in rows) + 2
+    room = width() - indent - pad
     for key, value in rows:
-        typer.echo(f"{' ' * indent}{dim(key.ljust(pad))}{value}")
+        narrow = width() < MAX_WIDTH and len(value) > room
+        first, *rest = _fill(value, room, "") if narrow else [value]
+        typer.echo(f"{' ' * indent}{dim(key.ljust(pad))}{first}")
+        for more in rest:
+            typer.echo(" " * (indent + pad) + more)
 
 
 def _mark() -> str:

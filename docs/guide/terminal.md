@@ -36,6 +36,16 @@ Phase 10.2 changed only how text looks. The sentences are the same ones as befor
 2. `use_colour()` is true only when the stream being written to (stdout, or stderr for errors) is a terminal **and** the `NO_COLOR` environment variable is not set. When true, the pieces are wrapped with `typer.style` (ANSI colour codes); when false they stay plain.
 3. The marks `✓ ! ✗ › • ─` are ordinary characters, so they print either way. Only the colour is conditional.
 4. `header` reads the terminal width with `shutil.get_terminal_size((80, 24))` and draws the rule `min(80, width)` columns wide, so a narrow window never wraps it. A title that is itself wider than the terminal is never cut: it prints in full, with no rule after it, and the terminal wraps it. Commands therefore keep headers short and put long text (counts, instructions such as `Ctrl-C stops; grades given are kept.`) in a `hint` line under the header.
+5. Narrow terminals (a phone over SSH, a split pane): the explanations are written with line breaks for 80 columns. On a terminal narrower than 80 columns the terminal itself would wrap each of those lines again, giving a ragged long-short-long-short pattern. So `reflow` rewraps the text to the real width instead: lines that belong to one paragraph are joined and refilled, blank lines stay as paragraph breaks, and lines that start with a space (lists, examples, command tables) keep their own line and indent. `hint`, the `✓ ! ✗` messages and `fields` values (which wrap under the value column, not under the key) all use it. At 80 columns or wider nothing is rewrapped, so desktop output, pipes and the tests look exactly as written. Example at 44 columns:
+
+   ```
+   ── Step 1 of 5 · Summaries ─────────────────
+     rpipe reads the papers it picks for you
+     and writes a summary of each. That needs
+     ...
+     arXiv categories  cs.CR, cs.LG, cs.AI,
+                       cs.CL, cs.OS, cs.SE,
+   ```
 
 Worked example: `rpipe profile show | cat` is not a terminal, so it prints `── Topics ───…` with no escape codes at all; the same command on your screen prints the header in bold cyan. The nightly `rpipe run` under systemd is not a terminal either, so its end-of-run summary is plain text for the journal:
 
@@ -83,11 +93,11 @@ The share commands follow the same rules as the rest: `rpipe share status` print
 - `rpipe init` in a new vault, or `rpipe profile show`: see headers, ticks and aligned fields.
 - `NO_COLOR=1 rpipe profile show`: same text, no colour, marks kept.
 - `rpipe profile show | cat`: no escape codes (the pipe is not a terminal).
-- Shrink the window to under 80 columns: the header rules shrink with it, and a long header title still shows in full.
+- Shrink the window to under 80 columns: the header rules shrink with it, a long header title still shows in full, and explanations rewrap to the new width instead of wrapping raggedly.
 - Tests: `uv run pytest -q tests/test_term.py`.
 
 ## Where the code is
 
 - `src/research_pipeline/term.py`: the helpers. It is in the composition group (see [architecture.md](architecture.md)); it imports only `typer` and the standard library.
 - `src/research_pipeline/cli.py`: `_fail`, the init wizard, the `profile` and `model` commands call it. The run, collect, triage, summarize, digest, requests, shelf, schedule, app and sources commands, the whole `model` group (scan, recommend, setup, tune, fit, bench, catalog), vote/save/feedback/review, and the share, gold and eval groups use it too.
-- `tests/test_term.py`: no escape codes off a terminal, colour on one, `NO_COLOR`, header width (including a title longer than the window), alignment, errors to stderr.
+- `tests/test_term.py`: no escape codes off a terminal, colour on one, `NO_COLOR`, header width (including a title longer than the window), rewrapping on a narrow terminal, alignment, errors to stderr.

@@ -133,3 +133,45 @@ def test_leading_newline_becomes_blank_line_before_the_mark(capsys):
     term.warn("\nX")
     term.ok("\n\nY")
     assert capsys.readouterr().out == "\n! X\n\n\n✓ Y\n"
+
+
+def _cols(monkeypatch, n):
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback=(80, 24): type("S", (), {"columns": n})())
+
+
+def test_hint_rewraps_on_a_narrow_terminal(monkeypatch, capsys):
+    _cols(monkeypatch, 44)
+    text = ("rpipe reads the papers it picks for you and writes a summary of each. That needs a\n"
+            "language model: one on this computer (Ollama: private; best with a graphics card).\n"
+            "\n"
+            "  rpipe run   collect today's papers")
+    term.hint(text)
+    lines = capsys.readouterr().out.split("\n")
+    assert all(len(line) <= 44 for line in lines)
+    assert all(line.startswith("  ") or not line for line in lines)
+    joined = " ".join(line.strip() for line in lines if line.strip())
+    assert "writes a summary of each. That needs a language model:" in joined
+    assert "" in lines  # the blank line between paragraphs is kept
+    assert "    rpipe run   collect today's papers" in lines  # indented lines keep their break
+
+
+def test_hint_keeps_line_breaks_on_a_wide_terminal(monkeypatch, capsys):
+    _cols(monkeypatch, 120)
+    term.hint("one line\nsecond line")
+    assert capsys.readouterr().out == "  one line\n  second line\n"
+
+
+def test_fields_wrap_values_under_themselves_when_narrow(monkeypatch, capsys):
+    _cols(monkeypatch, 44)
+    term.fields([("arXiv categories", "cs.CR, cs.LG, cs.AI, cs.CL, cs.OS, cs.SE, cs.DC, cs.NI")])
+    lines = capsys.readouterr().out.rstrip("\n").split("\n")
+    assert len(lines) > 1 and all(len(line) <= 44 for line in lines)
+    assert lines[1].startswith(" " * 20) and lines[1].strip().startswith("cs.")
+
+
+def test_marked_message_rewraps_under_the_text_when_narrow(monkeypatch, capsys):
+    _cols(monkeypatch, 44)
+    term.ok("Vault ready at /home/someone/research-vault and everything else is ready too")
+    lines = capsys.readouterr().out.rstrip("\n").split("\n")
+    assert lines[0].startswith("✓ Vault ready") and all(len(line) <= 44 for line in lines)
+    assert all(line.startswith("  ") for line in lines[1:])

@@ -57,4 +57,4 @@ The tests (`tests/test_serve.py`) run each canned query's SQL against a temporar
 
 ## Where the code is
 
-`src/research_pipeline/serve.py` (`build_metadata`, `tailscale_ip`, `resolve_host`, `command`) and the `serve` command in `src/research_pipeline/cli.py`. The extra is declared in `pyproject.toml`.
+`src/research_pipeline/serve.py` (`build_metadata`, `command`) and the host allowlist in `src/research_pipeline/netguard.py` (`check_host`, `tailscale_ip`, `resolve_host`; shared with the app server, re-exported by `serve.py`) and the `serve` command in `src/research_pipeline/cli.py`. The extra is declared in `pyproject.toml`.

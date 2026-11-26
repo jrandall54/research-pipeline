@@ -79,7 +79,7 @@ def test_app_commands_use_only_library_api():
 # ---- the pipeline/app boundary (see docs/guide/architecture.md, "The groups") ----
 
 SHARED = {"models", "summary_models", "db", "vault", "embed", "llm", "backends", "defaults",
-          "seeds", "profile_edit", "ids", "progress", "categories", "schedule"}
+          "seeds", "profile_edit", "ids", "progress", "categories", "schedule", "netguard"}
 PIPELINE = {"collect", "sources", "triage", "rank", "fulltext", "summarize", "prompts", "digest",
             "evaluate", "gold", "judge", "pruning", "parts", "citations", "spill",
             "ollama_fit", "ollama_tune", "bench", "scan", "catalog", "recommender", "machine",

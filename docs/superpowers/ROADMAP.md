@@ -38,6 +38,7 @@ The single list of all work on rpipe: what is done, what is next, and where each
 | 8.1 | Readable text in the app: each summary field spaced out, longer ones as points | merged | (Phase 9 design conversation) | [plan](plans/phase-08.1-readable-text.md) |
 | 9 | Diagrams in the feed, plus hooks, key numbers and plain-words fields, checked against the paper | merged | [design](specs/phase-09-hooks-and-diagrams-design.md) | [plan](plans/phase-09-hooks-and-diagrams.md) |
 | 9.1 | Stricter diagrams: no diagram by default, generic ones dropped, boxes must come from the method | merged | (owner request after the Phase 9 eval) | [plan](plans/phase-09.1-stricter-diagrams.md) |
+| 9.2 | Diagrams on the paper screen only, not in the feed | merged | (owner's choice after the 9.1 measurements) | [plan](plans/phase-09.2-diagram-on-paper-page.md) |
 | 10 | Sharing: publish your feed, a directory, follow others, custom mixes | idea | | |
 | 11 | Notes and link capture; the shelf grows into one library (overlap alerts, archive connections, weekly synthesis page) | idea | | |
 | 12 | Narrated video explainers | idea | | |

@@ -49,7 +49,7 @@ Worked example: a paper with reasons `topic: agentic workflow (0.80)` and `HF up
 
 ## Skim and Read
 
-Every card always contains the Skim fields (topic, title, hook or one line, key numbers, why) and, in a `<div class="read-more">`, the Read fields (problem, what they did, what they found, each with its section tag, then the diagram if there is one). The page's `<body data-depth="skim|read">` decides which show: CSS hides `.read-more` when it is `skim`. The Skim / Read buttons (`aria-pressed` marks the active one) are handled by `app.js`, which sets the attribute and saves the choice in the browser's `localStorage["depth"]`, wrapped in try/catch because private windows can refuse storage (the buttons then still work for that page). Without JavaScript the page stays in Skim. An unsummarized card has no problem/approach/results, so it shows the abstract excerpt at both depths.
+Every card always contains the Skim fields (topic, title, hook or one line, key numbers, why) and, in a `<div class="read-more">`, the Read fields (problem, what they did, what they found, each with its section tag; diagrams are shown only on the paper screen, see "Hook, key numbers and the diagram"). The page's `<body data-depth="skim|read">` decides which show: CSS hides `.read-more` when it is `skim`. The Skim / Read buttons (`aria-pressed` marks the active one) are handled by `app.js`, which sets the attribute and saves the choice in the browser's `localStorage["depth"]`, wrapped in try/catch because private windows can refuse storage (the buttons then still work for that page). Without JavaScript the page stays in Skim. An unsummarized card has no problem/approach/results, so it shows the abstract excerpt at both depths.
 
 ### How a summary field is laid out
 
@@ -96,7 +96,7 @@ Why this way: the list is plain links, so it works without JavaScript and each p
 
 ## Hook, key numbers and the diagram (Phase 9)
 
-**What it does.** A summarized paper now opens with its main finding, not just a topic sentence: the **hook** (one plain line such as "Robots finish 28% sooner", with its section tag), up to three **key numbers** as small chips under it (`28% less time`), and, when the paper has one, a small **diagram** of how the method fits together. On a card the hook takes the place of the one-line summary; with no hook (an older summary, or the hook failed its checks) the one-line summary shows as before. The paper screen does the same under the title and adds a "How it works" section with the diagram before the brief.
+**What it does.** A summarized paper now opens with its main finding, not just a topic sentence: the **hook** (one plain line such as "Robots finish 28% sooner", with its section tag), up to three **key numbers** as small chips under it (`28% less time`), and, on the paper screen only, a small **diagram** of how the method fits together when there is one. On a card the hook takes the place of the one-line summary; with no hook (an older summary, or the hook failed its checks) the one-line summary shows as before. The paper screen does the same under the title and adds a "How it works" section with the diagram before the brief.
 
 ```
 Card, Skim                               Card, Read adds
@@ -108,7 +108,7 @@ sooner  §5.1                                  |
 Why you're seeing this: ...              One coordinator hands work to three agents
 ```
 
-**How it works.** `present.card` copies `hook` and `key_numbers` from the summary and `diagram` from `library_api`'s paper view into `CardData`; nothing is computed there. The templates print them through one macro, `headline` in `_field.html` (hook or one-liner, then the chips), so a card and the paper screen cannot drift apart. The chips sit outside `.read-more`, so they show in Skim too; the diagram sits inside it, so it shows only in Read. The diagram is drawn by `webapp/diagram_svg.py`, registered in `deps.py` as the template filter `diagram_svg`:
+**How it works.** `present.card` copies `hook` and `key_numbers` from the summary and `diagram` from `library_api`'s paper view into `CardData`; nothing is computed there. The templates print them through one macro, `headline` in `_field.html` (hook or one-liner, then the chips), so a card and the paper screen cannot drift apart. The chips sit outside `.read-more`, so they show in Skim too. The diagram is drawn only on the paper screen, under "How it works" (Phase 9.2: the model draws a diagram for nearly every paper, including literature reviews and theory papers, where it shows how the work was done rather than an idea; kept off the feed so a dull one never takes space there). The diagram is drawn by `webapp/diagram_svg.py`, registered in `deps.py` as the template filter `diagram_svg`:
 
 1. The stored diagram is data: a shape (`parts`, `steps` or `loop`), 2 to 8 nodes (a short label each), the arrows between them and a caption.
 2. The shape picks a layout, all inside a 320-unit-wide `viewBox` so the picture scales to the card:
@@ -125,9 +125,9 @@ Worked example: `parts` with nodes Coordinator, Plan, Code, Test and arrows from
 - **Checkable data, not a drawing.** The model answers boxes and arrows; code checks every box and edge (see `summaries.md`) before it is stored. The drawer is also built so that no valid graph can crash it: it follows arrows with a "seen" set (a cycle cannot loop), draws isolated nodes, and `parts` ignores the arrows' exact targets and connects the top box to the rest.
 - **Look A.** Rounded boxes, the coordinating box in the accent colour, grey lines, small muted caption: the style chosen from the mockups.
 - **Light and dark from CSS variables.** The SVG carries classes (`d-node`, `d-top`, `d-line`, ...) and `app.css` colours them with `--accent`, `--surface`, `--ink` and `--muted`, so the same markup is right in both themes (text on the accent box uses `--surface`, which flips with the theme).
-- Rejected: drawing as an image file (cannot follow the theme, extra request) and showing the diagram in Skim (cards would get tall).
+- Rejected: drawing as an image file (cannot follow the theme, extra request); showing the diagram in Skim (cards would get tall); showing it in Read mode on cards (Phase 9 did; dropped in 9.2 because many diagrams for reviews and theory papers say little, owner's choice).
 
-**How to check.** `uv run pytest tests/test_webapp_diagram_svg.py tests/test_webapp_feed.py tests/test_webapp_pages.py -q`: the three shapes render with every label, labels are escaped, cycles, isolated nodes, self-arrows and dense graphs at 2 to 8 nodes all draw; the card shows the hook instead of the one-liner and falls back; chips are outside `read-more`; the paper page has "How it works" only when there is a diagram. Then open a summarized paper in the app after a night with diagrams on.
+**How to check.** `uv run pytest tests/test_webapp_diagram_svg.py tests/test_webapp_feed.py tests/test_webapp_pages.py -q`: the three shapes render with every label, labels are escaped, cycles, isolated nodes, self-arrows and dense graphs at 2 to 8 nodes all draw; the card shows the hook instead of the one-liner and falls back; chips are outside `read-more`; cards never carry a diagram; the paper page has "How it works" only when there is a diagram. Then open a summarized paper in the app after a night with diagrams on.
 
 **Where the code is.** `src/research_pipeline/webapp/diagram_svg.py` (`render`), `templates/_field.html` (`headline`), `_card.html`, `paper.html`, the "Hook, key numbers and diagram" block at the end of `static/app.css`, `present.py` (`CardData.hook`, `key_numbers`, `diagram`).
 

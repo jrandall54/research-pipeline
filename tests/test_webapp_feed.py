@@ -158,7 +158,8 @@ def test_key_numbers_visible_outside_read_more(client, vault):
     assert chips < html.index('class="read-more"')
 
 
-def test_card_diagram_inside_read_more(client, vault):
+def test_card_has_no_diagram_paper_page_does(client, vault):
+    # Phase 9.2: diagrams only on the paper screen, never in the feed.
     _with_hook(vault[0], "2611.25002")
-    html = client.get("/").text
-    assert html.index('class="read-more"') < html.index('<figure class="diagram') < html.index("</article>")
+    assert '<figure class="diagram' not in client.get("/").text
+    assert '<figure class="diagram' in client.get("/paper/2611.25002").text

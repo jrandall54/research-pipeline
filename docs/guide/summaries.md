@@ -317,7 +317,7 @@ Worked example (the ACAP paper). Section 5.1 says "ACAP cut latency by 28%".
 
 ### The diagram
 
-**What it does.** One more model call per paper (when the `diagrams` setting says so, see "The diagrams setting" in [llm.md](llm.md)) asks for a small diagram of how the method works. The model does not draw anything: it answers with data, a list of boxes (nodes) and arrows (edges), and the app turns that into a picture. The diagram shows on the card in Read mode and on the paper screen. No diagram is the normal answer: the prompt says `null` unless the paper's own method section (or a figure of its method) names distinct parts or stages, and code throws away generic diagrams (Phase 9.1). Expect most papers to have none; that is not a failure.
+**What it does.** One more model call per paper (when the `diagrams` setting says so, see "The diagrams setting" in [llm.md](llm.md)) asks for a small diagram of how the method works. The model does not draw anything: it answers with data, a list of boxes (nodes) and arrows (edges), and the app turns that into a picture. The diagram shows on the paper screen, under "How it works" (not on feed cards since Phase 9.2). No diagram is the normal answer: the prompt says `null` unless the paper's own method section (or a figure of its method) names distinct parts or stages, and code throws away generic diagrams (Phase 9.1). Expect most papers to have none; that is not a failure.
 
 **How it works.**
 

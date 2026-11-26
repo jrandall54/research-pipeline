@@ -8,7 +8,6 @@
       {% for label, f in [("The problem", c.problem), ("What they did", c.approach), ("What they found", c.results)] %}
         {{ field(label, f) }}
       {% endfor %}
-      {% if c.diagram %}{{ c.diagram | diagram_svg }}{% endif %}
     </div>
   {% else %}
     {# No summary yet: there is no problem/approach/results, so the abstract excerpt serves both depths. #}

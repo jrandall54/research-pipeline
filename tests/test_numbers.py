@@ -37,3 +37,19 @@ def test_number_found_survives_very_long_digit_runs():
 def test_numbers_in_plain_and_rounding_regressions():
     assert numbers_in("5 apples") == ["5"]
     assert number_found("28%", "27.5%")
+
+
+def test_percent_words_count_as_percent_sign():
+    assert number_found("80%", "About 80 per cent of the tokens")
+    assert number_found("80%", "About 80 percent of the tokens")
+    assert number_found("80%", "About 80 Percent of the tokens")
+    assert number_found("80%", "About 80pct of the tokens")
+
+
+def test_percent_word_needs_matching_sign():
+    assert numbers_in("rose 14 to 22 per cent") == ["14", "22%"]
+    assert not number_found("80", "80 per cent")
+
+
+def test_percent_word_not_a_prefix_of_another_word():
+    assert numbers_in("80 percentile") == ["80"]

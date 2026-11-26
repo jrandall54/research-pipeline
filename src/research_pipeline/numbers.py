@@ -9,10 +9,11 @@ from __future__ import annotations
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-# digits with optional thousands groups or decimals, then an optional sign (% or x)
+# digits with optional thousands groups or decimals, then an optional sign:
+# % or x, or the words "per cent" / "percent" / "pct" (read as %, any case)
 _NUM = re.compile(
     r"(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
-    r"(?:\s*(?P<sign>\\?%|[x×]))?"
+    r"(?:\s*(?P<sign>\\?%|[x×]|(?i:per ?cent|percent|pct)(?![a-zA-Z])))?"
 )
 
 
@@ -27,6 +28,8 @@ def _extract(text: str, skip_names: bool) -> list[str]:
         if skip_names and (before.isalpha() or before and (before in _HYPHENS or before == "§")):
             continue
         sign = (m.group("sign") or "").replace("\\", "").replace("×", "x")
+        if sign not in ("", "%", "x"):  # the words "per cent", "percent", "pct"
+            sign = "%"
         # a trailing "x" glued to a word (e.g. "5xyz") is not a sign
         if sign == "x" and text[m.end() : m.end() + 1].isalpha():
             sign = ""

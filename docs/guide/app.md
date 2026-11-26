@@ -90,6 +90,26 @@ Why this way: the choice lives in the browser, not the database, because it is a
 
 **Where the code is.** `webapp/routes_feed.py` (`_view_of`, `_page`), `webapp/present.py` (`followed_card`, `why_sentence(..., you=False)`), `webapp/routes_pages.py` (`paper`, `_with_publisher_summary`), `templates/_view_switch.html`, `_card.html`, `paper.html`, `static/app.js`.
 
+## People (Phase 10)
+
+**What it does.** The **People** page (the new link after Search) is where you manage sharing from the app. **Your feed** says whether you publish: if not, "Your feed is private" with the command `rpipe share setup`; if so, your display name, the address others follow, and the command `rpipe share stop`. **Feeds like yours** lists the directory (most shared topics first): an initial, the name, their topics, "About N papers a day · shares N of your topics", and a Follow button. Tap a row to open "Recently in <Name>'s feed" (their latest titles with one line each). A **Following** section lists the feeds you follow, each with an "In Mix" tick, and "<Name> stopped publishing" when the feed has gone quiet or away. On a desktop-width screen the Mix view also shows a **Showing** row: You, plus one tick per followed feed (ticking one reloads Mix without that feed).
+
+**Follow from the app means posts arrive tonight.** The button records the follow; it does not download anything. The nightly run fetches the feed, so the button then reads "Following · posts arrive tonight" and stays that way on later visits until the first fetch has happened. Following with `rpipe share follow` behaves the same.
+
+**How it works.**
+
+1. `rpipe app run` (and the service unit, which runs it) reads your profile topics and your sharing settings and hands them to `create_app(..., my_topics=..., share=...)`. The app never loads the profile or config itself. Because they are read at start-up, **changing your display name or turning sharing on or off needs an app restart** (`rpipe app install` restarts it); topic changes also show after a restart.
+2. `GET /people` (`routes_people.py`) calls `library_api.directory(conn, my_topics)` and `library_api.follows(conn)` and renders `people.html`.
+3. The Follow button posts to `POST /api/feed/{handle}/follow` (`library_api.follow_request`); an unknown handle answers 404 `{"error": ...}`.
+4. A Mix tick posts `{"on": true|false}` to `POST /api/feed/{handle}/mix` and the route finds your follow with that handle (`library_api.set_in_mix`). The route takes the handle because a feed id such as `github:alex/rpipe-feed` contains `:` and `/`, which do not fit a URL path. A follow added by URL with no handle therefore has no tick.
+5. Both routes go through the same-origin guard like the vote and save routes; `app.js` shows an error under the row when a call fails and puts the tick back.
+
+**Why it's built this way.** The page reuses the card, button and muted-text styles; only a few rules were added. The settings stay in the CLI (`rpipe share ...`); the page shows the exact command rather than running GitHub sign-in from a browser. Rejected: the app reading config itself (it would couple the web layer to the profile and config loaders), and a feed-id URL for the mix route (it needs escaping on both ends).
+
+**How to check it.** `uv run pytest tests/test_webapp_people.py -q`.
+
+**Where the code is.** `webapp/routes_people.py`, `templates/people.html`, `templates/_showing.html`, `server.py` (`create_app`), `cli.py` (`app_run`), the People block at the end of `static/app.js` and `static/app.css`.
+
 ## Why you're seeing this
 
 Built from the stored reasons; unknown reason formats are skipped, never shown raw, and "disliked similar" is not shown at all (it lowered the score, and showing it would confuse).
@@ -233,15 +253,16 @@ Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static fi
 
 ## Where the code is
 
-- `src/research_pipeline/webapp/server.py`: `create_app(vault_db, allowed_hosts, address=None)` (the optional `address` is what the wrong-host page offers), the 404 page handler and the "library busy" handler. `deps.py`: `get_conn` and the shared `templates` (routers import these from `deps`; `server` re-exports them).
+- `src/research_pipeline/webapp/server.py`: `create_app(vault_db, allowed_hosts, address=None, my_topics=None, share=None)` (the optional `address` is what the wrong-host page offers; `my_topics` and `share` feed the People page), the 404 page handler and the "library busy" handler. `deps.py`: `get_conn` and the shared `templates` (routers import these from `deps`; `server` re-exports them).
 - `src/research_pipeline/webapp/guard.py`: `check`, the Host and same-origin checks.
 - `src/research_pipeline/webapp/templates/base.html`: the page frame and navigation.
 - `src/research_pipeline/webapp/static/`: `app.css` (palette, type, layout), `app.js`, `icon.svg` and its PNG copies `icon-180.png` (iPhone home screen), `icon-192.png` and `icon-512.png` (Android, listed in the manifest) rendered from the SVG, `manifest.webmanifest`, `fonts/`.
 - `src/research_pipeline/webapp/present.py`: `why_sentence`, `topic_of`, `topic_color`, `section_tag`, `day_heading`, `card`/`CardData` (pure shaping).
 - `src/research_pipeline/webapp/diagram_svg.py`: draws a stored diagram as inline SVG (see "Hook, key numbers and the diagram").
 - `src/research_pipeline/webapp/routes_feed.py`: the `/` and `/day/{date}` routes (with the `?view=` choice, see "Mine, Following and Mix").
+- `src/research_pipeline/webapp/routes_people.py`: the `/people` page and the follow and Mix-tick endpoints (see "People").
 - `src/research_pipeline/webapp/routes_actions.py`: the `/api/paper/{id}/vote`, `save` and `summarize` endpoints; `templates/_actions.html` is the button row; the click handling is the second block of `static/app.js`.
 - `src/research_pipeline/webapp/routes_pages.py`: `/paper/{id}`, `/saved`, `/search`; `present.paper_detail` shapes the paper page.
 - `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`, `paper.html`, `list.html` (Saved and Search), `404.html`.
 - `src/research_pipeline/webapp/service.py`: the always-on service (see Setting it up).
-- Tests: `tests/test_webapp_server.py` (guard, static files, error pages), `tests/test_webapp_feed.py` (feed and Skim/Read), `tests/test_webapp_pages.py` (paper, Saved, Search), `tests/test_webapp_actions.py` (vote, save, summarize), `tests/test_webapp_share.py` (Mine / Following / Mix), `tests/test_webapp_present.py` (card shaping, safe links), `tests/test_webapp_diagram_svg.py` (the drawing), `tests/test_webapp_service.py` (the systemd unit), `tests/test_cli_app.py` (the `rpipe app` commands, port range, allowed hosts).
+- Tests: `tests/test_webapp_server.py` (guard, static files, error pages), `tests/test_webapp_feed.py` (feed and Skim/Read), `tests/test_webapp_pages.py` (paper, Saved, Search), `tests/test_webapp_actions.py` (vote, save, summarize), `tests/test_webapp_share.py` (Mine / Following / Mix), `tests/test_webapp_people.py` (People page, Follow, Mix ticks), `tests/test_webapp_present.py` (card shaping, safe links), `tests/test_webapp_diagram_svg.py` (the drawing), `tests/test_webapp_service.py` (the systemd unit), `tests/test_cli_app.py` (the `rpipe app` commands, port range, allowed hosts).

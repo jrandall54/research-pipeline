@@ -8,6 +8,7 @@
     {% include "_view_switch.html" %}
   </header>
   {% endif %}
+  {% if showing %}{% include "_showing.html" %}{% endif %}
   {% if view == "mine" %}{% include "_empty.html" %}{% else %}<p class="empty muted">Nothing here yet. Posts arrive after the next nightly run.</p>{% endif %}
 {% else %}
   <header class="feed-head">
@@ -18,6 +19,7 @@
       <button type="button" data-depth-set="read" aria-pressed="false">Read</button>
     </div>
   </header>
+  {% if showing %}{% include "_showing.html" %}{% endif %}
   <div class="cards">
     {% for c in cards %}{% include "_card.html" %}{% endfor %}
   </div>

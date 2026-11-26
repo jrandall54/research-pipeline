@@ -25,10 +25,13 @@ def _view_of(request: Request, has_follows: bool) -> str:
 
 
 def _page(request: Request, conn: sqlite3.Connection, day: str | None):
-    has_follows = bool(library_api.follows(conn))
+    follows = library_api.follows(conn)
+    has_follows = bool(follows)
     view = _view_of(request, has_follows)
     switch = {"switch": has_follows, "view": view,
-              "vq": f"?view={view}" if view != "mine" else ""}  # "mine" keeps today's plain addresses
+              "vq": f"?view={view}" if view != "mine" else "",
+              # the desktop "Showing" ticks; only handle follows can be ticked (the mix route takes the handle)
+              "showing": [f for f in follows if f.handle] if view == "mix" else []}  # "mine" keeps today's plain addresses
     if view == "following":
         dates = library_api.following_days(conn)
     elif view == "mix":

@@ -1,0 +1,8 @@
+<div class="showing" aria-label="Showing">
+  <span class="muted">Showing</span>
+  <span class="mix-tick">You</span>
+  {% for f in showing %}
+  <label class="mix-tick"><input type="checkbox" data-mix="{{ f.handle }}" data-reload{% if f.in_mix %} checked{% endif %}> {{ f.display_name }}</label>
+  {% endfor %}
+  <span class="status muted" role="status"></span>
+</div>

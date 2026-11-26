@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}People - Research Feed{% endblock %}
+{% block content %}
+<header class="feed-head"><h1>People</h1></header>
+
+<section class="card people-box" aria-labelledby="your-feed">
+  <h2 id="your-feed" class="people-h">Your feed</h2>
+  {% if share %}
+    <p>Published as {{ share.display_name }}. Others can follow it at <span class="mono">{{ share.address }}</span>.</p>
+    <p class="muted">To stop publishing, run <span class="mono">rpipe share stop</span>.</p>
+  {% else %}
+    <p>Your feed is private. To let others follow it, run <span class="mono">rpipe share setup</span>.</p>
+  {% endif %}
+</section>
+
+<h2 class="people-h">Feeds like yours</h2>
+{% if directory %}
+<ul class="people-list">
+  {% for d in directory %}
+  <li class="card person">
+    <span class="avatar" aria-hidden="true">{{ d.display_name[:1] | upper }}</span>
+    <details class="person-main">
+      <summary>
+        <span class="person-name">{{ d.display_name }}</span>
+        <span class="muted person-topics">{{ d.topics | join(" · ") }}</span>
+        <span class="muted person-meta">About {{ d.posts_per_day }} papers a day · shares {{ d.shared_topics }} of your topics</span>
+      </summary>
+      {% if d.preview %}
+      <div class="person-preview">
+        <p class="field-label">Recently in {{ d.display_name }}'s feed</p>
+        <ul class="points">
+          {% for p in d.preview %}<li><strong>{{ p.title }}</strong>{% if p.one_line %}<br><span class="muted">{{ p.one_line }}</span>{% endif %}</li>{% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </details>
+    {% set mine = follows | selectattr("feed_id", "equalto", d.feed_id) | first %}
+    {% if d.following %}
+      <button type="button" class="btn" disabled>Following{% if mine and mine.waiting %} · posts arrive tonight{% endif %}</button>
+    {% else %}
+      <button type="button" class="btn" data-follow="{{ d.handle }}">Follow</button>
+    {% endif %}
+    <span class="status muted" role="status"></span>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+  <p class="muted">No feeds in the directory yet. It fills in after a nightly run, or run <span class="mono">rpipe share browse</span>.</p>
+{% endif %}
+
+{% if follows %}
+<h2 class="people-h">Following</h2>
+<ul class="people-list">
+  {% for f in follows %}
+  <li class="card person">
+    <span class="avatar" aria-hidden="true">{{ f.display_name[:1] | upper }}</span>
+    <div class="person-main">
+      <span class="person-name">{{ f.display_name }}</span>
+      {% if f.stopped %}<span class="person-meta">{{ f.display_name }} stopped publishing</span>
+      {% elif f.waiting %}<span class="muted person-meta">Posts arrive tonight</span>{% endif %}
+    </div>
+    {% if f.handle %}
+    <label class="mix-tick"><input type="checkbox" data-mix="{{ f.handle }}"{% if f.in_mix %} checked{% endif %}> In Mix</label>
+    {% endif %}
+    <span class="status muted" role="status"></span>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

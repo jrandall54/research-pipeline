@@ -108,3 +108,54 @@
     if (btn) handle(btn);
   });
 })();
+
+// People: Follow buttons and Mix ticks post to /api/feed/<handle>/... and update from the answer.
+(function () {
+  function post(handle, action, body) {
+    return fetch("/api/feed/" + encodeURIComponent(handle) + "/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    }).catch(function () {
+      throw new Error("Couldn't reach your library. Check your connection.");
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) throw new Error(data.error || "Something went wrong. Try again.");
+        return data;
+      });
+    });
+  }
+  function statusOf(el) {
+    var scope = el.closest(".person, .showing");
+    return scope ? scope.querySelector(".status") : null;
+  }
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest("button[data-follow]");
+    if (!btn) return;
+    var status = statusOf(btn);
+    btn.disabled = true;
+    if (status) status.textContent = "";
+    post(btn.getAttribute("data-follow"), "follow").then(function () {
+      btn.textContent = "Following · posts arrive tonight";
+    }, function (e) {
+      btn.disabled = false;
+      if (status) status.textContent = e.message;
+    });
+  });
+  document.addEventListener("change", function (ev) {
+    var box = ev.target.closest("input[data-mix]");
+    if (!box) return;
+    var status = statusOf(box);
+    var on = box.checked;
+    box.disabled = true;
+    if (status) status.textContent = "";
+    post(box.getAttribute("data-mix"), "mix", { on: on }).then(function () {
+      box.disabled = false;
+      if (box.hasAttribute("data-reload")) location.reload();
+    }, function (e) {
+      box.disabled = false;
+      box.checked = !on;
+      if (status) status.textContent = e.message;
+    });
+  });
+})();

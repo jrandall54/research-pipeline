@@ -3315,9 +3315,18 @@ def app_run(
     from research_pipeline.webapp.server import create_app
 
     shown = f"[{bind}]" if ":" in bind else bind
+    profile = _load_profile(ctx)
+    share = None
+    if ctx.config.share_enabled and ctx.config.share_handle:
+        from research_pipeline import share_publish
+
+        handle = ctx.config.share_handle
+        share = {"handle": handle, "display_name": ctx.config.share_display_name or handle,
+                 "address": share_publish.feed_url(handle)}
     typer.echo(f"Your feed is at http://{shown}:{port}/ (only your own devices can reach it)")
     typer.echo("Open exactly this address: a machine name such as name.tailnet.ts.net will not work.")
-    uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind), f"http://{shown}:{port}/"),
+    uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind), f"http://{shown}:{port}/",
+                                my_topics=profile.topics, share=share),
                 host=bind, port=port, log_level="warning")
 
 

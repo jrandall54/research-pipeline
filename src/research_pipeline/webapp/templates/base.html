@@ -24,6 +24,8 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z"/></svg>Saved</a>
       <a href="/search" {% if nav == "search" %}aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>Search</a>
+      <a href="/people" {% if nav == "people" %}aria-current="page"{% endif %}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M16 5a3.5 3.5 0 010 6.5M18 14.5c2 .6 3.5 2.6 3.5 5.5"/></svg>People</a>
     </nav>
     <main class="content">
       {% block content %}{% endblock %}

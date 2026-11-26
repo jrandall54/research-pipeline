@@ -9,17 +9,23 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
-from research_pipeline.webapp import guard, routes_actions, routes_feed, routes_pages
+from research_pipeline.webapp import guard, routes_actions, routes_feed, routes_pages, routes_people
 from research_pipeline.webapp.deps import HERE, get_conn, templates
 
 __all__ = ["HERE", "create_app", "get_conn", "templates"]  # get_conn/templates re-exported for existing callers
 
 
-def create_app(vault_db: Path, allowed_hosts: set[str], address: str | None = None) -> FastAPI:
+def create_app(
+    vault_db: Path, allowed_hosts: set[str], address: str | None = None,
+    my_topics: list[str] | None = None, share: dict | None = None,
+) -> FastAPI:
+    """``my_topics`` and ``share`` ({"handle", "display_name", "address"}, None while private) come from the CLI."""
     app = FastAPI(title="Research Feed", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.vault_db = vault_db
     app.state.allowed_hosts = allowed_hosts
     app.state.address = address
+    app.state.my_topics = list(my_topics or [])
+    app.state.share = share
 
     @app.middleware("http")
     async def guard_middleware(request: Request, call_next):
@@ -45,5 +51,6 @@ def create_app(vault_db: Path, allowed_hosts: set[str], address: str | None = No
     app.include_router(routes_feed.router)
     app.include_router(routes_pages.router)
     app.include_router(routes_actions.router)
+    app.include_router(routes_people.router)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     return app

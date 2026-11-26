@@ -69,7 +69,7 @@ The rules:
 
 ## Just reading: `rpipe show`
 
-`rpipe show` prints the same block `review` shows (title, `id:`, `why:`, then the summary and critique, or the abstract when there is no summary yet, then the link) but never asks for a vote and never writes to the vault.
+`rpipe show` prints the same block `review` shows (title, `id:`, `why:`, then the summary and critique, or the abstract when there is no summary yet, then the link; a summary with a hook shows its `**Hook:**` line first, see [digest.md](digest.md)) but never asks for a vote and never writes to the vault.
 
 ```
 rpipe show 2611.25005            # by id

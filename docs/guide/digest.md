@@ -90,9 +90,11 @@ To go through a digest's papers one by one in the terminal, use `rpipe review` (
 
 ### The summary block
 
-Under a paper that has a summary, the digest shows the one-line takeaway, the four summary claims (problem, approach, results, limitations), the critique's strengths and weaknesses, and questions to ask. Every claim ends with the paper sections it cites, written `[§ 2 Method, 3 Results]`. A real rendering (paper and model output are made up; the layout is produced by the code):
+Under a paper that has a summary, the digest shows the hook (when there is one), the one-line takeaway, the four summary claims (problem, approach, results, limitations), the critique's strengths and weaknesses, and questions to ask. Every claim ends with the paper sections it cites, written `[§ 2 Method, 3 Results]`. A real rendering (paper and model output are made up; the layout is produced by the code):
 
 ```markdown
+**Hook:** Suffixes found on open models jailbreak closed ones 79% of the time. [§ 5 Results]
+
 **Summary:** Gradient-searched suffixes jailbreak many aligned models at once.
 
 - **Problem:** Aligned models can still be pushed to produce harmful text. [§ 1 Introduction]
@@ -113,6 +115,7 @@ Under a paper that has a summary, the digest shows the one-line takeaway, the fo
 - Does a perplexity filter stop these suffixes?
 ```
 
+- **Hook line.** When the summary has a hook (one plain line stating the main finding, see `summaries.md`), it comes first, above `**Summary:**`, written `**Hook:** <text> [§ <cited sections>]` and followed by a blank line. Its citations are checked like any claim's; a hook that fails the check is left out, and the digest then shows only the one-line summary, exactly as before. A summary with no hook (an older summary, or the model gave none) has no `**Hook:**` line at all. The hook is never marked `⚠ unverified`: a hook that cannot be checked is dropped instead.
 - **`⚠ unverified`** in front of a claim means at least one section it cites does not exist in the paper (the code checks every cited title against the real section titles, see `summaries.md`). Treat that claim as a guess and check the paper.
 - **Basis note.** A summary written from the abstract only (the paper has no arXiv HTML version) ends with the line _Summary based on the abstract only (full text unavailable)._ Its citations can only point at "Abstract". If the paper was too long for the model's context window a second note says part of it was left out.
 - **No summary.** A paper whose summary failed, or that was listed while Ollama was down, shows the abstract and links only. **Same-day recovery:** start Ollama, then run `rpipe summarize` and `rpipe digest` (or `rpipe run` again) on the same day; the summarize stage also picks up papers already in *today's* digest that lack a summary (they stay `in_digest`), and the digest is rewritten with the summaries. A paper that has failed 3 times is no longer retried, on that day or later (the errors say `gave up after 3 failed tries`). Once the day has passed, the nightly run no longer touches that digest's papers, but `rpipe summarize --backlog` (or `rpipe summarize ID`) summarises them on request, and `rpipe digest --date DAY` then rewrites that day's file (see `running.md`).

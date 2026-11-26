@@ -128,6 +128,22 @@ def test_show_says_when_a_paper_was_read_in_parts(vault, mode, parts, line):
     assert line in r.output
 
 
+def test_show_prints_hook(vault):
+    conn = open_db(vault / "vault.sqlite")
+    c = Claim(text="Cuts memory use by 28%.", sections=["5.1 Efficiency"])
+    save_summary(conn, "2401.00003", PaperSummary(
+        summary=Summary(one_line="Summary line here", problem=c, approach=c, results=c, limitations=c,
+                        hook=c),
+        critique=Critique(strengths=[c], weaknesses=[], questions=[]),
+        basis="full_text", unverified=[]), "fake")
+    conn.commit()
+    conn.close()
+    r = run(vault, "show", "2401.00003")
+    assert r.exit_code == 0, r.output
+    assert "**Hook:** Cuts memory use by 28%. [§ 5.1 Efficiency]" in r.output
+    assert "Summary line here" in r.output
+
+
 def test_show_is_silent_about_whole_reads(vault):
     _save(vault, "2401.00003")
     r = run(vault, "show", "2401.00003")

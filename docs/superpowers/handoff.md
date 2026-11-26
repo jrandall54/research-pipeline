@@ -10,9 +10,9 @@ Current state and next steps only. Read `ROADMAP.md` for the full list of phases
 
 ## Next
 
-1. The owner runs `rpipe share setup` (needs `gh` installed and signed in).
-2. Check the first nightly run with sharing (the fetch stage before the digest, the publish stage after; `rpipe share status`).
-3. AI club members can follow the owner's feed with `rpipe share follow HANDLE`.
+1. Check the first nightly run with sharing (owner ran `rpipe share setup` on 2026-11-26: publishing as "James Randall" at https://jrandall54.github.io/rpipe-feed/; topics trimmed from 18 to 14 the same day) (the fetch stage before the digest, the publish stage after; `rpipe share status`).
+2. AI club members can follow the owner's feed with `rpipe share follow HANDLE`.
+3. Owner setup still open: seed papers (none yet).
 4. Later: diagrams from the paper's own figures and tables (owner's idea, 2026-11-26).
 
 ## Parked (small, not urgent)

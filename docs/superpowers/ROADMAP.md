@@ -2,7 +2,7 @@
 
 The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-26 (Phase 10 built on branch phase-10-sharing, awaiting merge).
 
-**Next up:** the owner's first real `rpipe share setup`, then a first nightly run with sharing. Summaries and the app's look stay as they are (owner ruling 2026-11-26).
+**Next up:** check the first nightly run with sharing (setup done 2026-11-26), then the AI club pilot (members follow the owner's feed). Summaries and the app's look stay as they are (owner ruling 2026-11-26).
 
 ## How this is organized
 

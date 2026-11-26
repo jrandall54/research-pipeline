@@ -216,7 +216,7 @@ The health line shows ` · rerun 2` (papers read whole tonight) and ` · rerun w
 
 ### The request list: work the app asked for
 
-**What it does.** The app half of rpipe (today `rpipe requests add PAPER`; later a button in the app, both calling `library_api.request`) never runs the model itself. When you ask for a paper to be summarized, it writes a `pending` row in the `requests` table (see "The request list" in [data-model.md](data-model.md)) and the pipeline does the work: every night inside `rpipe run`, or straight away with `rpipe requests run`. This is called **draining** the request list (working through it until nothing is left to do). `rpipe requests list` shows every request and how it went.
+**What it does.** The app half of rpipe (`rpipe requests add PAPER` and the "Summarize this" button in the app, both calling `library_api.request`) never runs the model itself. When you ask for a paper to be summarized, it writes a `pending` row in the `requests` table (see "The request list" in [data-model.md](data-model.md)) and the pipeline does the work: every night inside `rpipe run`, or straight away with `rpipe requests run`. This is called **draining** the request list (working through it until nothing is left to do). `rpipe requests list` shows every request and how it went.
 
 **How it works.** `requests_queue.drain_requests` does this, step by step:
 

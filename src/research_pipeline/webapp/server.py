@@ -4,10 +4,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
-from research_pipeline.webapp import guard, routes_feed, routes_pages
+from research_pipeline.webapp import guard, routes_actions, routes_feed, routes_pages
 from research_pipeline.webapp.deps import HERE, get_conn, templates
 
 __all__ = ["HERE", "create_app", "get_conn", "templates"]  # get_conn/templates re-exported for existing callers
@@ -27,10 +28,14 @@ def create_app(vault_db: Path, allowed_hosts: set[str]) -> FastAPI:
     async def not_found_page(request: Request, exc: StarletteHTTPException):
         if exc.status_code != 404:
             return await http_exception_handler(request, exc)
+        if request.url.path.startswith("/api/"):
+            message = exc.detail if exc.detail != "Not Found" else "Not found"
+            return JSONResponse({"error": message}, status_code=404)
         message = exc.detail if exc.detail != "Not Found" else None
         return templates.TemplateResponse(request, "404.html", {"nav": None, "message": message}, status_code=404)
 
     app.include_router(routes_feed.router)
     app.include_router(routes_pages.router)
+    app.include_router(routes_actions.router)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     return app

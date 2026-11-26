@@ -80,6 +80,26 @@ Why this way: the list is plain links, so it works without JavaScript and each p
 
 `GET /saved` lists saved papers as cards, newest save first, or "Nothing saved yet." `GET /search?q=word` searches titles and abstracts (`library_api.search_papers`, which only uses the words you type, so quotes or operators never cause an error) and shows up to 30 results as cards. An empty query shows only the search box; no match shows `No papers match "q".` The query is printed escaped, so typing `<b>` shows the characters rather than making text bold. Both pages reuse the card template and the Skim / Read switch.
 
+## Voting, saving and asking for a summary
+
+**What it does.** Every card and paper page has three buttons: "More like this", "Less like this" and "Save" (it then reads "Saved"). A paper with no summary also shows "Summarize this". Tapping changes things at once; there is no page reload.
+
+**How it works.** The buttons are plain `<button data-action=...>` elements; `static/app.js` sends one `fetch` POST with a JSON body to a small endpoint and updates the button from the answer:
+
+| Tap | Request | Answer |
+|---|---|---|
+| More / Less like this | `POST /api/paper/{id}/vote` `{"direction": "up" \| "down" \| "clear"}` | `{"vote": 1 \| -1 \| 0}` |
+| Save / Saved | `POST /api/paper/{id}/save` `{"saved": true \| false}` | `{"saved": true \| false}` |
+| Summarize this | `POST /api/paper/{id}/summarize` | `{"state": "pending" \| "running"}` |
+
+Each endpoint is one `library_api` call (`vote`, `save`, `request`), so the app writes to the library the same way the command line does and never takes the pipeline lock. The id may be written any way the paper page accepts (`2611.25005v2` works). Tapping the choice that is already active ("More like this" while it is lit) sends `clear`, so a second tap takes the vote back; the server just records what it is sent. After "Summarize this" the card text becomes "Summary coming tonight" and the button disappears; the request waits in the request list until the nightly run (or `rpipe requests run`) does it, see [running.md](running.md), "The request list". If the summary failed, "Try again" posts the same endpoint (a repeat while one is waiting returns the same request, so tapping twice never queues two).
+
+Errors are JSON `{"error": "..."}` and the page shows the text in a small line under the buttons: `404` "That paper isn't in your library." for an unknown id, `400` for a body that is not valid (a direction other than up, down or clear; `saved` not true or false), `503` "Your library is busy. Try again in a moment." when the database is locked (for example while the nightly run is writing). Every path under `/api/` answers 404 in JSON too; pages keep the HTML "not found" page. Like every non-GET request these need a same-origin `Origin` header (see Security), which the browser adds by itself.
+
+**Why this way.** JSON over `fetch` rather than HTML forms: the page stays where you are in the feed. The server does not toggle for you ("vote again means clear"): the page knows what it shows, and a server that only records what it is told is simple and cannot get out of step when two tabs are open. Rejected: optimistic updates (changing the button before the answer): a failed save would then look like it worked.
+
+**Check it.** `uv run pytest tests/test_webapp_actions.py -q` (offline).
+
 ## About this summary
 
 At the foot of a paper with a summary, a collapsed "About this summary" lists in plain words how it was made: `Read from the full paper` or `Read from the abstract only`; `Read in N parts` for long papers read in pieces; `Some of the paper was too long and was cut`; `Summarized by {model} on {date}` (taken from the stored record `library_api.summary_provenance`, and left out for older summaries that have none); and one `Could not check: "..."` line for each claim whose quoted section could not be verified against the paper (see [summaries.md](summaries.md)). Model names appear only here, so the rest of the app stays free of jargon.
@@ -97,7 +117,7 @@ What it does not defend against: another person on your tailnet. They can use th
 
 ## How to run / check it
 
-Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static files, a wrong `Host` (400), a cross-site and a header-less POST (403), a same-origin POST reaching the router (404), IPv6 hosts, the `Referer` fallback and template escaping. The `rpipe app` commands that start the server come in a later task.
+Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static files, a wrong `Host` (400), a cross-site and a header-less POST (403), a same-origin POST reaching the router (404, JSON under `/api/`), IPv6 hosts, the `Referer` fallback and template escaping. The `rpipe app` commands that start the server come in a later task.
 
 ## Where the code is
 
@@ -107,6 +127,7 @@ Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static fi
 - `src/research_pipeline/webapp/static/`: `app.css` (palette, type, layout), `app.js`, `icon.svg`, `manifest.webmanifest`, `fonts/`.
 - `src/research_pipeline/webapp/present.py`: `why_sentence`, `topic_of`, `topic_color`, `section_tag`, `day_heading`, `card`/`CardData` (pure shaping).
 - `src/research_pipeline/webapp/routes_feed.py`: the `/` and `/day/{date}` routes.
+- `src/research_pipeline/webapp/routes_actions.py`: the `/api/paper/{id}/vote`, `save` and `summarize` endpoints; `templates/_actions.html` is the button row; the click handling is the second block of `static/app.js`.
 - `src/research_pipeline/webapp/routes_pages.py`: `/paper/{id}`, `/saved`, `/search`; `present.paper_detail` shapes the paper page.
 - `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`, `paper.html`, `list.html` (Saved and Search), `404.html`.
 - `tests/test_webapp_server.py`, `tests/test_webapp_present.py`, `tests/test_webapp_feed.py`, `tests/test_webapp_pages.py`.

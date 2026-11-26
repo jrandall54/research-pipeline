@@ -7,7 +7,7 @@ from datetime import date
 from typing import Literal
 
 from research_pipeline.library_api import PaperView, ProvenanceView, ReasonView, plain_reasons
-from research_pipeline.summary_models import Claim
+from research_pipeline.summary_models import Claim, Diagram
 
 SummarizeState = Literal["none", "pending", "running", "done", "failed"]
 EXCERPT_CHARS = 300
@@ -119,6 +119,7 @@ class CardData:
     hook: Field | None
     key_numbers: list[tuple[str, str, str | None]]  # (value, label, section tag)
     abstract: str
+    diagram: Diagram | None
     problem: Field | None
     approach: Field | None
     results: Field | None
@@ -146,7 +147,7 @@ def card(view: PaperView, state: str | None) -> CardData:
         topic_color=topic_color(topic) if topic else 0,
         one_line=s.one_line if s else None, hook=_field(s.hook if s else None),
         key_numbers=[(k.value, k.label, section_tag(k.sections)) for k in s.key_numbers] if s else [],
-        abstract=excerpt(view.abstract),
+        abstract=excerpt(view.abstract), diagram=view.diagram,
         problem=_field(s.problem if s else None), approach=_field(s.approach if s else None),
         results=_field(s.results if s else None), why=why_sentence(reasons),
         vote=view.vote, saved=view.saved,

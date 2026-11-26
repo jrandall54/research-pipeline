@@ -6,7 +6,16 @@ from fastapi.testclient import TestClient
 from research_pipeline import db, library_api
 from research_pipeline.db import mark_in_digest, open_db, save_summary, set_status, upsert_paper
 from research_pipeline.models import PaperMeta, Status
-from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
+from research_pipeline.summary_models import (
+    Claim,
+    Critique,
+    Diagram,
+    DiagramEdge,
+    DiagramNode,
+    KeyNumber,
+    PaperSummary,
+    Summary,
+)
 from research_pipeline.webapp.server import create_app
 
 
@@ -111,3 +120,45 @@ def test_earlier_days_link_points_to_previous_date(client):
     old = client.get("/day/2026-11-24")
     assert old.status_code == 200 and "Old Paper" in old.text and "Tuesday, Nov 24" in old.text
     assert "Earlier days" not in old.text
+
+
+def _with_hook(conn, pid, hook=True):
+    c = Claim(text="claim text", sections=["5.1 Efficiency"])
+    save_summary(conn, pid, PaperSummary(
+        summary=Summary(one_line="the one line", problem=c, approach=c, results=c, limitations=c,
+                        hook=Claim(text="Robots finish 28% sooner", sections=["5.1 Efficiency"]) if hook else None,
+                        key_numbers=[KeyNumber(value="28%", label="less time", sections=["5.1 Efficiency"])]),
+        critique=Critique(strengths=[c], weaknesses=[], questions=[]),
+        basis="full_text", unverified=[]), "m")
+    db.save_diagram(conn, pid, Diagram(
+        shape="parts", caption="The parts",
+        nodes=[DiagramNode(id="a", label="Planner", sections=["3 Method"]),
+               DiagramNode(id="b", label="Worker", sections=["3 Method"])],
+        edges=[DiagramEdge(source="a", target="b")]), "m")
+    conn.commit()
+
+
+def test_card_shows_hook_instead_of_one_line(client, vault):
+    _with_hook(vault[0], "2611.25002")
+    html = client.get("/").text
+    assert "Robots finish 28% sooner" in html and "§5.1" in html
+    assert "the one line" not in html
+
+
+def test_card_falls_back_to_one_line(client):
+    html = client.get("/").text
+    assert "the one line" in html and 'class="one-line hook"' not in html and "key-numbers" not in html
+
+
+def test_key_numbers_visible_outside_read_more(client, vault):
+    _with_hook(vault[0], "2611.25002")
+    html = client.get("/").text
+    chips = html.index('<ul class="key-numbers">')
+    assert "<strong>28%</strong> less time" in html
+    assert chips < html.index('class="read-more"')
+
+
+def test_card_diagram_inside_read_more(client, vault):
+    _with_hook(vault[0], "2611.25002")
+    html = client.get("/").text
+    assert html.index('class="read-more"') < html.index('<figure class="diagram') < html.index("</article>")

@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
-from research_pipeline.vault import load_config
 import respx
 from conftest import SECTIONS, AlwaysSummary, FakeEmbedder, critique, summary
 from typer.testing import CliRunner
@@ -28,7 +27,7 @@ from research_pipeline.models import PaperMeta
 from research_pipeline.progress import ListReporter
 from research_pipeline.summarize import TIMEOUT_STOPPED
 from research_pipeline.summary_models import PaperSummary
-from research_pipeline.vault import init_vault
+from research_pipeline.vault import init_vault, load_config
 
 URL = "http://ollama.test:11434"
 MODEL = "testmodel:14b"

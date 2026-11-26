@@ -178,7 +178,7 @@ class OllamaLike(FakeLLM):
 def fake_reruns(monkeypatch):
     """Skip the real mode probe and reruns; record what the rerun stage was told."""
     calls = []
-    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0))
+    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0, False))
 
     def reruns(conn, llm, vault, deadline, *, reporter=None, model_timed_out=False):
         calls.append(model_timed_out)
@@ -350,7 +350,7 @@ def test_nightly_run_passes_the_night_deadline_to_the_drain(vault, monkeypatch):
         return {"requests_done": 0, "requests_failed": 0, "requests_waiting": 1}, []
 
     monkeypatch.setattr(cli, "drain_requests", drain)
-    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0))
+    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0, False))
     install(monkeypatch, AlwaysSummary([]))
     res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
@@ -366,7 +366,7 @@ def test_requests_run_passes_no_deadline(vault, monkeypatch):
         return {"requests_done": 0, "requests_failed": 0, "requests_waiting": 0}, []
 
     monkeypatch.setattr(cli, "drain_requests", drain)
-    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0))
+    monkeypatch.setattr(cli, "_summarize_plan", lambda *a, **k: ("whole", 0, False))
     install(monkeypatch, AlwaysSummary([]))
     res = runner.invoke(cli.app, ["requests", "run", "--vault", str(vault)])
     assert res.exit_code == 0, res.output

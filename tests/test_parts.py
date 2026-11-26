@@ -13,6 +13,7 @@ from research_pipeline.parts import (
     NoUsableNotes,
     chunk_to_budget,
     read_in_parts,
+    resolve_diagrams,
     resolve_mode,
     split_groups,
 )
@@ -341,3 +342,25 @@ def test_resolve_mode_names_where_a_fixed_mode_was_set():
         "split", "split: set with `rpipe model set-mode split`")
     assert resolve_mode("whole", "ollama", 0.0, 8192, set_with="--mode for this eval") == (
         "whole", "whole: set with --mode for this eval")
+
+
+@pytest.mark.parametrize("setting,backend,share,want,word", [
+    ("on", "ollama", 0.0, True, "set with `rpipe model set-diagrams on`"),
+    ("off", "claude-code", None, False, "set with `rpipe model set-diagrams off`"),
+    ("auto", "claude-code", 0.0, True, "claude-code"),
+    ("auto", "ollama", None, True, "not read"),
+    ("auto", "ollama", 0.0, False, "CPU only (GPU share 0.0)"),
+    ("auto", "ollama", 0.4, True, "0.40"),
+    ("auto", "ollama", 1.0, True, "GPU"),
+])
+def test_resolve_diagrams_cases(setting, backend, share, want, word):
+    on, reason = resolve_diagrams(setting, backend, share)
+    assert on is want
+    assert reason.startswith("diagrams on: " if want else "diagrams off: ")
+    assert word in reason
+
+
+def test_resolve_diagrams_exact_reasons():
+    assert resolve_diagrams("on", "ollama", 0.0)[1] == "diagrams on: set with `rpipe model set-diagrams on`"
+    assert resolve_diagrams("auto", "ollama", 0.0)[1] == (
+        "diagrams off: the model runs on the CPU only (GPU share 0.0)")

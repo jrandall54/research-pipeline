@@ -237,3 +237,19 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .btn[aria-pressed="true"] { color: var(--surface); background: var(--accent); }
 .btn[disabled] { opacity: .6; cursor: progress; }
 .actions .status { font-size: 14px; }
+
+/* ---- Hook, key numbers and diagram (Phase 9) ---- */
+.hook { font-weight: 500; }
+.key-numbers { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0 0 8px; padding: 0; }
+.key-numbers li { background: var(--accent-soft); border-radius: 999px; padding: 4px 12px; font-size: 14px; color: var(--ink); }
+.key-numbers strong { color: var(--accent); font-weight: 600; }
+.diagram { margin: 0 0 16px; }
+.diagram-svg { display: block; width: 100%; max-width: 480px; height: auto; margin: 0 auto; font-family: var(--font-body); }
+.diagram figcaption { margin-top: 6px; font-size: 13px; color: var(--muted); text-align: center; }
+.d-node rect { fill: var(--surface); stroke: var(--muted); stroke-opacity: .45; stroke-width: 1; }
+.d-node text { fill: var(--ink); }
+.d-node.d-top rect { fill: var(--accent); stroke: var(--accent); stroke-opacity: 1; }
+.d-node.d-top text { fill: var(--surface); font-weight: 600; }
+.d-node.d-chip rect { fill: var(--accent-soft); stroke: none; }
+.d-line { stroke: var(--muted); stroke-opacity: .6; stroke-width: 1.5; fill: none; }
+.d-head { fill: var(--muted); fill-opacity: .8; }

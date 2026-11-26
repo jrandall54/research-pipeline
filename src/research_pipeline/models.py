@@ -100,6 +100,15 @@ class Config(BaseModel):
     # How papers are read: whole (one call), split (front/body notes, then combine) or auto
     # (chosen per run from the backend, GPU share and context). See docs/guide/summaries.md.
     summarize_mode: Literal["auto", "whole", "split"] = "auto"
+    # Whether each paper also gets a diagram (one more model call): on, off, or auto (off on a
+    # CPU-only Ollama model, on otherwise). See docs/guide/summaries.md.
+    diagrams: Literal["auto", "on", "off"] = "auto"
+
+    @field_validator("diagrams", mode="before")
+    @classmethod
+    def _diagrams_bool(cls, v: Any) -> Any:
+        # A hand-edited `diagrams: off` is a YAML boolean; read it as the word.
+        return {True: "on", False: "off"}.get(v, v) if isinstance(v, bool) else v
 
     @field_validator("night_deadline", mode="before")
     @classmethod

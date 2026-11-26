@@ -33,6 +33,7 @@ Worked example: you run `rpipe model set-backend claude-code` while logged out. 
 | `set NAME` | any Ollama model, or `auto` | `sonnet`, `haiku`, `opus`, a full `claude-...` name, or `auto` | refused |
 | `set-effort low\|medium\|high` | accepted and saved, but ignored (`show` says so) | yes: how hard Claude thinks per call | accepted, ignored |
 | `set-mode auto\|whole\|split` | yes; `auto` chooses per run from where the model sits | yes; `auto` means whole | accepted, ignored (no summaries) |
+| `set-diagrams auto\|on\|off` | yes; `auto` draws a diagram per paper unless the model runs on the CPU only | yes; `auto` draws | accepted, ignored (no summaries) |
 | `check` | server up and model installed | logged in, one tiny test call | refused |
 | `fit`, `set-url`, `set-context` | yes | refused: "only applies to the ollama backend (current: claude-code). Nothing was changed." | refused (same wording) |
 

@@ -140,7 +140,7 @@
 
 **Provenance** — the record of where a summary came from: which model, prompt version, paper version and context size produced it, and when. Shown as a footer in the digest. See `summaries.md`.
 
-**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts (and the notes, condense and combine prompts used when a paper is read in parts). Bumped whenever those prompts change, so summaries made with different wording can be told apart. Currently `2026-11-p7`. See `summaries.md`.
+**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts (and the notes, condense and combine prompts used when a paper is read in parts). Bumped whenever those prompts change, so summaries made with different wording can be told apart. Currently `2026-11-p9`. See `summaries.md`.
 
 **Unfinished run** — a `runs` row whose `finished_at` is empty: the process was killed before it could record its end. The next digest's health line says `previous run did not finish`. See `running.md`.
 
@@ -326,6 +326,8 @@
 
 **Summarize mode (`summarize_mode`)** — the setting that says how papers are read: `whole` (the model reads the whole paper in one go), `split` (notes on the front matter and the body, then combined; see *Task splitting*) or `auto` (the default: split when the model is not fully in GPU memory, runs on the CPU, or has a context below 26,624 tokens; whole otherwise and for Claude Code). Change it with `rpipe model set-mode`; `rpipe eval run --mode` overrides it for one eval without saving. See "Choosing the mode" in `summaries.md` and "Comparing reading modes" in `evaluation.md`.
 
+**Diagrams setting (`diagrams`)** — the setting that says whether each paper also gets a diagram (one more model call): `on`, `off` or `auto` (the default: off when the Ollama model runs on the CPU only, on otherwise and for Claude Code). Change it with `rpipe model set-diagrams`. See "The diagrams setting" in `llm.md`.
+
 **Context cap (model cap)** — the biggest context window a model can be run at here: the context it was trained for, as Ollama reports it, but at most `CONTEXT_CEILING` (131,072 tokens). `spill.model_cap` reads it. A paper needing more than this can never be read whole.
 
 **Condensing notes** — when the notes from all parts of a paper are too long to send in one call, they are sent back to the model in batches to be merged into fewer notes, keeping every cited section. At most 3 rounds; if they still do not fit, every note is shortened by the same share and the summary is marked `body_cut`. See `summaries.md`.
@@ -362,6 +364,14 @@
 
 **Section tag** — the small `§5.1` next to a line in a summary, saying which section of the paper that claim came from. A range (`§5.1–5.2`) means the claim draws on several consecutive sections; no tag means the stored sections had no number (for example "Abstract"). See "The feed" in `app.md`.
 
-**Skim / Read** — the two levels of detail on the feed. Skim shows title, one-line summary and why it was picked; Read adds the problem, what they did and what they found. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.
+**Skim / Read** — the two levels of detail on the feed. Skim shows title, the hook (or the one-line summary when there is no hook), key numbers and why it was picked; Read adds the problem, what they did and what they found, and the diagram. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.
 
 **Day list** — the compact list of one digest day shown beside the reader on a wide screen (1100 px or more) so you can jump between that day's papers. Hidden on phones. See "Reading a paper" in `app.md`.
+
+**Hook** — one line (at most 90 characters) that states a paper's main finding as a plain fact, with the paper's own numbers. It is not clickbait: no question, no teaser, no held-back answer; it makes the real finding easy to take in. Asked for by the summary prompt and checked by code against the paper. See `summaries.md`.
+
+**Key number** — one of up to three numbers a paper reports that matter most, shown as a value written exactly as the paper writes it (for example "28%"), a short label for what it measures and the sections it comes from. See `summaries.md`.
+
+**Diagram (per paper)** — a small picture of how a paper's method works, stored as data (boxes called nodes, arrows called edges, a caption) rather than as a drawing, so code can check it and the app can draw it the same way everywhere. Made by one extra model call; dropped if a check fails. See "The diagram" in `summaries.md`.
+
+**SVG** — Scalable Vector Graphics: a picture written as text (shapes, lines and words) that the browser draws at any size without blurring. The app writes a paper's diagram as SVG on the server and puts it straight into the page, so it needs no image file, no script, and takes its colours from the page's light or dark theme. See "Hook, key numbers and the diagram" in `app.md`.

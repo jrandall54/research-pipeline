@@ -124,7 +124,7 @@ def test_combine_titles_are_defused():
 
 def test_whole_prompts_unchanged():
     assert build_summary_prompt("T", [Section(title="A", text="b")], "full_text")[1].endswith(SUMMARY_TASK)
-    assert PROMPT_VERSION == "2026-11-p7"
+    assert PROMPT_VERSION == "2026-11-p9"
 
 
 def test_condense_and_combine_quote_the_title_as_data():

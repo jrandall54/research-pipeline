@@ -49,7 +49,7 @@ Worked example: a paper with reasons `topic: agentic workflow (0.80)` and `HF up
 
 ## Skim and Read
 
-Every card always contains the Skim fields (topic, title, one line, why) and, in a `<div class="read-more">`, the Read fields (problem, what they did, what they found, each with its section tag). The page's `<body data-depth="skim|read">` decides which show: CSS hides `.read-more` when it is `skim`. The Skim / Read buttons (`aria-pressed` marks the active one) are handled by `app.js`, which sets the attribute and saves the choice in the browser's `localStorage["depth"]`, wrapped in try/catch because private windows can refuse storage (the buttons then still work for that page). Without JavaScript the page stays in Skim. An unsummarized card has no problem/approach/results, so it shows the abstract excerpt at both depths.
+Every card always contains the Skim fields (topic, title, hook or one line, key numbers, why) and, in a `<div class="read-more">`, the Read fields (problem, what they did, what they found, each with its section tag, then the diagram if there is one). The page's `<body data-depth="skim|read">` decides which show: CSS hides `.read-more` when it is `skim`. The Skim / Read buttons (`aria-pressed` marks the active one) are handled by `app.js`, which sets the attribute and saves the choice in the browser's `localStorage["depth"]`, wrapped in try/catch because private windows can refuse storage (the buttons then still work for that page). Without JavaScript the page stays in Skim. An unsummarized card has no problem/approach/results, so it shows the abstract excerpt at both depths.
 
 ### How a summary field is laid out
 
@@ -86,13 +86,50 @@ Built from the stored reasons; unknown reason formats are skipped, never shown r
 
 ## Reading a paper
 
-**What it does.** `GET /paper/{id}` shows one paper: topic, title, authors ("A, B, C and 2 others" when there are more than three), a "Read the paper" button to the original (shown only when the paper's address starts with `http://` or `https://`; anything else, such as a `javascript:` address, is left out so a bad record cannot run code when tapped), the one-line summary, the problem / what they did / what they found fields (laid out as described in "How a summary field is laid out"), then the critique under the heading "How solid is it?" (subheadings "Strong points", "Weak points" and "Questions to ask"), and "Why you're seeing this". Each claim carries its section tag (for example `§4`). A paper with no summary yet shows its full abstract and the same "Summarize this" control as a card. An id with a version (`2611.25005v2`) or an arXiv URL form works; an unknown or malformed id gives the 404 page "That paper isn't in your library." inside the normal app frame (the same page serves any other missing address). Cards on the feed, Saved and Search link to this page from their titles.
+**What it does.** `GET /paper/{id}` shows one paper: topic, title, authors ("A, B, C and 2 others" when there are more than three), a "Read the paper" button to the original (shown only when the paper's address starts with `http://` or `https://`; anything else, such as a `javascript:` address, is left out so a bad record cannot run code when tapped), the hook (or the one-line summary when there is no hook) with key-number chips, a "How it works" diagram when there is one, the problem / what they did / what they found fields (laid out as described in "How a summary field is laid out"), then the critique under the heading "How solid is it?" (subheadings "Strong points", "Weak points" and "Questions to ask"), and "Why you're seeing this". Each claim carries its section tag (for example `§4`). A paper with no summary yet shows its full abstract and the same "Summarize this" control as a card. An id with a version (`2611.25005v2`) or an arXiv URL form works; an unknown or malformed id gives the 404 page "That paper isn't in your library." inside the normal app frame (the same page serves any other missing address). Cards on the feed, Saved and Search link to this page from their titles.
 
 **How it works.** `routes_pages.paper` runs the id through `ids.normalise_paper_id`, loads the paper with `library_api.get_paper`, and asks `present.paper_detail` to shape it into a `DetailData` (the card plus authors, critique, questions, "about" lines). Two small clean-ups happen there: each critique question loses a trailing `[sections: ...]` note (the model sometimes appends one; it is noise on a screen), and claims get section tags as on cards. The route also loads that paper's digest day and passes the titles to the template.
 
 **Feed beside reader.** From 1100 px wide, the page is two columns: the paper's digest day as a compact list on the left (the current paper highlighted, every item a link to its own page) and the reader on the right, so a desktop feels like a mail client. Below 1100 px the list is hidden by CSS and the reader fills the width; reading text never exceeds 680 px, which keeps lines comfortable.
 
 Why this way: the list is plain links, so it works without JavaScript and each paper keeps its own address you can bookmark. Rejected: loading the paper into the feed page with JavaScript (breaks back/forward and bookmarks).
+
+## Hook, key numbers and the diagram (Phase 9)
+
+**What it does.** A summarized paper now opens with its main finding, not just a topic sentence: the **hook** (one plain line such as "Robots finish 28% sooner", with its section tag), up to three **key numbers** as small chips under it (`28% less time`), and, when the paper has one, a small **diagram** of how the method fits together. On a card the hook takes the place of the one-line summary; with no hook (an older summary, or the hook failed its checks) the one-line summary shows as before. The paper screen does the same under the title and adds a "How it works" section with the diagram before the brief.
+
+```
+Card, Skim                               Card, Read adds
+AGENT-BASED DEVELOPMENT                  THE PROBLEM / WHAT THEY DID / WHAT THEY FOUND
+ACAP: Asynchronous Coding Agents         ...
+One robot, many agents: finishes 28%     [  Coordinator  ]      (accent box)
+sooner  §5.1                                  |
+( 28% less time ) ( 25 tasks )           [Plan] [Code] [Test]
+Why you're seeing this: ...              One coordinator hands work to three agents
+```
+
+**How it works.** `present.card` copies `hook` and `key_numbers` from the summary and `diagram` from `library_api`'s paper view into `CardData`; nothing is computed there. The templates print them through one macro, `headline` in `_field.html` (hook or one-liner, then the chips), so a card and the paper screen cannot drift apart. The chips sit outside `.read-more`, so they show in Skim too; the diagram sits inside it, so it shows only in Read. The diagram is drawn by `webapp/diagram_svg.py`, registered in `deps.py` as the template filter `diagram_svg`:
+
+1. The stored diagram is data: a shape (`parts`, `steps` or `loop`), 2 to 8 nodes (a short label each), the arrows between them and a caption.
+2. The shape picks a layout, all inside a 320-unit-wide `viewBox` so the picture scales to the card:
+   - `parts`: the node with the most outgoing arrows (the first on ties) is the coordinating box on top, filled with the accent colour; the other nodes sit in a row below (two rows above four), joined by grey connector lines.
+   - `steps`: boxes top to bottom with a down arrow between each, in the order the arrows lead; nodes no arrow reaches are added at the end.
+   - `loop`: chips top to bottom with arrows, and one return arrow from the last back to the first.
+3. A label wraps to at most two lines by word (a still-too-long line ends in "…"), so text stays about 12 units high and legible at phone width.
+4. The result is one `<figure class="diagram">` holding an inline `<svg role="img" aria-label="caption">` and a `<figcaption>`. Every piece of text is escaped, so a label such as `<b>` shows as text.
+
+Worked example: `parts` with nodes Coordinator, Plan, Code, Test and arrows from Coordinator to the other three. Coordinator has three outgoing arrows, so it goes on top in the accent style; Plan, Code and Test share one row of three boxes (96 units wide each), with a stem down from Coordinator, a bar across, and a short drop into each box.
+
+**Why it's built this way.**
+- **Our own SVG, no JavaScript library.** A charting or Mermaid library would add a large script to every page and the pages promise no new scripts and no third-party requests. About 150 lines of Python give the exact look wanted.
+- **Checkable data, not a drawing.** The model answers boxes and arrows; code checks every box and edge (see `summaries.md`) before it is stored. The drawer is also built so that no valid graph can crash it: it follows arrows with a "seen" set (a cycle cannot loop), draws isolated nodes, and `parts` ignores the arrows' exact targets and connects the top box to the rest.
+- **Look A.** Rounded boxes, the coordinating box in the accent colour, grey lines, small muted caption: the style chosen from the mockups.
+- **Light and dark from CSS variables.** The SVG carries classes (`d-node`, `d-top`, `d-line`, ...) and `app.css` colours them with `--accent`, `--surface`, `--ink` and `--muted`, so the same markup is right in both themes (text on the accent box uses `--surface`, which flips with the theme).
+- Rejected: drawing as an image file (cannot follow the theme, extra request) and showing the diagram in Skim (cards would get tall).
+
+**How to check.** `uv run pytest tests/test_webapp_diagram_svg.py tests/test_webapp_feed.py tests/test_webapp_pages.py -q`: the three shapes render with every label, labels are escaped, cycles, isolated nodes, self-arrows and dense graphs at 2 to 8 nodes all draw; the card shows the hook instead of the one-liner and falls back; chips are outside `read-more`; the paper page has "How it works" only when there is a diagram. Then open a summarized paper in the app after a night with diagrams on.
+
+**Where the code is.** `src/research_pipeline/webapp/diagram_svg.py` (`render`), `templates/_field.html` (`headline`), `_card.html`, `paper.html`, the "Hook, key numbers and diagram" block at the end of `static/app.css`, `present.py` (`CardData.hook`, `key_numbers`, `diagram`).
 
 ## Saved and Search
 
@@ -180,9 +217,10 @@ Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static fi
 - `src/research_pipeline/webapp/templates/base.html`: the page frame and navigation.
 - `src/research_pipeline/webapp/static/`: `app.css` (palette, type, layout), `app.js`, `icon.svg` and its PNG copies `icon-180.png` (iPhone home screen), `icon-192.png` and `icon-512.png` (Android, listed in the manifest) rendered from the SVG, `manifest.webmanifest`, `fonts/`.
 - `src/research_pipeline/webapp/present.py`: `why_sentence`, `topic_of`, `topic_color`, `section_tag`, `day_heading`, `card`/`CardData` (pure shaping).
+- `src/research_pipeline/webapp/diagram_svg.py`: draws a stored diagram as inline SVG (see "Hook, key numbers and the diagram").
 - `src/research_pipeline/webapp/routes_feed.py`: the `/` and `/day/{date}` routes.
 - `src/research_pipeline/webapp/routes_actions.py`: the `/api/paper/{id}/vote`, `save` and `summarize` endpoints; `templates/_actions.html` is the button row; the click handling is the second block of `static/app.js`.
 - `src/research_pipeline/webapp/routes_pages.py`: `/paper/{id}`, `/saved`, `/search`; `present.paper_detail` shapes the paper page.
 - `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`, `paper.html`, `list.html` (Saved and Search), `404.html`.
 - `src/research_pipeline/webapp/service.py`: the always-on service (see Setting it up).
-- Tests: `tests/test_webapp_server.py` (guard, static files, error pages), `tests/test_webapp_feed.py` (feed and Skim/Read), `tests/test_webapp_pages.py` (paper, Saved, Search), `tests/test_webapp_actions.py` (vote, save, summarize), `tests/test_webapp_present.py` (card shaping, safe links), `tests/test_webapp_service.py` (the systemd unit), `tests/test_cli_app.py` (the `rpipe app` commands, port range, allowed hosts).
+- Tests: `tests/test_webapp_server.py` (guard, static files, error pages), `tests/test_webapp_feed.py` (feed and Skim/Read), `tests/test_webapp_pages.py` (paper, Saved, Search), `tests/test_webapp_actions.py` (vote, save, summarize), `tests/test_webapp_present.py` (card shaping, safe links), `tests/test_webapp_diagram_svg.py` (the drawing), `tests/test_webapp_service.py` (the systemd unit), `tests/test_cli_app.py` (the `rpipe app` commands, port range, allowed hosts).

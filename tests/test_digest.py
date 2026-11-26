@@ -113,11 +113,13 @@ def test_other_days_papers_not_included(conn, tmp_path):
 from conftest import critique, summary  # noqa: E402
 
 from research_pipeline.db import save_summary  # noqa: E402
-from research_pipeline.summarize import PaperSummary  # noqa: E402
+from research_pipeline.summarize import Claim, PaperSummary  # noqa: E402
 
 
-def with_summary(conn, pid, basis="full_text", unverified=(), status=Status.summarized, body_cut=False, dropped=()):
+def with_summary(conn, pid, basis="full_text", unverified=(), status=Status.summarized, body_cut=False, dropped=(), hook=None):
     s = summary()
+    if hook is not None:
+        s = s.model_copy(update={"hook": hook})
     s = s.model_copy(update={"approach": s.approach.model_copy(
         update={"sections": ["2 Method", "3 Results"]})})
     save_summary(conn, pid, PaperSummary(summary=s, critique=critique(), basis=basis,
@@ -138,6 +140,22 @@ def test_digest_renders_summary_and_citations(conn, tmp_path):
     assert "Does it generalise?" in text
     assert "abstract only" not in text
     assert "Abstract 2501.00001" in text
+
+
+def test_digest_shows_hook_line(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001", hook=Claim(text="Cuts memory use by 28%.", sections=["5.1 Efficiency"]))
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "**Hook:** Cuts memory use by 28%. [§ 5.1 Efficiency]\n\n" in text
+    assert text.index("**Hook:**") < text.index("**Summary:**")
+
+
+def test_digest_without_hook_unchanged(conn, tmp_path):
+    add(conn, "2501.00001", 0.9)
+    with_summary(conn, "2501.00001")
+    text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
+    assert "**Hook:**" not in text
+    assert "**Summary:** A classifier for X.\n\n" in text
 
 
 def test_digest_marks_unverified(conn, tmp_path):

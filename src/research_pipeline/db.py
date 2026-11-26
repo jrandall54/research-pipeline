@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from research_pipeline.models import PaperMeta, Section, Status
-from research_pipeline.summary_models import Critique, PaperSummary, Summary
+from research_pipeline.summary_models import Critique, Diagram, PaperSummary, Summary
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
@@ -447,6 +447,7 @@ def save_summary(
         "notes_unverified": result.notes_unverified,
         "read_mode": result.read_mode,
         "parts": result.parts,
+        "checks": result.checks,
     }
     if prompt_version is not None:
         summary_json["provenance"] = {
@@ -489,11 +490,34 @@ def get_summary(conn: sqlite3.Connection, paper_id: str) -> PaperSummary | None:
     meta["read_mode"] = s.pop("read_mode", "whole")  # rows from before B.6 were read whole
     meta["parts"] = s.pop("parts", 1)
     meta["notes_unverified"] = s.pop("notes_unverified", [])  # only reading in parts has notes
+    meta["checks"] = s.pop("checks", [])  # rows from before Phase 9 have none
     return PaperSummary(
         summary=Summary.model_validate(s),
         critique=Critique.model_validate(rows["critique"]),
         **meta,
     )
+
+
+def save_diagram(
+    conn: sqlite3.Connection, paper_id: str, diagram: Diagram | None, model: str
+) -> None:
+    """Store (or replace) a paper's diagram row; `None` deletes it. Does not commit."""
+    if diagram is None:
+        conn.execute("DELETE FROM summaries WHERE paper_id = ? AND kind = 'diagram'", (paper_id,))
+        return
+    conn.execute(
+        "INSERT OR REPLACE INTO summaries (paper_id, kind, text, model, created_at)"
+        " VALUES (?, 'diagram', ?, ?, ?)",
+        (paper_id, diagram.model_dump_json(by_alias=True), model, _now()),
+    )
+
+
+def get_diagram(conn: sqlite3.Connection, paper_id: str) -> Diagram | None:
+    """The stored diagram for a paper, or None when there is none."""
+    row = conn.execute(
+        "SELECT text FROM summaries WHERE paper_id = ? AND kind = 'diagram'", (paper_id,)
+    ).fetchone()
+    return Diagram.model_validate_json(row["text"]) if row else None
 
 
 def get_provenance(conn: sqlite3.Connection, paper_id: str) -> dict | None:

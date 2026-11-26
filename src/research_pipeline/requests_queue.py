@@ -76,6 +76,7 @@ def drain_requests(
     reporter: Reporter | None = None,
     mode: Literal["whole", "split"] = "whole",
     fallback_above: int | None = None,
+    diagrams: bool = False,
     deadline: datetime | None = None,
     now: Callable[[], datetime] = datetime.now,
 ) -> tuple[dict[str, int], list[str]]:
@@ -85,7 +86,7 @@ def drain_requests(
        cut-short try was its last is marked `failed` (`GAVE_UP_CUT_SHORT`).
     2. Each `pending` ``summarize`` request with fewer than MAX_SUMMARY_TRIES tries is marked
        `running` (one try counted) and its paper summarized with ``run_summarize(paper_ids=[id])``
-       (``mode`` and ``fallback_above`` as for the summarize stage).
+       (``mode``, ``fallback_above`` and ``diagrams`` as for the summarize stage).
     3. Summarized → `done`. Failed → back to `pending` with the error, or `failed` on the last
        try. Usage limit → back to `pending` with the try given back, and the drain stops.
        Model timeout → counted as a failure, and the drain stops (a hung model would make every
@@ -120,7 +121,7 @@ def drain_requests(
                 try:
                     got, errs = run_summarize(
                         conn, llm, fetch, num_ctx, paper_ids=[pid], reporter=_NotesOnly(handle),
-                        mode=mode, fallback_above=fallback_above,
+                        mode=mode, fallback_above=fallback_above, diagrams=diagrams,
                     )
                 except Exception as exc:  # noqa: BLE001 - e.g. the paper is gone; fail this request only
                     got, errs = {}, [f"summarize {pid}: {' '.join(str(exc).split()) or type(exc).__name__}"]
@@ -129,6 +130,8 @@ def drain_requests(
                     mark_request(conn, rid, "done", result={"summarized": True})
                     counts["requests_done"] += 1
                     handle.step(pid, current=i, outcome="done")
+                    if LIMIT_STOPPED in errs or TIMEOUT_STOPPED in errs:
+                        break  # the diagram call hit the limit or hung: the paper is fine, stop here
                     continue
                 if LIMIT_STOPPED in errs:
                     mark_request(conn, rid, "pending", error=row["error"], undo_try=True)

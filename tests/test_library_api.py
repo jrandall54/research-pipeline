@@ -11,7 +11,7 @@ from research_pipeline.db import UnknownPaperError, mark_in_digest, open_db, sav
 from research_pipeline.library import current_votes, record_vote, set_saved
 from research_pipeline.library_api import PaperView, QueueProgress, ShelfItemView, VoteView
 from research_pipeline.models import PaperMeta, Status
-from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
+from research_pipeline.summary_models import Claim, Critique, Diagram, DiagramNode, PaperSummary, Summary
 
 
 def _add(conn, pid, title, day=None, score=None, reasons=None, abstract="An abstract."):
@@ -221,3 +221,11 @@ def test_summary_provenance_returns_model_and_date_or_none(conn):
     _summary(conn, "2611.25006")  # saved without prompt_version: no provenance
     assert library_api.summary_provenance(conn, "2611.25006") is None
     assert library_api.summary_provenance(conn, "2611.25007") is None
+
+
+def test_paper_view_has_diagram(conn):
+    assert library_api.get_paper(conn, "2611.25005").diagram is None
+    d = Diagram(shape="steps", nodes=[DiagramNode(id="a", label="A", sections=["1 Intro"])], edges=[], caption="c")
+    db.save_diagram(conn, "2611.25005", d, "m")
+    conn.commit()
+    assert library_api.get_paper(conn, "2611.25005").diagram == d

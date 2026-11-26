@@ -5,9 +5,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from research_pipeline import library_api
-from research_pipeline.db import mark_in_digest, open_db, save_summary, set_status, upsert_paper
+from research_pipeline.db import mark_in_digest, open_db, save_diagram, save_summary, set_status, upsert_paper
 from research_pipeline.models import PaperMeta, Status
-from research_pipeline.summary_models import Claim, Critique, PaperSummary, Summary
+from research_pipeline.summary_models import (
+    Claim,
+    Critique,
+    Diagram,
+    DiagramEdge,
+    DiagramNode,
+    KeyNumber,
+    PaperSummary,
+    Summary,
+)
 from research_pipeline.webapp import present
 from research_pipeline.webapp.server import create_app
 
@@ -161,3 +170,30 @@ def test_long_field_shows_as_points_with_tag_on_last(vault):
     assert '<ul class="points"><li>First sentence.</li><li>Second sentence. <span class="tag mono">§2</span></li></ul>' in html
     assert '<p class="field-text">single sentence <span class="tag mono">§3</span></p>' in html
     assert '<p class="field-label">The problem</p>' in html
+
+
+def _add_hook_and_diagram(conn, pid):
+    c = Claim(text="claim text", sections=["5.1 Efficiency"])
+    _summarize(conn, pid, summary=Summary(
+        one_line="the one line", problem=c, approach=c, results=c, limitations=c,
+        hook=Claim(text="Robots finish 28% sooner", sections=["5.1 Efficiency"]),
+        key_numbers=[KeyNumber(value="28%", label="less time", sections=["5.1 Efficiency"])]))
+    save_diagram(conn, pid, Diagram(
+        shape="steps", caption="Two steps",
+        nodes=[DiagramNode(id="a", label="Plan", sections=["3 Method"]),
+               DiagramNode(id="b", label="Act", sections=["3 Method"])],
+        edges=[DiagramEdge(source="a", target="b")]), "m")
+    conn.commit()
+
+
+def test_paper_page_how_it_works_section(client, vault):
+    _add_hook_and_diagram(vault[0], "2611.25005")
+    html = client.get("/paper/2611.25005").text
+    assert "Robots finish 28% sooner" in html and "the one line" not in html
+    assert "<strong>28%</strong> less time" in html
+    assert html.index("<h2>How it works</h2>") < html.index('<figure class="diagram') < html.index("The problem")
+
+
+def test_no_diagram_no_heading(client):
+    html = client.get("/paper/2611.25005").text
+    assert "the one line" in html and "How it works" not in html and "<figure" not in html

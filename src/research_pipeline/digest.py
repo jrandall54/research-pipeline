@@ -42,6 +42,9 @@ def _claim(c: Claim, unverified: list[str], label: str = "") -> str:
 def render_summary(ps: PaperSummary) -> list[str]:
     s, c, bad = ps.summary, ps.critique, ps.unverified
     lines = [f"**Summary:** {_one_line(s.one_line)}", ""]
+    if s.hook is not None:
+        cited = ", ".join(_one_line(x) for x in s.hook.sections)
+        lines = [f"**Hook:** {_one_line(s.hook.text)} [§ {cited}]", ""] + lines
     lines += [
         _claim(s.problem, bad, "**Problem:** "),
         _claim(s.approach, bad, "**Approach:** "),

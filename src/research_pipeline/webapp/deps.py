@@ -9,7 +9,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.templating import Jinja2Templates
 
 from research_pipeline import db
-from research_pipeline.webapp import present
+from research_pipeline.webapp import diagram_svg, present
 
 HERE = Path(__file__).parent
 
@@ -19,6 +19,8 @@ templates = Jinja2Templates(
 )
 # Splits a summary field into points, so no field shows as one long block (Phase 8.1).
 templates.env.filters["sentences"] = present.sentences
+# Draws a paper's stored diagram as inline SVG (Phase 9).
+templates.env.filters["diagram_svg"] = diagram_svg.render
 
 
 def get_conn(request: Request) -> Iterator[sqlite3.Connection]:

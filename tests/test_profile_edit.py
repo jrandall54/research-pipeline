@@ -360,3 +360,24 @@ def test_set_summarize_mode_normalises_and_validates(vault):
     with pytest.raises(ValueError, match="auto, whole, split"):
         pe.set_summarize_mode(vault, "fast")
     assert load_config(vault / "config.yaml").summarize_mode == "split"
+
+
+def test_set_diagrams_accepts_capitals_refuses_bad(vault):
+    assert load_config(vault / "config.yaml").diagrams == "auto"
+    pe.set_diagrams(vault, " OFF ")
+    assert load_config(vault / "config.yaml").diagrams == "off"
+    with pytest.raises(ValueError, match="auto, on, off"):
+        pe.set_diagrams(vault, "maybe")
+    assert load_config(vault / "config.yaml").diagrams == "off"
+
+
+@pytest.mark.parametrize("word", ["on", "off"])
+def test_hand_edited_unquoted_bool_reads_as_word(vault, word):
+    path = vault / "config.yaml"
+    path.write_text(path.read_text() + f"\ndiagrams: {word}\n")
+    assert load_config(path).diagrams == word
+
+
+def test_set_diagrams_writes_a_quoted_string(vault):
+    pe.set_diagrams(vault, "off")
+    assert 'diagrams: "off"' in (vault / "config.yaml").read_text()

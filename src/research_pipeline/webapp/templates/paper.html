@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_field.html" import field %}
+{% from "_field.html" import field, headline %}
 {% block title %}{{ d.card.title }} - Research Feed{% endblock %}
 {% block content %}
 {% set c = d.card %}
@@ -22,7 +22,8 @@
     {% if c.safe_url %}<p><a class="btn" href="{{ c.safe_url }}" rel="noopener noreferrer" target="_blank">Read the paper</a></p>{% endif %}
 
     {% if c.one_line %}
-      <p class="one-line lead">{{ c.one_line }}</p>
+      {{ headline(c, "one-line lead") }}
+      {% if c.diagram %}<h2>How it works</h2>{{ c.diagram | diagram_svg }}{% endif %}
       {% for label, f in [("The problem", c.problem), ("What they did", c.approach), ("What they found", c.results)] %}
         {{ field(label, f) }}
       {% endfor %}

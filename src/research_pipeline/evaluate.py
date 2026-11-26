@@ -6,6 +6,7 @@ Results live in `<vault>/eval/YYYY-MM-DD.json` (entries and grades) with a reada
 
 import os
 import tempfile
+import time
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -13,15 +14,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
+from research_pipeline.diagram import make_diagram
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.gold import GoldPaper, load_gold
 from research_pipeline.judge import FactVerdict, is_self_graded, judge_summary
-from research_pipeline.llm import LLM, LlmLimitReached
+from research_pipeline.llm import LLM, LlmError, LlmLimitReached
 from research_pipeline.models import Section
 from research_pipeline.profile_edit import normalise_text
 from research_pipeline.progress import Reporter, stage
 from research_pipeline.prompts import PROMPT_VERSION
 from research_pipeline.summarize import Claim, PaperSummary, phase_note, summarize_paper
+from research_pipeline.summary_models import Diagram
 from research_pipeline.vault import ConfigError
 
 PASS_MARK = 0.9
@@ -37,6 +40,10 @@ class EvalEntry(BaseModel):
     verdicts: list[FactVerdict | None] | None = None  # one slot per key fact; None = not judged
     judge_error: str | None = None
     key_facts: list[str] = []  # the key facts used for this run (old files have none)
+    diagram: Diagram | None = None  # the drawn diagram (eval never writes it to the vault database)
+    diagram_problems: list[str] = []  # why the diagram was dropped, or that the call failed
+    diagram_asked: bool = False  # the diagram call was made (to tell "no clear shape" from "off")
+    diagram_seconds: float | None = None  # how long the diagram call(s) took
 
 
 class EvalSetup(BaseModel):
@@ -164,10 +171,26 @@ def _entry_md(entry: EvalEntry, gold: GoldPaper | None, sections: list[Section])
         how = f" (read in parts: {mode}, {s.parts} notes call{'s' if s.parts != 1 else ''})"
     cut = " (body cut to fit the context)" if s.body_cut else ""
     lines += [f"Basis: {basis}{how}{cut}", ""]
+    if entry.diagram_asked:
+        took = f" in {entry.diagram_seconds:.1f}s" if entry.diagram_seconds is not None else ""
+        if entry.diagram is not None:
+            lines += [f"Diagram: drawn ({entry.diagram.shape}, {len(entry.diagram.nodes)} boxes){took}", ""]
+        elif entry.diagram_problems:
+            lines += [f"Diagram: dropped ({'; '.join(entry.diagram_problems)}){took}", ""]
+        else:
+            lines += [f"Diagram: none (no clear shape){took}", ""]
+    if s.checks:
+        lines += ["Left out by the checks:", *[f"- {c}" for c in s.checks], ""]
     if s.dropped:
         left_out = ", ".join(f"{normalise_text(d.title)} ({d.chars:,} chars)" for d in s.dropped)
         lines += [f"Left out: {left_out}", ""]
     lines += [f"**{s.summary.one_line}**", ""]
+    if s.summary.hook is not None:
+        lines += _claim_md("Hook", s.summary.hook, sections)
+    for k in s.summary.key_numbers:
+        cites = ", ".join(k.sections)
+        lines += [f"- **Key number:** {k.value} {k.label} _[{cites}]_",
+                  *_cited_text(Claim(text=k.value, sections=k.sections), sections)]
     for label, claim in (
         ("Problem", s.summary.problem),
         ("Approach", s.summary.approach),
@@ -192,6 +215,26 @@ def _entry_md(entry: EvalEntry, gold: GoldPaper | None, sections: list[Section])
     return "\n".join(lines)
 
 
+def _extras_summary(entries: list[EvalEntry]) -> list[str]:
+    """Totals for the hook, key numbers and diagram of a run (the numbers Task 10 measures)."""
+    done = [e for e in entries if e.summary is not None]
+    hooks = sum(e.summary.summary.hook is not None for e in done)
+    kept = sum(len(e.summary.summary.key_numbers) for e in done)
+    dropped = sum(c.startswith("key number") for e in done for c in e.summary.checks)
+    lines = ["## Hooks, key numbers, diagrams", "",
+             f"- Hooks kept: {hooks} of {len(done)} papers summarized",
+             f"- Key numbers: {kept} kept, {dropped} dropped by the checks"]
+    asked = [e for e in done if e.diagram_asked]
+    if asked:
+        drawn = sum(e.diagram is not None for e in asked)
+        failed = sum(e.diagram is None and bool(e.diagram_problems) for e in asked)
+        none = len(asked) - drawn - failed
+        times = [e.diagram_seconds for e in asked if e.diagram_seconds is not None]
+        mean = f"; mean {sum(times) / len(times):.1f}s per diagram call" if times else ""
+        lines.append(f"- Diagrams: {drawn} drawn, {failed} dropped, {none} none (no clear shape){mean}")
+    return lines
+
+
 def run_eval(
     vault: Path,
     llm: LLM,
@@ -203,6 +246,7 @@ def run_eval(
     reporter: Reporter | None = None,
     judge: LLM | None = None,
     mode: Literal["whole", "split"] = "whole",
+    diagrams: bool = False,
 ) -> Path:
     """Summarize every gold paper and write `eval/<today>.json` and `.md`; return the .md path.
 
@@ -215,6 +259,8 @@ def run_eval(
     ``mode`` is the resolved reading mode (whole or split). Eval never uses the rerun-aware
     fallback of nightly runs: a paper cut in whole mode goes straight to parts (fallback_above=0),
     so one eval measures one reading of every paper.
+    ``diagrams=True`` also makes the diagram call for each paper and records the diagram, or why
+    it was dropped, on the entry and in the report (nothing goes to the vault database).
     """
     entries: list[EvalEntry] = []
     sections_by_id: dict[str, list[Section]] = {}
@@ -228,9 +274,8 @@ def run_eval(
                     sections: list[Section] | None = ensure_usable(fetch(g.paper_id))
                 except FullTextUnavailable:
                     sections = None
-                abstract = ""
+                abstract = abstract_for(g.paper_id) if abstract_for else ""
                 if sections is None:
-                    abstract = abstract_for(g.paper_id) if abstract_for else ""
                     if not abstract.strip():
                         raise ValueError("no full text and no abstract could be found")
                     sections_by_id[g.paper_id] = [Section(title="Abstract", text=abstract)]
@@ -249,6 +294,15 @@ def run_eval(
                     key_facts=list(g.key_facts),
                 )
                 entries.append(entry)
+                if diagrams:
+                    entry.diagram_asked = True
+                    started = time.monotonic()
+                    try:
+                        entry.diagram, entry.diagram_problems = make_diagram(
+                            llm, g.title, sections, abstract, num_ctx, on_phase=on_phase)
+                    except LlmError:  # a failed diagram never loses the summary
+                        entry.diagram_problems = ["diagram: the model call failed"]
+                    entry.diagram_seconds = time.monotonic() - started
                 if judge is not None:
                     if limit_hit:
                         entry.judge_error = "usage limit reached"
@@ -297,6 +351,7 @@ def run_eval(
         "",
     ]
     gold_by_id = {g.paper_id: g for g in gold}
+    parts += [*_extras_summary(entries), ""]
     for e in entries:
         parts.append(_entry_md(e, gold_by_id.get(e.paper_id), sections_by_id.get(e.paper_id, [])))
     parts.append(f"## Automatic result\n\nCitations all verified: {ok} of {len(entries)} papers.\n")

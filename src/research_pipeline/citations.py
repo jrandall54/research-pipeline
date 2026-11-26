@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from research_pipeline.llm import LLM
+from research_pipeline.models import Section
 from research_pipeline.prompts import citation_feedback
 from research_pipeline.summary_models import Claim, Critique, Notes, Summary
 
@@ -27,11 +28,43 @@ def claims(obj: Summary | Critique | Notes) -> list[Claim]:
     return [*obj.strengths, *obj.weaknesses]
 
 
-def unknown_citations(obj: Summary | Critique | Notes, titles: list[str]) -> list[str]:
-    """Cited titles that match no section (ignoring case and surrounding whitespace)."""
+def extra_claims(summary: Summary) -> list[Claim]:
+    """The hook and one claim per key number: checked by extras.py, not part of `claims`."""
+    out = [summary.hook] if summary.hook is not None else []
+    out += [Claim(text=f"{k.value} {k.label}", sections=k.sections) for k in summary.key_numbers]
+    return out
+
+
+def section_texts(titles: list[str], sections: list[Section], abstract: str) -> list[str] | None:
+    """The text of each cited title (matched with `norm_title`); None if any title is unknown.
+
+    The title "Abstract" also matches the paper's abstract, even with no Abstract section.
+    """
+    texts: list[str] = []
+    for cited in titles:
+        key = norm_title(cited)
+        found = [s.text for s in sections if norm_title(s.title) == key]
+        if key == "abstract":
+            found.append(abstract)
+        if not found:
+            return None
+        texts.extend(found)
+    return texts
+
+
+def unknown_citations(
+    obj: Summary | Critique | Notes, titles: list[str], *, extras: bool = False
+) -> list[str]:
+    """Cited titles that match no section (ignoring case and surrounding whitespace).
+
+    ``extras=True`` also looks at a summary's hook and key numbers.
+    """
     known = {norm_title(t) for t in titles}
     bad: list[str] = []
-    for claim in claims(obj):
+    cited_claims = claims(obj)
+    if extras and isinstance(obj, Summary):
+        cited_claims = [*cited_claims, *extra_claims(obj)]
+    for claim in cited_claims:
         for cited in claim.sections:
             if norm_title(cited) not in known and cited not in bad:
                 bad.append(cited)
@@ -44,7 +77,7 @@ def generate_checked(  # noqa: UP047 (module-level constrained TypeVar T is shar
 ) -> tuple[T, list[str]]:
     """Generate, check citations, retry once with feedback; return result and unverified texts."""
     result = llm.generate(system, user, schema)
-    bad = unknown_citations(result, titles)
+    bad = unknown_citations(result, titles, extras=schema is Summary)
     if bad:
         if on_retry is not None:
             on_retry()

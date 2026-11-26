@@ -371,7 +371,13 @@ def test_set_diagrams_accepts_capitals_refuses_bad(vault):
     assert load_config(vault / "config.yaml").diagrams == "off"
 
 
-def test_hand_edited_unquoted_off_reads_as_off(vault):
+@pytest.mark.parametrize("word", ["on", "off"])
+def test_hand_edited_unquoted_bool_reads_as_word(vault, word):
     path = vault / "config.yaml"
-    path.write_text(path.read_text() + "\ndiagrams: off\n")
-    assert load_config(path).diagrams == "off"
+    path.write_text(path.read_text() + f"\ndiagrams: {word}\n")
+    assert load_config(path).diagrams == word
+
+
+def test_set_diagrams_writes_a_quoted_string(vault):
+    pe.set_diagrams(vault, "off")
+    assert 'diagrams: "off"' in (vault / "config.yaml").read_text()

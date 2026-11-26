@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from research_pipeline.vault import load_config
 import respx
 from conftest import SECTIONS, AlwaysSummary, FakeEmbedder, critique, summary
 from typer.testing import CliRunner
@@ -744,3 +745,51 @@ def test_daytime_run_with_deadline_set_still_passes_the_cap(vault, monkeypatch):
     res = runner.invoke(cli.app, ["run", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
     assert seen["fallback_above"] == 40_960
+
+
+# --- the diagrams decision, through the real _read_mode / _summarize_plan -------------------
+
+
+class _Boom(ModeOllama):
+    def gpu_share(self):
+        raise LlmError("no share")
+
+
+def _plan(vault, llm, **cfg):
+    set_cfg(vault, **cfg)
+    reporter = ListReporter()
+    plan = cli._summarize_plan(llm, load_config(vault / "config.yaml"), True, reporter, has_work=True)
+    notes = [e.detail or e.label for e in reporter.events if e.stage == "reading mode" and e.kind == "note"]
+    return plan, notes, reporter
+
+
+@pytest.mark.parametrize("llm,cfg,want,word", [
+    (ModeOllama(share=0.0), {}, False, "CPU only"),
+    (ModeOllama(share=0.5), {}, True, "0.50"),
+    (_Boom(), {}, True, "GPU share not read"),
+    (ModeOllama(share=0.0), {"summarize_mode": "whole"}, True, "GPU share not read"),
+    (ModeOllama(share=1.0), {"diagrams": "off"}, False, "set-diagrams off"),
+])
+def test_summarize_plan_decides_diagrams(vault, llm, cfg, want, word):
+    (mode, _above, diagrams), notes, _ = _plan(vault, llm, **cfg)
+    assert diagrams is want
+    assert any(n.startswith("diagrams on: " if want else "diagrams off: ") and word in n for n in notes), notes
+
+
+def test_fixed_mode_does_not_load_the_model_for_diagrams(vault):
+    llm = ModeOllama(share=0.0)
+    _plan(vault, llm, summarize_mode="whole")
+    assert llm.loaded == 0
+
+
+def test_read_mode_returns_mode_and_share():
+    assert cli._read_mode(ModeOllama(share=0.0), "auto", None) == ("split", 0.0)
+    assert cli._read_mode(ModeOllama(share=1.0), "whole", None) == ("whole", None)
+
+
+def test_summarize_plan_with_nothing_queued_has_no_stage(vault):
+    set_cfg(vault)
+    reporter = ListReporter()
+    mode, _above, diagrams = cli._summarize_plan(
+        ModeOllama(share=0.0), load_config(vault / "config.yaml"), True, reporter, has_work=False)
+    assert (mode, diagrams) == ("whole", True) and not reporter.events

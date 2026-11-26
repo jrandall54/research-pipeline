@@ -434,13 +434,22 @@ def _read_mode(
     llm: LLM, setting: str, reporter: Reporter | None, set_with: str | None = None,
     diagrams: str = "auto",
 ) -> tuple[Literal["whole", "split"], float | None]:
+    """`_read_plan` without the diagrams decision: the mode and the GPU share it read."""
+    mode, share, _ = _read_plan(llm, setting, reporter, set_with, diagrams)
+    return mode, share
+
+
+def _read_plan(
+    llm: LLM, setting: str, reporter: Reporter | None, set_with: str | None = None,
+    diagrams: str = "auto",
+) -> tuple[Literal["whole", "split"], float | None, bool]:
     """Resolve a summarize_mode setting (auto/whole/split) to whole or split, in a "reading mode" stage.
 
     For `auto` on Ollama the model is loaded (a note says so first) and its GPU share read
     (parts.resolve_mode). Any failure there reads whole, as before split mode existed. Shared
     by `rpipe run`, `rpipe summarize` and `rpipe eval run` so all three decide the same way.
     ``set_with`` names where a fixed mode came from (eval's `--mode`); default the setting.
-    Returns the mode and the GPU share it read (None when not read). The diagrams setting
+    Returns the mode, the GPU share it read (None when not read) and whether to draw diagrams. The diagrams setting
     (parts.resolve_diagrams) is noted in the same stage and uses the same share; a fixed
     summarize mode does not load the model, so the share is unknown and `auto` draws.
     """
@@ -458,8 +467,9 @@ def _read_mode(
                 problem = " ".join(str(exc).split()) or type(exc).__name__
         mode, reason = resolve_mode(setting, backend, share, llm.num_ctx, set_with=set_with)
         handle.note(f"{reason} ({problem})" if problem else reason)
-        handle.note(resolve_diagrams(diagrams, backend, share)[1])
-    return mode, share
+        draw, draw_reason = resolve_diagrams(diagrams, backend, share)
+        handle.note(draw_reason)
+    return mode, share, draw
 
 
 def _summarize_plan(
@@ -476,10 +486,9 @@ def _summarize_plan(
     """
     backend = getattr(llm, "name", "")
     mode: Literal["whole", "split"] = "whole"
-    share: float | None = None
+    diagrams, _ = resolve_diagrams(config.diagrams, backend, None)  # nothing queued: no stage, no note
     if has_work:
-        mode, share = _read_mode(llm, config.summarize_mode, reporter, diagrams=config.diagrams)
-    diagrams, _ = resolve_diagrams(config.diagrams, backend, share)
+        mode, _share, diagrams = _read_plan(llm, config.summarize_mode, reporter, diagrams=config.diagrams)
     fallback_above = 0
     if backend == "ollama" and reruns_possible:
         fallback_above = model_cap(getattr(llm, "url", ""), llm.model_name)

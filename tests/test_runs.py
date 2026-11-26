@@ -221,8 +221,13 @@ def test_run_fetch_counts_in_health_line(tmp_path, monkeypatch):
     vault, _ = _share_run(tmp_path, monkeypatch, follow=True)
     result = runner.invoke(cli.app, ["run", "--vault", str(vault)])
     assert result.exit_code == 0, result.output
+    (digest,) = (vault / "digests").glob("*.md")
+    assert "followed: 1 feed, 0 new posts" in digest.read_text()
     counts, _ = _last_run(vault)
-    assert counts["followed_feeds"] == 1 and counts["followed_new"] == 0
-    line = cli.health_line(date(2026, 11, 26), counts, [])
-    assert "followed: 1 feeds, 0 new posts" in line
+    assert counts["followed_feeds"] == 1
+
+
+def test_health_line_followed_pluralises():
+    assert "followed: 3 feeds, 1 new post ·" in cli.health_line(
+        date(2026, 11, 26), {"followed_feeds": 3, "followed_new": 1}, [])
     assert "followed" not in cli.health_line(date(2026, 11, 26), {}, [])

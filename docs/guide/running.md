@@ -397,16 +397,16 @@ Unlocked commands can still write to `vault.sqlite` while a job runs. SQLite all
 
 **A run that never finished.** If the process was killed outright (power cut, `kill -9`) nothing can record anything, so `finished_at` stays empty. The next `run` notices that the run immediately before it has no `finished_at` and adds `previous run did not finish` to the end of the digest's health line. Only the immediately preceding run is checked (the current run is itself unfinished while it writes the digest, so it is excluded), so the warning appears once and clears after the next healthy run.
 
-### The sharing stages (after the digest)
+### The sharing stages
 
-Two stages run at the very end of `rpipe run`, after the digest is written and inside the same lock. Each is in its own `try`, so a network problem can never touch the digest. Details of what they do are in [sharing.md](sharing.md).
+Two stages are added to `rpipe run`, inside the same lock. Each is in its own `try`, so a network problem can never stop the digest. Details of what they do are in [sharing.md](sharing.md).
 
-1. **publish**, only when sharing is on (`rpipe share setup` done). It rebuilds your feed files and pushes them. A failed push (offline, signed out of GitHub) adds `sharing: push failed, will retry tomorrow: <reason>` to the run's errors; the commit stays local and the next night's push carries everything.
-2. **fetch and directory refresh**, when you follow someone or share yourself. It downloads every followed feed, then refreshes the public directory. Counts `followed_feeds` and `followed_new` are stored with the run.
+1. **fetch and directory refresh**, when you follow someone or share yourself. It runs *before* the digest is written (it does not depend on tonight's papers): it downloads every followed feed, then refreshes the public directory. The counts `followed_feeds` and `followed_new` go on tonight's health line as ` · followed: 3 feeds, 24 new posts` and into the run record. A failure adds `fetch: ...` to the errors and the digest is still written.
+2. **publish**, only when sharing is on (`rpipe share setup` done). It runs *after* the digest, because the feed holds tonight's digest papers. It rebuilds your feed files and pushes them. A failed push (offline, signed out of GitHub) adds `sharing: push failed, will retry tomorrow: <reason>` to the run's errors; the commit stays local and the next night's push carries everything. Because the digest is already written, this error shows in `rpipe runs`, not in tonight's digest health line.
 
-Because the digest is already written when these stages finish, their results appear in the run's record (`rpipe runs`, `rpipe share status`) and in the *next* digest's health line, not in tonight's. That is accepted: the digest must never wait on, or depend on, the network. The health line gains ` · followed: 3 feeds, 24 new posts` when you follow anyone. Both stages report progress (`publish`, `fetch`, `directory`).
+Both stages report progress (`publish`, `fetch`, `directory`).
 
-Wiring: `_share_stages` in `cli.py`. Tests: `test_run_publishes_after_digest`, `test_run_push_failure_is_reported_not_fatal`, `test_run_fetch_counts_in_health_line` in `tests/test_runs.py`.
+Wiring: `_share_fetch_stage` and `_share_publish_stage` in `cli.py`. Tests: `test_run_publishes_after_digest`, `test_run_push_failure_is_reported_not_fatal`, `test_run_fetch_counts_in_health_line` in `tests/test_runs.py`.
 
 ### Running it nightly
 

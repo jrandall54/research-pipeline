@@ -405,7 +405,8 @@ def health_line(
         if counts.get(key):
             extras += f" · {label} {counts[key]}"
     if counts.get("followed_feeds"):
-        extras += f" · followed: {counts['followed_feeds']} feeds, {counts.get('followed_new', 0)} new posts"
+        feeds, new = counts["followed_feeds"], counts.get("followed_new", 0)
+        extras += f" · followed: {feeds} feed{'' if feeds == 1 else 's'}, {new} new post{'' if new == 1 else 's'}"
     if counts.get("summaries_off"):
         extras += " · summaries off (abstracts-only mode)"
     if unknown_categories:
@@ -700,6 +701,7 @@ def _run_locked(ctx: _Context) -> None:
             except Exception as exc:  # noqa: BLE001 - record it, then still try to write the digest
                 crashed = True
                 errors.append(f"{stage}: {' '.join(str(exc).split()) or type(exc).__name__}")
+            _share_fetch_stage(ctx, counts, errors)  # before the digest, so tonight's health line has its counts
             today = date.today()
             unfinished = previous_run_unfinished(ctx.conn, run_id)
             try:
@@ -715,9 +717,9 @@ def _run_locked(ctx: _Context) -> None:
             except Exception as exc:  # noqa: BLE001
                 crashed = True
                 errors.append(f"digest: {' '.join(str(exc).split()) or type(exc).__name__}")
-            # The digest is written, so sharing problems can never affect it. Their counts and
-            # errors reach finish_run (and the next run's health line), not tonight's digest.
-            _share_stages(ctx, profile, counts, errors)
+            # Publishing needs tonight's digest papers, so it runs after the digest; its error
+            # goes to the run record (finish_run), not tonight's digest.
+            _share_publish_stage(ctx, profile, errors)
         finally:
             in_flight = sys.exc_info()[0] is not None  # an error is already propagating
             try:
@@ -734,26 +736,32 @@ def _run_locked(ctx: _Context) -> None:
         raise typer.Exit(code=1)
 
 
-def _share_stages(ctx: _Context, profile: Profile, counts: dict[str, int], errors: list[str]) -> None:
-    """The two nightly sharing stages (docs/guide/sharing.md); each in its own try, never fatal."""
-    if ctx.config.share_enabled:
-        try:
-            with _reporter() as reporter:
-                _publish_feed(ctx, profile, _share_runner(), reporter,
-                              handle=ctx.config.share_handle, name=ctx.config.share_display_name)
-        except Exception as exc:  # noqa: BLE001 - a push problem never touches the digest
-            reason = " ".join(str(exc).split()) or type(exc).__name__
-            errors.append(f"sharing: push failed, will retry tomorrow: {reason}")
-    if ctx.config.share_enabled or library_api.follows(ctx.conn):
-        try:
-            with _share_http() as http, _reporter() as reporter:
-                fetch_counts, fetch_errors = share_fetch.fetch_all(ctx.conn, http, reporter)
-                counts |= fetch_counts
-                errors += fetch_errors
-                _found, dir_errors = share_directory.refresh(ctx.conn, http, reporter)
-                errors += dir_errors
-        except Exception as exc:  # noqa: BLE001 - a fetch problem never touches the digest
-            errors.append(f"fetch: {' '.join(str(exc).split()) or type(exc).__name__}")
+def _share_publish_stage(ctx: _Context, profile: Profile, errors: list[str]) -> None:
+    """Nightly stage `publish` (only when sharing is on), after the digest; never fatal."""
+    if not ctx.config.share_enabled:
+        return
+    try:
+        with _reporter() as reporter:
+            _publish_feed(ctx, profile, _share_runner(), reporter,
+                          handle=ctx.config.share_handle, name=ctx.config.share_display_name)
+    except Exception as exc:  # noqa: BLE001 - a push problem never touches the digest
+        reason = " ".join(str(exc).split()) or type(exc).__name__
+        errors.append(f"sharing: push failed, will retry tomorrow: {reason}")
+
+
+def _share_fetch_stage(ctx: _Context, counts: dict[str, int], errors: list[str]) -> None:
+    """Nightly stage `fetch` + directory refresh (when sharing or following), before the digest; never fatal."""
+    if not (ctx.config.share_enabled or library_api.follows(ctx.conn)):
+        return
+    try:
+        with _share_http() as http, _reporter() as reporter:
+            fetch_counts, fetch_errors = share_fetch.fetch_all(ctx.conn, http, reporter)
+            counts |= fetch_counts
+            errors += fetch_errors
+            _found, dir_errors = share_directory.refresh(ctx.conn, http, reporter)
+            errors += dir_errors
+    except Exception as exc:  # noqa: BLE001 - a fetch problem never touches the digest
+        errors.append(f"fetch: {' '.join(str(exc).split()) or type(exc).__name__}")
 
 
 @app.command()
@@ -3562,6 +3570,7 @@ def share_setup(vault: VaultOption = None) -> None:
                 return
             clone = _clone_dir(ctx.vault)
             if status == "missing":
+                shutil.rmtree(clone, ignore_errors=True)  # a leftover from an aborted setup
                 clone.parent.mkdir(parents=True, exist_ok=True)
                 share_github.create_repo(runner, handle, clone)
             else:
@@ -3605,7 +3614,7 @@ def share_status(vault: VaultOption = None) -> None:
         if (clone / ".git").exists():
             r = _share_runner().run(["git", "log", "-1", "--format=%cI"], cwd=clone)
             if r.returncode == 0 and r.stdout.strip():
-                typer.echo(f"  Last change pushed: {r.stdout.strip()[:19].replace('T', ' ')}")
+                typer.echo(f"  Last local commit: {r.stdout.strip()[:19].replace('T', ' ')}")
         last = list_runs(ctx.conn, 1)
         if last and last[0]["finished_at"]:
             bad = [e for e in json.loads(last[0]["errors"] or "[]") if e.startswith("sharing:")]

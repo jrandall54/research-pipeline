@@ -55,13 +55,16 @@ GENERIC_WORDS = frozenset(
 _GENERIC_STEMS = frozenset(_stem(w) for w in GENERIC_WORDS)
 MIN_SPECIFIC_NODES = 2
 TOO_GENERIC = "too generic (fewer than 2 boxes name something specific to this paper)"
-_FRONT = ("abstract", "introduction", "conclusion")
-_NUMBER_PREFIX = re.compile(r"^[\d.\s]*")
+# A leading section label (3, 3.1, IV, IV-B, A.) is skipped, then the title must be one of the
+# front-matter words as a whole word ("Abstraction layer" is not the abstract; the title must be
+# just "Abstract", so "Abstract syntax trees" is a real section).
+_LABEL = re.compile(r"^(?:[\divxlc]+[.\s)-]+|[a-z][.)]\s)*", re.I)
+_FRONT = re.compile(r"(?:abstract$|(?:introduction|conclusions?)\b)", re.I)
 
 
 def _is_front(title: str) -> bool:
-    """An abstract, introduction or conclusion title (after any leading section number)."""
-    return _NUMBER_PREFIX.sub("", title.strip().casefold()).startswith(_FRONT)
+    """An abstract, introduction or conclusion title (after any leading section label)."""
+    return _FRONT.match(_LABEL.sub("", title.strip(), count=1)) is not None
 
 
 def check_diagram(d: Diagram, sections: list[Section], abstract: str) -> list[str]:

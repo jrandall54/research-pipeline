@@ -192,3 +192,14 @@ def test_stem_silent_e_meets_inflections():
                  ("processes", "process"), ("classes", "class"), ("boxes", "box"),
                  ("matches", "match")):
         assert _stem(a) == _stem(b), (a, b)
+
+
+def test_front_matter_titles_ieee_and_lettered_styles():
+    from research_pipeline.diagram import _is_front
+
+    for t in ("I. Introduction", "V. Conclusion", "A. Introduction", "1 Introduction", "6. Conclusions",
+              "Abstract", "II) Abstract", "VI-Conclusion"):
+        assert _is_front(t), t
+    for t in ("IV-B Effectiveness", "3 Method", "5.1 Main Results", "Abstraction layer",
+              "Abstract syntax trees", "III. Method"):
+        assert not _is_front(t), t

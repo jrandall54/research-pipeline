@@ -141,7 +141,7 @@ rpipe model set qwen3:8b   # pin a smaller model for less memory (rpipe model se
 rpipe model set-url http://gpu-box:11434   # a different Ollama server (must start with http:// or https://)
 rpipe model set-context 16384   # pin the context in tokens, at least 8192, or `auto`; invalid values are refused and the file is left alone
 rpipe model set-mode split      # read papers in parts (auto, the default, picks per machine; whole reads in one go)
-rpipe model set-diagrams off    # no diagram per paper (auto, the default, skips it only on a CPU-only model; on always draws)
+rpipe model set-diagrams off    # no diagram per paper (auto, the default, skips it only on a CPU-only model; on always asks for one: the model may still answer no diagram, and abstract-only papers never get one)
 ```
 
 **Check that prefix caching works.** The summary and the critique start with identical text (see `summaries.md`), so Ollama should read the paper once. After every reply the client keeps Ollama's own timing numbers in `client.last_stats` (`prompt_eval_count`: the prompt's length in tokens, which this Ollama counts in full even when part of it came from the cache; `prompt_eval_duration` and `eval_duration` in nanoseconds, where the cache shows up; `eval_count`: tokens written; `None` when Ollama sends none). To see it on one paper:

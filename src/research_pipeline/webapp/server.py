@@ -1,32 +1,16 @@
-"""The app server: builds the FastAPI app, mounts static files, sets up templates and the guard."""
+"""The app server: builds the FastAPI app, mounts static files, sets up the guard and the 404 page."""
 
-import sqlite3
-from collections.abc import Iterator
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
-from starlette.templating import Jinja2Templates
 
-from research_pipeline import db
-from research_pipeline.webapp import guard
+from research_pipeline.webapp import guard, routes_feed, routes_pages
+from research_pipeline.webapp.deps import HERE, get_conn, templates
 
-HERE = Path(__file__).parent
-
-# Autoescape is on for every template, so paper titles and abstracts cannot inject markup.
-templates = Jinja2Templates(
-    env=Environment(loader=FileSystemLoader(HERE / "templates"), autoescape=select_autoescape(default=True))
-)
-
-
-def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
-    """FastAPI dependency: one database connection per request, closed afterwards."""
-    conn = db.open_db(request.app.state.vault_db)
-    try:
-        yield conn
-    finally:
-        conn.close()
+__all__ = ["HERE", "create_app", "get_conn", "templates"]  # get_conn/templates re-exported for existing callers
 
 
 def create_app(vault_db: Path, allowed_hosts: set[str]) -> FastAPI:
@@ -39,8 +23,14 @@ def create_app(vault_db: Path, allowed_hosts: set[str]) -> FastAPI:
         refusal = guard.check(request, allowed_hosts)
         return refusal if refusal is not None else await call_next(request)
 
-    from research_pipeline.webapp import routes_feed  # imported here: it needs `templates` and `get_conn` above
+    @app.exception_handler(StarletteHTTPException)
+    async def not_found_page(request: Request, exc: StarletteHTTPException):
+        if exc.status_code != 404:
+            return await http_exception_handler(request, exc)
+        message = exc.detail if exc.detail != "Not Found" else None
+        return templates.TemplateResponse(request, "404.html", {"nav": None, "message": message}, status_code=404)
 
     app.include_router(routes_feed.router)
+    app.include_router(routes_pages.router)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     return app

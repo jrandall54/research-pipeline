@@ -1,6 +1,6 @@
 <article class="card" id="paper-{{ c.id }}" data-paper-id="{{ c.id }}">
   {% if c.topic %}<div class="topic" style="color: var(--topic-{{ c.topic_color }})">{{ c.topic }}</div>{% endif %}
-  <h2 class="card-title">{{ c.title }}</h2>
+  <h2 class="card-title"><a href="/paper/{{ c.id }}">{{ c.title }}</a></h2>
   {% if c.one_line %}
     <p class="one-line">{{ c.one_line }}</p>
     <div class="read-more">

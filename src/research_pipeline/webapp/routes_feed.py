@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from research_pipeline import library_api
 from research_pipeline.webapp import present
-from research_pipeline.webapp.server import get_conn, templates
+from research_pipeline.webapp.deps import get_conn, templates
 
 router = APIRouter()
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]

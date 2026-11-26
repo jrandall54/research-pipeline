@@ -66,6 +66,24 @@ Built from the stored reasons; unknown reason formats are skipped, never shown r
 | `keyword: X` | it mentions X |
 | `near your shelf: name` | it's close to "name" on your shelf |
 
+## Reading a paper
+
+**What it does.** `GET /paper/{id}` shows one paper: topic, title, authors ("A, B, C and 2 others" when there are more than three), a "Read the paper" button to the original, the one-line summary, the problem / what they did / what they found fields, then Strengths, Weaknesses and "Questions to ask" from the critique, and "Why you're seeing this". Each claim carries its section tag (for example `§4`). A paper with no summary yet shows its full abstract and the same "Summarize this" control as a card. An id with a version (`2611.25005v2`) or an arXiv URL form works; an unknown or malformed id gives the 404 page "That paper isn't in your library." inside the normal app frame (the same page serves any other missing address). Cards on the feed, Saved and Search link to this page from their titles.
+
+**How it works.** `routes_pages.paper` runs the id through `ids.normalise_paper_id`, loads the paper with `library_api.get_paper`, and asks `present.paper_detail` to shape it into a `DetailData` (the card plus authors, critique, questions, "about" lines). Two small clean-ups happen there: each critique question loses a trailing `[sections: ...]` note (the model sometimes appends one; it is noise on a screen), and claims get section tags as on cards. The route also loads that paper's digest day and passes the titles to the template.
+
+**Feed beside reader.** From 1100 px wide, the page is two columns: the paper's digest day as a compact list on the left (the current paper highlighted, every item a link to its own page) and the reader on the right, so a desktop feels like a mail client. Below 1100 px the list is hidden by CSS and the reader fills the width; reading text never exceeds 680 px, which keeps lines comfortable.
+
+Why this way: the list is plain links, so it works without JavaScript and each paper keeps its own address you can bookmark. Rejected: loading the paper into the feed page with JavaScript (breaks back/forward and bookmarks).
+
+## Saved and Search
+
+`GET /saved` lists saved papers as cards, newest save first, or "Nothing saved yet." `GET /search?q=word` searches titles and abstracts (`library_api.search_papers`, which only uses the words you type, so quotes or operators never cause an error) and shows up to 30 results as cards. An empty query shows only the search box; no match shows `No papers match "q".` The query is printed escaped, so typing `<b>` shows the characters rather than making text bold. Both pages reuse the card template and the Skim / Read switch.
+
+## About this summary
+
+At the foot of a paper with a summary, a collapsed "About this summary" lists in plain words how it was made: `Read from the full paper` or `Read from the abstract only`; `Read in N parts` for long papers read in pieces; `Some of the paper was too long and was cut`; `Summarized by {model} on {date}` (taken from the stored record `library_api.summary_provenance`, and left out for older summaries that have none); and one `Could not check: "..."` line for each claim whose quoted section could not be verified against the paper (see [summaries.md](summaries.md)). Model names appear only here, so the rest of the app stays free of jargon.
+
 ## Security
 
 There is no login. The threat model is the one in [browsing.md](browsing.md): anyone who can reach the address can read and vote, and the address is only your own machine (localhost) or its Tailscale address, checked by the same allowlist as `rpipe serve` (`netguard`). The guard adds two checks that `rpipe serve` lacks:
@@ -83,11 +101,12 @@ Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static fi
 
 ## Where the code is
 
-- `src/research_pipeline/webapp/server.py`: `create_app`, `get_conn`, the shared `templates`.
+- `src/research_pipeline/webapp/server.py`: `create_app` and the 404 page handler. `deps.py`: `get_conn` and the shared `templates` (routers import these from `deps`; `server` re-exports them).
 - `src/research_pipeline/webapp/guard.py`: `check`, the Host and same-origin checks.
 - `src/research_pipeline/webapp/templates/base.html`: the page frame and navigation.
 - `src/research_pipeline/webapp/static/`: `app.css` (palette, type, layout), `app.js`, `icon.svg`, `manifest.webmanifest`, `fonts/`.
 - `src/research_pipeline/webapp/present.py`: `why_sentence`, `topic_of`, `topic_color`, `section_tag`, `day_heading`, `card`/`CardData` (pure shaping).
 - `src/research_pipeline/webapp/routes_feed.py`: the `/` and `/day/{date}` routes.
-- `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`.
-- `tests/test_webapp_server.py`, `tests/test_webapp_present.py`, `tests/test_webapp_feed.py`.
+- `src/research_pipeline/webapp/routes_pages.py`: `/paper/{id}`, `/saved`, `/search`; `present.paper_detail` shapes the paper page.
+- `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`, `paper.html`, `list.html` (Saved and Search), `404.html`.
+- `tests/test_webapp_server.py`, `tests/test_webapp_present.py`, `tests/test_webapp_feed.py`, `tests/test_webapp_pages.py`.

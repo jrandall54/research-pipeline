@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
-from research_pipeline.library_api import PaperView, ReasonView, plain_reasons
+from research_pipeline.library_api import PaperView, ProvenanceView, ReasonView, plain_reasons
 from research_pipeline.summary_models import Claim
 
 SummarizeState = Literal["none", "pending", "running", "done", "failed"]
@@ -117,4 +117,54 @@ def card(view: PaperView, state: str | None) -> CardData:
         results=_field(s.results if s else None), why=why_sentence(reasons),
         vote=view.vote, saved=view.saved,
         summarize_state="done" if s else (state or "none"),  # type: ignore[arg-type]
+    )
+
+
+_SECTIONS_SUFFIX = re.compile(r"\s*\[sections?:[^\]]*\]\s*$", re.IGNORECASE)
+
+
+@dataclass
+class DetailData:
+    card: CardData
+    authors_short: str
+    abstract: str  # full text, for papers with no summary yet
+    strengths: list[Field]
+    weaknesses: list[Field]
+    questions: list[str]
+    about: list[str]
+
+
+def authors_short(authors: list[str]) -> str:
+    """'A', 'A and B', 'A, B and C', or 'A, B, C and N others' for more than three."""
+    if len(authors) <= 1:
+        return "".join(authors)
+    if len(authors) <= 3:
+        return f"{', '.join(authors[:-1])} and {authors[-1]}"
+    return f"{', '.join(authors[:3])} and {len(authors) - 3} others"
+
+
+def _tagged(claims: list[Claim]) -> list[Field]:
+    return [(c.text, section_tag(c.sections)) for c in claims]
+
+
+def paper_detail(view: PaperView, state: str | None, provenance: ProvenanceView | None = None) -> DetailData:
+    """Everything the paper page prints beyond the card: critique with tags and the "About this summary" lines."""
+    ps = view.summary
+    about: list[str] = []
+    if ps:
+        about.append("Read from the full paper" if ps.basis == "full_text" else "Read from the abstract only")
+        if ps.parts > 1:
+            about.append(f"Read in {ps.parts} parts")
+        if ps.body_cut:
+            about.append("Some of the paper was too long and was cut")
+        if provenance:
+            about.append(f"Summarized by {provenance.model} on {provenance.created_at[:10]}")
+        about += [f'Could not check: "{t}"' for t in ps.unverified]
+    return DetailData(
+        card=card(view, state),
+        authors_short=authors_short(view.authors), abstract=view.abstract,
+        strengths=_tagged(ps.critique.strengths) if ps else [],
+        weaknesses=_tagged(ps.critique.weaknesses) if ps else [],
+        questions=[_SECTIONS_SUFFIX.sub("", q) for q in ps.critique.questions] if ps else [],
+        about=about,
     )

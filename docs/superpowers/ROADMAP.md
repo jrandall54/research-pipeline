@@ -1,8 +1,8 @@
 # Roadmap
 
-The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-26 (Phase 9.3 merged).
+The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-26 (Phase 9.3 merged; summaries and app look kept as they are).
 
-**Next up:** check the first nightly run with hooks and diagrams (see `handoff.md`), then Phase 10 (sharing): design conversation.
+**Next up:** Phase 10 (sharing): design conversation. Summaries and the app's look stay as they are (owner ruling 2026-11-26).
 
 ## How this is organized
 

@@ -7,15 +7,12 @@ Current state and next steps only. Read `ROADMAP.md` for the full list of phases
 - Phases 1 to 9.3 merged to `main` and pushed. `uv run pytest -q`: 1769 passing, ruff clean.
 - The 2026-11-26 nightly run (first on Phase 7-9 code) worked: 15 papers summarized whole, 13 diagrams, 2 requests done, no errors, finished 03:15. Database is at version 4.
 - **Diagrams are off** (Phase 9.3, owner ruling): `rpipe model set-diagrams off` is set, so none are drawn, and the app hides the ones already stored. The owner found them pointless (labels in boxes repeating "What they did"). Diagrams worth having would be the paper's own figures, tables and graphics brought into the app; that is a future phase, not now.
-- **Summaries are hidden in the app (not fixed yet).** They are all stored and the markdown digest shows them in full, but: the feed opens in Skim, which shows one line per card; since Phase 9 that line is the hook (a single stat) instead of the one-line summary on 12 of 15 papers; Limitations is never shown in the app. The owner saw "no summaries".
-- The owner also questioned the summary format itself: one sentence is not an overview of a paper, and Problem/Approach/Results/Limitations + Strengths/Weaknesses was chosen so code can check citations, not from research on how people learn from summaries.
+- **Summaries and the app's look stay as they are** (owner ruling 2026-11-26, next session): turning diagrams off was enough. The summary display fix and the summary redesign listed last session are dropped; don't bring them back unless the owner asks.
 
 ## Next
 
-1. **Summary display fix (small, first).** Default view shows the real summary; the one-line summary comes before the hook, never replaced by it; Limitations shown. Ask the owner before building: drop Skim, or keep it as an opt-in.
-2. **Summary redesign (a phase, starts with a design conversation).** What a summary is for (e.g. "after reading it I know what the paper is about and whether to open it"); a short look at what research on summaries and learning supports (structured abstracts are the closest evidence); likely a real paragraph overview first, then the parts. Hooks stay only if they earn a place.
-3. **Phase 10: sharing.** Design conversation first.
-4. Later: diagrams from the paper's own figures and tables (owner's idea, 2026-11-26).
+1. **Phase 10: sharing.** Design conversation first (started 2026-11-26).
+2. Later: diagrams from the paper's own figures and tables (owner's idea, 2026-11-26).
 
 ## Parked (small, not urgent)
 

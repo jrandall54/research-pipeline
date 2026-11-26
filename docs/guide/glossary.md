@@ -140,7 +140,7 @@
 
 **Provenance** — the record of where a summary came from: which model, prompt version, paper version and context size produced it, and when. Shown as a footer in the digest. See `summaries.md`.
 
-**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts (and the notes, condense and combine prompts used when a paper is read in parts). Bumped whenever those prompts change, so summaries made with different wording can be told apart. Currently `2026-11-p7`. See `summaries.md`.
+**Prompt version** — `PROMPT_VERSION` in `prompts.py`, a label for the current wording of the summary and critique prompts (and the notes, condense and combine prompts used when a paper is read in parts). Bumped whenever those prompts change, so summaries made with different wording can be told apart. Currently `2026-11-p9`. See `summaries.md`.
 
 **Unfinished run** — a `runs` row whose `finished_at` is empty: the process was killed before it could record its end. The next digest's health line says `previous run did not finish`. See `running.md`.
 
@@ -365,3 +365,7 @@
 **Skim / Read** — the two levels of detail on the feed. Skim shows title, one-line summary and why it was picked; Read adds the problem, what they did and what they found. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.
 
 **Day list** — the compact list of one digest day shown beside the reader on a wide screen (1100 px or more) so you can jump between that day's papers. Hidden on phones. See "Reading a paper" in `app.md`.
+
+**Hook** — one line (at most 90 characters) that states a paper's main finding as a plain fact, with the paper's own numbers. It is not clickbait: no question, no teaser, no held-back answer; it makes the real finding easy to take in. Asked for by the summary prompt and checked by code against the paper. See `summaries.md`.
+
+**Key number** — one of up to three numbers a paper reports that matter most, shown as a value written exactly as the paper writes it (for example "28%"), a short label for what it measures and the sections it comes from. See `summaries.md`.

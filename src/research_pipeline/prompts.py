@@ -20,7 +20,7 @@ from research_pipeline.summary_models import Claim
 # Stamped on every stored summary (its provenance). Bump it whenever SHARED_SYSTEM or
 # the task texts change (the notes and combine prompts included), so old summaries can be
 # told apart from new ones.
-PROMPT_VERSION = "2026-11-p7"
+PROMPT_VERSION = "2026-11-p9"
 
 # Both block tags are defused everywhere: paper text could fake </notes> and notes could fake </paper>.
 _BLOCK_TAG = re.compile(r"<(/?)(paper|notes)", re.IGNORECASE)
@@ -39,14 +39,26 @@ Rules:
 
 # One system prompt for both calls, so the summary call and the critique call begin with the
 # same text and a model server can reuse its reading of the paper for the second call.
-_TASK_FIELDS = """\
-Summary task fields: one_line (one sentence on what the paper does), problem, approach,
-results, limitations. Each of the last four is a claim: a short text plus the sections it
-comes from. Limitations are the ones the paper itself states; if it states none, say so.
+_PLAIN_WORDS = (
+    "Write for a reader who is not an expert in this field: short sentences, everyday words, "
+    "and when a technical term is needed, explain it in a few words. Keep the paper's numbers."
+)
+_TASK_FIELDS = f"""\
+Summary task fields: one_line (one sentence on what the paper does), hook, key_numbers, problem,
+approach, results, limitations. Each of problem, approach, results and limitations is a claim:
+a short text plus the sections it comes from. Limitations are the ones the paper itself states;
+if it states none, say so.
+hook is a claim: one line (at most 90 characters) stating the paper's main finding as a plain
+fact, using the paper's own numbers when it has them. Never claim more than the paper shows,
+never round a number into a bigger-sounding one, no questions, no teasers, no held-back answers.
+key_numbers: 0 to 3 numbers the paper reports that matter most, each with value (exactly as the
+paper writes it, e.g. "28%"), label (what it measures, a few plain words) and sections.
 
 Critique task fields: strengths and weaknesses (lists of claims, each a short text plus the
 sections it is based on) and questions (open questions a reader should ask the authors).
-Base every strength and weakness on what the paper shows or fails to show."""
+Base every strength and weakness on what the paper shows or fails to show.
+
+{_PLAIN_WORDS}"""
 
 SHARED_SYSTEM = f"""\
 You read research papers carefully and answer one task per request.
@@ -62,10 +74,13 @@ REMINDER = (
     'Reminder: use only the paper above, cite section titles exactly as written in its "## " '
     "headings, answer with JSON only."
 )
-_SUMMARY_LIMITS = "Length limits: one_line is one sentence. Each claim text is at most two sentences."
+_SUMMARY_LIMITS = (
+    "Length limits: one_line is one sentence; hook at most 90 characters. "
+    "Each claim text is at most two short sentences."
+)
 _CRITIQUE_LIMITS = (
     "Length limits: give 3 to 5 strengths, 3 to 5 weaknesses and 3 to 5 questions. "
-    "Each claim text is at most two sentences."
+    "Each claim text is at most two short sentences."
 )
 SUMMARY_TASK = f"""\
 Task: summarise the paper above.

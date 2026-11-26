@@ -349,3 +349,11 @@
 **Composition layer** — the code allowed to use both the pipeline and the app and wire them together: `cli.py` (every `rpipe` command) and `progress_render.py` (turns progress events into terminal lines). For example, `rpipe run` syncs the shelf (app) and then runs the pipeline stages. See `architecture.md`.
 
 **One door** — the rule that the app reaches the database only through `library_api.py`, so every front end (the terminal today, a web page or MCP tool later) uses the same functions and gets the same data. See `architecture.md`.
+
+**Web server** — a program that stays running and answers requests from a browser: "show me this page" or "record this vote". `rpipe app` is one (built with FastAPI and run by uvicorn). It builds each page when asked, so the page always shows what is in the database right now. See `app.md`.
+
+**Template** — a page written once with blanks in it (`{{ paper.title }}`), which the web server fills in with real data for each request. The app uses Jinja2 templates in `webapp/templates/`; the filling-in escapes special characters, so a paper title containing `<script>` is shown as text and never runs. See `app.md`.
+
+**Web app manifest** — a small JSON file (`manifest.webmanifest`) that tells a phone browser an app's name, icon and that it may open full-screen. It is what makes "Add to Home Screen" give you an icon that opens the feed like an app. See `app.md`.
+
+**Same-origin check** — the server refuses any request that changes something (anything but GET or HEAD) unless the browser says it came from a page on one of the server's own allowed addresses (the `Origin` or `Referer` header). It stops another website you have open from making your browser vote or save on your behalf (cross-site request forgery). See "Security" in `app.md`.

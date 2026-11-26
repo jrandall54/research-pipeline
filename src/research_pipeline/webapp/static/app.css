@@ -1,0 +1,160 @@
+/* Research Feed: look A's structure and type, look C's palette as the dark theme.
+   Everything is served from /static; the page makes no third-party requests. */
+
+@font-face { font-family: "Literata"; font-weight: 600; font-style: normal; font-display: swap;
+  src: url("/static/fonts/literata-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 400; font-style: normal; font-display: swap;
+  src: url("/static/fonts/inter-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 500; font-style: normal; font-display: swap;
+  src: url("/static/fonts/inter-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 600; font-style: normal; font-display: swap;
+  src: url("/static/fonts/inter-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-style: normal; font-display: swap;
+  src: url("/static/fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2"); }
+
+:root {
+  --bg: #F6F7F9;
+  --surface: #FFFFFF;
+  --ink: #14171F;
+  --muted: #5B6270;
+  --line: #E3E6EB;
+  --accent: #2F45C8;
+  --accent-soft: #EEF0FB;
+  /* Topic colours, each at least 4.5:1 on --surface. */
+  --topic-0: #2F45C8;
+  --topic-1: #B4380F;
+  --topic-2: #0B7A4B;
+  --topic-3: #8A3FB0;
+  --topic-4: #8F5200;
+  --topic-5: #0A7285;
+  --topic-6: #B0285F;
+  --topic-7: #4E6B12;
+  --font-title: "Literata", Georgia, serif;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --radius: 14px;
+  --nav-h: 56px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101318;
+    --surface: #161A21;
+    --ink: #E7EAF0;
+    --muted: #9AA3B2;
+    --line: #232833;
+    --accent: #9CC0FF;
+    --accent-soft: #1E2840;
+    --topic-0: #9CC0FF;
+    --topic-1: #FF9E7A;
+    --topic-2: #6FD3A0;
+    --topic-3: #D3A1F0;
+    --topic-4: #F0B95C;
+    --topic-5: #6CCBE0;
+    --topic-6: #F59BBE;
+    --topic-7: #B9D96A;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  /* Keep content clear of the notch, home indicator and rounded corners when run from the home screen. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* A band behind the status bar so scrolled content never shows through it. */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: env(safe-area-inset-top);
+  background: var(--bg);
+  z-index: 30;
+}
+
+a { color: var(--accent); }
+h1, h2, h3 { font-family: var(--font-title); font-weight: 600; line-height: 1.25; margin: 0 0 .5em; }
+.mono { font-family: var(--font-mono); font-weight: 500; font-size: .8em; }
+.muted { color: var(--muted); }
+
+.shell { min-height: 100vh; }
+
+.content {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: calc(16px + env(safe-area-inset-top)) 16px calc(var(--nav-h) + 24px + env(safe-area-inset-bottom));
+}
+
+/* Phone: bottom navigation. */
+.nav {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 20;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.nav-brand { display: none; }
+.nav a {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--nav-h);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.nav a[aria-current="page"] { color: var(--accent); }
+.nav svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Desktop: a left sidebar instead. */
+@media (min-width: 900px) {
+  .nav {
+    top: 0; right: auto; bottom: 0;
+    width: 220px;
+    flex-direction: column;
+    border-top: 0;
+    border-right: 1px solid var(--line);
+    padding: calc(24px + env(safe-area-inset-top)) 12px 24px calc(12px + env(safe-area-inset-left));
+    gap: 4px;
+  }
+  .nav-brand {
+    display: block;
+    font-family: var(--font-title);
+    font-weight: 600;
+    font-size: 20px;
+    padding: 0 12px 16px;
+  }
+  .nav a {
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 10px;
+    font-size: 15px;
+  }
+  .nav a[aria-current="page"] { background: var(--accent-soft); }
+  .content {
+    max-width: 1000px;
+    margin-left: 220px;
+    padding: 32px 32px 48px;
+  }
+}

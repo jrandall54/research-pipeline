@@ -19,13 +19,14 @@ dependencies = [
 [project.optional-dependencies]
 embed = ["sentence-transformers"]
 serve = ["datasette>=0.65,<1"]
+app = ["fastapi>=0.110", "jinja2>=3.1", "uvicorn>=0.29"]
 
 [project.scripts]
 rpipe = "research_pipeline.cli:app"
 research-pipeline = "research_pipeline.cli:app"
 
 [dependency-groups]
-dev = ["pytest", "respx", "ruff"]
+dev = ["pytest", "respx", "ruff", "fastapi", "jinja2"]
 
 [build-system]
 requires = ["hatchling"]

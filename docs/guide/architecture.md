@@ -38,7 +38,7 @@ No files were moved; the groups are lists in `tests/test_architecture.py`, check
 | --- | --- | --- | --- |
 | **Shared** | `models`, `summary_models`, `db`, `vault`, `embed`, `llm`, `backends`, `defaults`, `seeds`, `profile_edit`, `ids`, `progress`, `categories`, `schedule`, `netguard` | The building blocks both halves need: data shapes, the database connection and schema, the vault folders, the embedding and language-model clients, the profile and config editors, paper-id clean-up, progress events, the host allowlist for servers with no login | shared only |
 | **Pipeline** | `collect`, `sources`, `triage`, `rank`, `fulltext`, `summarize`, `prompts`, `digest`, `evaluate`, `gold`, `judge`, `pruning`, `parts`, `citations`, `spill`, `ollama_fit`, `ollama_tune`, `bench`, `scan`, `catalog`, `recommender`, `machine`, `registry`, `run_lock`, `requests_queue`, `seed_input`, `onboarding` | Getting and processing papers, plus everything about choosing, fitting and tuning the model that does it, the lock, and draining the request list | shared, plus the read functions of `library` listed in `library.PIPELINE_READS` |
-| **App** | `library`, `shelf`, `review`, `serve`, `library_api`, `workbench` | What you do with the papers: votes, saves, skips, the shelf, the review queue, the browser view, the one door, and `workbench/` (an empty package waiting for the app's future features) | shared and app; never pipeline |
+| **App** | `library`, `shelf`, `review`, `serve`, `library_api`, `workbench`, `webapp` | What you do with the papers: votes, saves, skips, the shelf, the review queue, the browser view, the one door, and `workbench/` (an empty package waiting for the app's future features) and `webapp/` (the web app server, see [app.md](app.md)) | shared and app; never pipeline |
 | **Composition** | `cli`, `progress_render` | The `rpipe` commands, and turning progress events into terminal lines | anything |
 
 Placements that are not obvious:
@@ -112,6 +112,7 @@ To see the request list of a vault: `rpipe requests list`.
 - `src/research_pipeline/requests_queue.py`: the pipeline side of the request list.
 - `src/research_pipeline/run_lock.py`: the lock.
 - `src/research_pipeline/workbench/`: empty home for future app features.
+- `src/research_pipeline/webapp/`: the web app server, templates and static files ([app.md](app.md)).
 - `src/research_pipeline/cli.py`: the composition layer.
 
 ## The app's door in detail

@@ -20,7 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from research_pipeline import db, ids, library, review, shelf
+from research_pipeline import db, feed_format, ids, library, review, shelf
 from research_pipeline.db import REQUEST_KINDS, UnknownPaperError
 from research_pipeline.embed import Embedder
 from research_pipeline.progress import Reporter
@@ -95,12 +95,6 @@ class ProvenanceView(BaseModel):
     model: str
     created_at: str
 
-
-_TOPIC_REASON = re.compile(r"^topic: (.+?) \(\d+(?:\.\d+)?\)$")
-_PREFIX_REASONS: list[tuple[str, Literal["upvotes", "author", "keyword", "shelf"]]] = [
-    ("HF upvotes: ", "upvotes"), ("followed author: ", "author"),
-    ("keyword: ", "keyword"), ("near your shelf: ", "shelf"),
-]
 
 _DIRECTIONS: dict[str, int] = {"up": 1, "down": -1, "clear": 0}
 
@@ -336,15 +330,9 @@ def plain_reasons(reasons: list[str]) -> list[ReasonView]:
     """
     out: list[ReasonView] = []
     for text in reasons:
-        if m := _TOPIC_REASON.match(text):
-            out.append(ReasonView(kind="topic", label=m.group(1)))
-        elif text.startswith("liked similar: "):
-            out.append(ReasonView(kind="liked", label="", paper_id=text.removeprefix("liked similar: ")))
-        else:
-            for prefix, kind in _PREFIX_REASONS:
-                if text.startswith(prefix):
-                    out.append(ReasonView(kind=kind, label=text.removeprefix(prefix)))
-                    break
+        if parsed := feed_format.parse_reason(text):
+            kind, label, paper_id = parsed
+            out.append(ReasonView(kind=kind, label=label, paper_id=paper_id))
     return out
 
 

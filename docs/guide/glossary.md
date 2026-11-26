@@ -375,3 +375,9 @@
 **Diagram (per paper)** — a small picture of how a paper's method works, stored as data (boxes called nodes, arrows called edges, a caption) rather than as a drawing, so code can check it and the app can draw it the same way everywhere. Made by one extra model call; dropped if a check fails, including when it is too generic (its boxes use only everyday words like agent, input, output that would fit any paper). See "The diagram" in `summaries.md`.
 
 **SVG** — Scalable Vector Graphics: a picture written as text (shapes, lines and words) that the browser draws at any size without blurring. The app writes a paper's diagram as SVG on the server and puts it straight into the page, so it needs no image file, no script, and takes its colours from the page's light or dark theme. See "Hook, key numbers and the diagram" in `app.md`.
+
+**JSON Feed** — a standard file format (version 1.1) for a list of posts, written as JSON, so any feed reader can read it. rpipe publishes your feed as a `feed.json` in this format and adds an `_rpipe` section (extra fields the standard allows) with the paper, summary and reasons. See `sharing.md`.
+
+**Atom** — an older standard XML format for a list of posts. rpipe also writes `feed.xml` in Atom, so ordinary feed readers (which show title, link and a one-line summary) can follow a feed without rpipe. See `sharing.md`.
+
+**GitHub Pages** — GitHub's free hosting for static files: files in a repository are served as a web page at `https://<handle>.github.io/<repository>/`. rpipe publishes your feed through a repository named `rpipe-feed`, so the feed address is `https://<handle>.github.io/rpipe-feed/feed.json`. See `sharing.md`.

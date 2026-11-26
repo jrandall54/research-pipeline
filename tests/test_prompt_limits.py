@@ -13,7 +13,7 @@ def test_summary_prompt_states_length_limits():
 
 
 def test_prompt_version_is_p9():
-    assert PROMPT_VERSION == "2026-11-p9"
+    assert PROMPT_VERSION == "2026-11-p9b"
 
 
 def test_summary_prompt_asks_for_hook_and_key_numbers():

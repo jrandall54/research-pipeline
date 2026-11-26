@@ -317,19 +317,21 @@ Worked example (the ACAP paper). Section 5.1 says "ACAP cut latency by 28%".
 
 ### The diagram
 
-**What it does.** One more model call per paper (when the `diagrams` setting says so, see "The diagrams setting" in [llm.md](llm.md)) asks for a small diagram of how the method works. The model does not draw anything: it answers with data, a list of boxes (nodes) and arrows (edges), and the app turns that into a picture. The diagram shows on the card in Read mode and on the paper screen. A paper with no clear shape (a survey, a theory paper) gets no diagram, and that is a normal answer, not a failure.
+**What it does.** One more model call per paper (when the `diagrams` setting says so, see "The diagrams setting" in [llm.md](llm.md)) asks for a small diagram of how the method works. The model does not draw anything: it answers with data, a list of boxes (nodes) and arrows (edges), and the app turns that into a picture. The diagram shows on the card in Read mode and on the paper screen. No diagram is the normal answer: the prompt says `null` unless the paper's own method section (or a figure of its method) names distinct parts or stages, and code throws away generic diagrams (Phase 9.1). Expect most papers to have none; that is not a failure.
 
 **How it works.**
 
-1. After the summary and critique, `make_diagram` (`diagram.py`) sends the paper again with a diagram task (`build_diagram_prompt`). The progress note says `drawing a diagram for <id>`. The paper is cut to the same context budget as the other calls (`fit_to_budget`); an abstract-only paper sends just its abstract.
+1. After the summary and critique, `make_diagram` (`diagram.py`) sends the paper again with a diagram task (`build_diagram_prompt`). The progress note says `drawing a diagram for <id>`. The paper is cut to the same context budget as the other calls (`fit_to_budget`); an abstract-only paper never gets a diagram (a diagram must cite a method section, and an abstract has none), so no call is made for it.
 2. The model answers `{"diagram": ...}` or `{"diagram": null}`. A diagram has a `shape` (`parts`: one thing coordinating several parts; `steps`: A, then B, then C; `loop`: steps that repeat), 2 to 8 `nodes` (each with an `id`, a `label` of at most 4 words, optional `detail` and the `sections` it comes from), `edges` (arrows between node ids, with an optional label) and a one-sentence `caption`.
 3. Code checks it (`check_diagram`):
    - 2 to 8 nodes, and unique ids;
    - every arrow starts and ends at a real node;
    - every label has at most 4 words;
    - every node cites a section the paper has (the same lookup the hook check uses, `citations.section_texts`; "Abstract" always counts);
-   - every content word of every label appears somewhere in the paper's text. Case is ignored; words under 3 letters and small words (the, and, with, ...) are skipped; a trailing `s` (or `es` after ss, x, ch, sh), `ing` or `ed` is stripped, then a trailing silent `e` (on words longer than 4 letters), on both sides, so "agents" matches "agent", "planning" matches "plan", "processes" matches "process", "caches" matches "cache" and "encoding" matches "encode". A label with no checkable words at all ("LM", "X", words in non-ASCII letters) passes this word check, because there is nothing to compare.
-4. If a check fails, the model gets one more try (progress note `retrying the diagram for <id>`) with the problems listed and the real section titles. If it fails again, the diagram is dropped and one line goes into the summary's `checks`, for example `diagram: label 'Coordinator' uses words the paper never uses: coordinator`. If the model call itself fails, the summary is still saved, `checks` says `diagram: the model call failed`, and any older stored diagram is deleted (the summary was replaced, so the old picture would no longer match it).
+   - every node cites at least one section that is not the abstract, introduction or conclusion (a title counts as one of those when, after any leading section number, it starts with "abstract", "introduction" or "conclusion", in any case). "5.1 Main Results" and "3 Method" pass; "1 Introduction" alone fails with `node 'X' cites only the abstract, introduction or conclusion`;
+   - every content word of every label appears somewhere in the paper's text. Case is ignored; words under 3 letters and small words (the, and, with, ...) are skipped; a trailing `s` (or `es` after ss, x, ch, sh), `ing` or `ed` is stripped, then a trailing silent `e` (on words longer than 4 letters), on both sides, so "agents" matches "agent", "planning" matches "plan", "processes" matches "process", "caches" matches "cache" and "encoding" matches "encode". A label with no checkable words at all ("LM", "X", words in non-ASCII letters) passes this word check, because there is nothing to compare;
+   - at least 2 boxes name something specific. A word is generic if it is in the list `GENERIC_WORDS` (agent, action, observation, thought, input, output, feedback, evaluation, evaluator, user, environment, model, result, query, response, llm, data, step, task, final, process, system, module, tool, memory, plan, answer, prompt, utterance, natural, language), compared by the same stem as above (so "agents" and "planning" are generic too). A box is specific when its label has at least one word outside that list. Fewer than 2 specific boxes gives `diagram: too generic (fewer than 2 boxes name something specific to this paper)`.
+4. If a check fails, the model gets one more try, except when the only problem is "too generic": that diagram is dropped at once, because a retry would only relabel the same generic loop. For any other problem the model gets one more try (progress note `retrying the diagram for <id>`) with the problems listed and the real section titles. If it fails again, the diagram is dropped and one line goes into the summary's `checks`, for example `diagram: label 'Coordinator' uses words the paper never uses: coordinator`. If the model call itself fails, the summary is still saved, `checks` says `diagram: the model call failed`, and any older stored diagram is deleted (the summary was replaced, so the old picture would no longer match it).
 5. A kept diagram is saved as a `summaries` row with `kind = 'diagram'` (no schema change, see [data-model.md](data-model.md)), so it can be added or dropped without touching the summary. With `diagrams` off, no call is made and any stored diagram is left alone. `rpipe summarize` and the nightly run count the drawn ones as `diagrams=N` (shown only when diagrams are on).
 
 Worked example (the ACAP robot-agents paper). The paper calls its coordinator a "hyper-agent" and says it hands tasks to an arm agent, a torso agent and a chassis agent. The model answers:
@@ -342,15 +344,26 @@ edges: h -> a, h -> t, h -> c  (label "tasks")
 caption: One hyper-agent hands tasks to an agent for each part of the robot.
 ```
 
-All checks pass: 4 nodes, edges point at real ids, labels are short, every label word is in the paper. Had the model written "Coordinator" because that is the usual word, the check would find that the paper never says it and drop that attempt; the retry tells the model to use the paper's own names.
+All checks pass: 4 nodes, edges point at real ids, labels are short, every label word is in the paper, the nodes cite a method section, and all 4 boxes name something specific (hyper, arm, torso, chassis). Had the model written "Coordinator" because that is the usual word, the check would find that the paper never says it and drop that attempt; the retry tells the model to use the paper's own names.
+
+The second worked example is the diagram that Phase 9 drew for 8 of 10 gold papers, the generic loop:
+
+```
+shape: loop
+nodes: "Natural Language Utterance", "Thought", "Action", "Observation", "Final Output"
+edges: utterance -> thought -> action -> observation -> thought
+```
+
+Every word is in the paper and the sections exist, so the Phase 9 checks passed it. Now every label is made of generic words (natural, language, utterance, thought, action, observation, final, output), so 0 boxes are specific, fewer than 2, and the diagram is dropped with the "too generic" line. It looks like a diagram, but it would fit almost any agent paper and teaches nothing about this one.
 
 **Why it is built this way.**
 - Data, not Mermaid or SVG from the model. Data can be checked by code (the checks above) and drawn the same way on every screen, in the light and dark themes, with no JavaScript and no third-party request. Free-form drawing code cannot be checked for invented components.
 - Labels must use words from the paper so the model cannot invent a component. The cost is a false drop when the paper uses a word only in a different form; the eval report (see [evaluation.md](evaluation.md)) shows how many are dropped, so the owner can see whether the rule is too strict.
+- No diagram is the default, and generic ones are dropped by code. Phase 9's eval drew a diagram for all 10 gold papers, 8 of them the same loop. A diagram is worth showing only where the method has a shape of its own. The generic-word list is a plain list a person can read and change, and it is cheaper and more predictable than asking the model to rate its own diagram (it approves its own output). A diagram must cite a method section, so an abstract-only paper (which has none) never gets one. Rejected: turning diagrams off by default (they help on papers with a real architecture, like the robot-agents example).
 - One retry, not more. A second chance fixes most slips (a made-up name, a wrong section title) for the price of one call; a third would cost a slow call per paper for a nicety. This matches the citation check.
 - A dropped diagram never fails the paper: the summary is the product, the diagram is an extra.
 
-**How to check it.** `uv run pytest -q tests/test_diagram.py tests/test_citations.py tests/test_summarize.py`. To see the real thing, `rpipe eval run` writes one line per paper (drawn, none, or dropped and why).
+**How to check it.** `uv run pytest -q tests/test_diagram.py tests/test_citations.py tests/test_summarize.py`. To see the real thing, `rpipe eval run` writes one line per paper (drawn, none, or dropped and why). The rules are tested in `tests/test_diagram.py` (generic loop dropped, robot-agents diagram kept, front-matter-only citation fails).
 
 **Measured (2026-11-25, owner's machine, `q3.8-27b-34k`, 56,320-token context, model fully in GPU memory, 10 gold papers, judged by Claude Sonnet).** Before and after the Phase 9 prompts (`2026-11-p7` → `2026-11-p9`), both read whole:
 
@@ -374,7 +387,7 @@ Every summary saved by `rpipe summarize` / `rpipe run` also records where it cam
 
 **`gpu_share`** is the share of the model that sat in GPU memory just after the summary was written: Ollama's `/api/ps` lists each loaded model with its total `size` and the part in GPU memory (`size_vram`), and `gpu_share = size_vram / size`, rounded to 2 places. `1.0` means fully on the GPU; `0.93` means 7% of the model ran from ordinary RAM (slower). It is `null` when it is unknown: a backend that is not Ollama (a cloud model has no GPU of yours), the model was not listed, or Ollama could not be asked. Asking never fails a summary: any error there just stores `null`. Provenance saved before this field has no `gpu_share` key.
 
-**When to bump `PROMPT_VERSION`** (in `prompts.py`, currently `2026-11-p9`): whenever `SHARED_SYSTEM`, `SUMMARY_TASK`, `CRITIQUE_TASK` or the notes, condense and combine prompts (`NOTES_SYSTEM`, `CONDENSE_SYSTEM`, `COMBINE_SYSTEM` and their task texts) change in any way that could change the output. Use the form `YYYY-MM-<tag>`. Without the bump, summaries from different wordings look identical and you cannot tell which ones to regenerate or compare.
+**When to bump `PROMPT_VERSION`** (in `prompts.py`, currently `2026-11-p9`): whenever `SHARED_SYSTEM`, `SUMMARY_TASK`, `CRITIQUE_TASK`, `DIAGRAM_TASK` or the notes, condense and combine prompts (`NOTES_SYSTEM`, `CONDENSE_SYSTEM`, `COMBINE_SYSTEM` and their task texts) change in any way that could change the output. Use the form `YYYY-MM-<tag>`. Without the bump, summaries from different wordings look identical and you cannot tell which ones to regenerate or compare.
 
 ## Why it's built this way
 

@@ -372,6 +372,6 @@
 
 **Key number** — one of up to three numbers a paper reports that matter most, shown as a value written exactly as the paper writes it (for example "28%"), a short label for what it measures and the sections it comes from. See `summaries.md`.
 
-**Diagram (per paper)** — a small picture of how a paper's method works, stored as data (boxes called nodes, arrows called edges, a caption) rather than as a drawing, so code can check it and the app can draw it the same way everywhere. Made by one extra model call; dropped if a check fails. See "The diagram" in `summaries.md`.
+**Diagram (per paper)** — a small picture of how a paper's method works, stored as data (boxes called nodes, arrows called edges, a caption) rather than as a drawing, so code can check it and the app can draw it the same way everywhere. Made by one extra model call; dropped if a check fails, including when it is too generic (its boxes use only everyday words like agent, input, output that would fit any paper). See "The diagram" in `summaries.md`.
 
 **SVG** — Scalable Vector Graphics: a picture written as text (shapes, lines and words) that the browser draws at any size without blurring. The app writes a paper's diagram as SVG on the server and puts it straight into the page, so it needs no image file, no script, and takes its colours from the page's light or dark theme. See "Hook, key numbers and the diagram" in `app.md`.

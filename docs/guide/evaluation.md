@@ -21,10 +21,12 @@ Worked example (illustrative output; your numbers will differ):
 ```
 $ rpipe gold add 2307.15043
 Universal and Transferable Adversarial Attacks on Aligned Language Models (Andy Zou, 2023)
-Add this paper? [Y/n]: y
-Fact 1: Finds adversarial suffixes automatically by greedy and gradient-based search
-Fact 2: The suffixes found on open models transfer to closed models such as ChatGPT
-Fact 3 (blank line to finish):
+› Add this paper? [Y/n]: y
+  Key facts a correct summary must get right (specific and checkable).
+  Type one per line; press Enter on an empty line to finish. Aim for 3 or more.
+› Fact 1: Finds adversarial suffixes automatically by greedy and gradient-based search
+› Fact 2: The suffixes found on open models transfer to closed models such as ChatGPT
+› Fact 3:
 ! Saved with 2 fact(s); 3 or more make a better test (rpipe gold add-fact).
 ✓ Added 2307.15043: Universal and Transferable Adversarial Attacks ...
 ```
@@ -98,18 +100,19 @@ Worked example (illustrative output; the drafts will differ):
 
 ```
 $ rpipe gold draft 2307.15043
-The paper text is sent to Claude to draft the facts. You review every one before it is saved.
+  The paper text is sent to Claude to draft the facts. You review every one before it is saved.
 
 Universal and Transferable Adversarial Attacks on Aligned Language Models
   1. Adversarial suffixes are found automatically by greedy, gradient-guided search.
-Keep, edit or drop? [k/e/d]: k
+› Keep, edit or drop? [k/e/d]: k
   2. The paper is about attacks.
-Keep, edit or drop? [k/e/d]: d
+› Keep, edit or drop? [k/e/d]: d
   3. Suffixes found on open models also work on closed models such as ChatGPT.
-Keep, edit or drop? [k/e/d]: e
-New text (empty keeps the draft): Suffixes transfer to ChatGPT, Bard and Claude.
-Key facts a correct summary must get right (specific and checkable).
-Fact 1:
+› Keep, edit or drop? [k/e/d]: e
+› New text (empty keeps the draft): Suffixes transfer to ChatGPT, Bard and Claude.
+  Key facts a correct summary must get right (specific and checkable).
+  Type one per line; press Enter on an empty line to finish. Aim for 3 or more.
+› Fact 1:
 ✓ Added 2307.15043 with 2 fact(s).
 ```
 

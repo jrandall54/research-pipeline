@@ -73,9 +73,9 @@ def test_review_votes_and_skips_in_order(vault, tty):
     assert skips(vault) == ["2401.00003"]
     out = res.output
     assert out.index("Old Paper") < out.index("Old Second") < out.index("New Paper")
-    assert "Digest 2026-11-01 · paper 1 of 2 · 0 voted, 0 skipped" in out
-    assert "Digest 2026-11-01 · paper 2 of 2 · 1 voted, 0 skipped" in out
-    assert "Digest 2026-11-02 · paper 1 of 1 · 2 voted, 0 skipped" in out
+    assert "Digest 2026-11-01 · paper 1 of 2 " in out and "0 voted, 0 skipped" in out
+    assert "Digest 2026-11-01 · paper 2 of 2 " in out and "1 voted, 0 skipped" in out
+    assert "Digest 2026-11-02 · paper 1 of 1 " in out and "2 voted, 0 skipped" in out
     assert "why: close to seed; followed author" in out
     assert "id: 2401.00001" in out and "https://arxiv.org/abs/2401.00001" in out
     assert "Voted 2, skipped 1 this session. 0 left in the queue." in out
@@ -141,8 +141,8 @@ def test_review_later_votes_remove_skip(vault, tty):
     conn.close()
     res = run(vault, "review", "--later", input="u\ns\n")
     assert res.exit_code == 0, res.output
-    assert "Review later · 1 of 2 · 0 voted, 0 skipped" in res.output
-    assert "Review later · 2 of 2 · 1 voted, 0 skipped" in res.output
+    assert "Review later · 1 of 2 " in res.output and "0 voted, 0 skipped" in res.output
+    assert "Review later · 2 of 2 " in res.output and "1 voted, 0 skipped" in res.output
     assert votes(vault) == [("2401.00001", 1)]
     assert skips(vault) == ["2401.00002"]
     assert "Voted 1, skipped 1 this session. 1 left in the queue." in res.output

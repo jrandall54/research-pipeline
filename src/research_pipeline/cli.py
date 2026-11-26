@@ -283,7 +283,7 @@ def init(
     try:
         _wizard(path, fresh_profile="profile.yaml" not in existed, fresh_config="config.yaml" not in existed)
     except (typer.Abort, KeyboardInterrupt, EOFError):
-        typer.echo("\nSaved what you entered so far. Re-run rpipe init to continue.")
+        term.warn("\nSaved what you entered so far. Re-run rpipe init to continue.")
         raise typer.Exit(code=130) from None
 
 
@@ -921,7 +921,7 @@ def _refresh_hint(conn: sqlite3.Connection, paper_ids: list[str], today: date) -
     if dates:
         term.warn("Older digests do not show new summaries until you refresh them:")
         for d in dates:
-            term.bullet(term.cmd(f"rpipe digest --date {d}"))
+            typer.echo(f"  {term.cmd(f'rpipe digest --date {d}')}")
 
 
 @app.command()
@@ -1584,7 +1584,7 @@ def gold_add(
             finally:
                 _close(arxiv)
             if chosen is None:
-                typer.echo("Cancelled. Nothing was changed.")
+                term.hint("Cancelled. Nothing was changed.")
                 return
             if has_gold(existing, chosen.id):
                 term.warn(f"{chosen.id} is already in your gold set.")
@@ -1629,7 +1629,7 @@ def gold_suggest(
                 "or add papers by hand with `rpipe gold add`."
             )
             return
-        term.header(f"{len(picks)} suggested paper(s), shortest to longest:")
+        term.header(f"{len(picks)} suggested paper(s), shortest to longest")
         for s in picks:
             typer.echo(f"  {s.paper_id}  ~{s.tokens} tokens  {profile_edit.normalise_text(s.title)}")
         term.hint("Pick the ones you know well, then: rpipe gold draft ID ...")
@@ -1851,7 +1851,7 @@ def gold_remove_fact(
     with _clean_errors():
         paper_id, number, fact = _pick_fact(ctx.vault, paper_id, number, "remove")
         if not yes and not _confirm(f'Remove fact {number} of {paper_id} ("{fact}")?', default=False):
-            typer.echo("Cancelled. Nothing was changed.")
+            term.hint("Cancelled. Nothing was changed.")
             return
         try:
             removed = remove_fact(ctx.vault, paper_id, number)
@@ -1945,7 +1945,8 @@ def eval_grade(vault: VaultOption = None) -> None:
     if not todo:
         typer.echo("Nothing left to grade. See the result with: rpipe eval report")
         return
-    term.header(f"Grading eval {day.isoformat()}: {len(todo)} paper(s) to go. Ctrl-C stops; grades given are kept.")
+    term.header(f"Grading eval {day.isoformat()}: {len(todo)} paper(s) to go")
+    term.hint("Ctrl-C stops; grades given are kept.")
     try:
         for e in todo:
             assert e.summary is not None
@@ -2973,7 +2974,7 @@ def _wizard(vault: Path, fresh_profile: bool, fresh_config: bool) -> None:
         raise _fail(str(exc)) from exc
     profile_show(vault)
     term.header("All set")
-    typer.echo("Next:")
+    term.hint("Next:")
     _next_commands()
 
 
@@ -3005,7 +3006,7 @@ def _resolve_paper(conn: sqlite3.Connection, text: str) -> str:
     except _SeedProblem as exc:
         raise _fail(str(exc)) from exc
     if index is None:
-        typer.echo("Cancelled. Nothing was changed.")
+        term.hint("Cancelled. Nothing was changed.")
         raise typer.Exit(code=0)
     return rows[index]["id"]
 
@@ -3088,8 +3089,10 @@ def feedback(vault: VaultOption = None) -> None:
 _REVIEW_KEYS = {"u": "up", "d": "down", "s": "skip", "q": "quit"}
 
 
-def _show_paper(paper: library_api.PaperView, header: str) -> None:
+def _show_paper(paper: library_api.PaperView, header: str, counts: str = "") -> None:
     term.header(header)
+    if counts:
+        term.hint(counts)
     typer.echo("")
     typer.echo(paper.title)
     typer.echo(f"id: {paper.id}")
@@ -3130,7 +3133,7 @@ def review(
                 else:
                     progress = library_api.queue_progress(ctx.conn, paper.digest_date or "")
                     header = f"Digest {paper.digest_date} · paper {progress.handled + 1} of {progress.total}"
-                _show_paper(paper, f"{header} · {voted} voted, {skipped} skipped")
+                _show_paper(paper, header, f"{voted} voted, {skipped} skipped")
                 while True:
                     answer = _prompt("[u]p  [d]own  [s]kip  [q]uit").strip()[:1].lower()
                     if answer in _REVIEW_KEYS:
@@ -3557,9 +3560,9 @@ def sources_list(vault: VaultOption = None) -> None:
     width = max((len(k) for k in [*found, *missing]), default=0)
     for key, p in found.items():
         state = "on " if key in ctx.config.sources else "off"
-        typer.echo(f"{key.ljust(width)}  {state}  {p.origin}  {p.error or 'ok'}")
+        typer.echo(f"  {key.ljust(width)}  {state}  {p.origin}  {p.error or 'ok'}")
     for name in missing:
-        typer.echo(f"{name.ljust(width)}  on   not installed")
+        typer.echo(f"  {name.ljust(width)}  on   not installed")
 
 
 @sources_app.command("set-max-results")
@@ -3958,7 +3961,7 @@ def share_follow(
         except ValueError as exc:
             raise _fail(str(exc)) from exc
     if result.error:
-        term.warn(f"Following {target.strip()}, but the first fetch failed: {result.error}. "
+        term.warn(f"Following {target.strip()}, but the first fetch failed: {clean_text(result.error)}. "
                   "`rpipe share fetch` tries again.", err=True)
         return
     term.ok(f"Following {target.strip()}: {result.new_posts} posts downloaded.")

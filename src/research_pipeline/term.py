@@ -43,11 +43,17 @@ def dim(text: str) -> str:
 
 
 def header(title: str) -> None:
-    """A blank line, then `── Title ───…` as wide as the terminal (at most 80 columns)."""
+    """A blank line, then `── Title ───…` as wide as the terminal (at most 80 columns).
+
+    A title too wide for the terminal is printed in full with no trailing rule: never cut text.
+    """
     width = min(MAX_WIDTH, shutil.get_terminal_size((MAX_WIDTH, 24)).columns)
     line = f"── {title} "
-    line += "─" * max(0, width - len(line))
-    typer.echo("\n" + _style(line[:width], bold=True, fg="cyan"))
+    if len(line) > width:
+        line = f"── {title}"
+    else:
+        line += "─" * (width - len(line))
+    typer.echo("\n" + _style(line, bold=True, fg="cyan"))
 
 
 def step(n: int, total: int, name: str) -> None:

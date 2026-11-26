@@ -178,7 +178,9 @@ def _squash(text: str) -> str:
 
 def test_model_show_first_line_names_backend(vault):
     set_config(vault, llm_backend="none")
-    assert "backend none" in _squash(run(vault, "model", "show").output)
+    lines = _squash(run(vault, "model", "show").output).splitlines()
+    assert lines[0] == "" and lines[1].startswith("── Summary model")
+    assert lines[2] == "backend none"
 
 
 def test_suggest_announces_non_local_backend(vault, monkeypatch):

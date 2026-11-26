@@ -1,4 +1,5 @@
 import json
+import re
 
 import httpx
 import pytest
@@ -241,7 +242,8 @@ def test_model_set_url_and_context(vault):
     loaded = load_config(cfg)
     assert (loaded.llm_url, loaded.llm_num_ctx) == ("http://gpu-box:11434", 16384)
     out = model(vault, "show").output
-    assert "gpu-box" in out and "16384" in out and "model " in out
+    assert "gpu-box" in out and "16384" in out
+    assert re.search(r"^\s+model\s+\S", out, re.M)
 
 
 def test_model_set_url_and_context_reject_bad_values(vault):

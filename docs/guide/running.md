@@ -104,7 +104,7 @@ Illustrative output; your numbers will differ. The candidates are tried in order
 *How it works.* The backlog is a database query (`papers_missing_summary`): status `in_digest`, digest date not today, no `kind='summary'` row, fewer than 3 failures, ordered by digest date then row, newest first, cut at N. The cap applies only to those backlog papers; the normal candidates are not counted against it. Each paper then goes through the same loop as always (`run_summarize`): stored full text or fetch it, summarise, critique, save. Status handling: only `triaged`/`fetched` papers become `summarized`; an `in_digest` or `skipped` paper keeps its status and just gains a summary. A digest file is only rewritten by `rpipe digest`, so after the run `rpipe summarize` lists the older digests that gained summaries, ready to copy:
 
 ```
-Older digests do not show new summaries until you refresh them:
+! Older digests do not show new summaries until you refresh them:
   rpipe digest --date 2026-11-21
   rpipe digest --date 2026-11-20
 ```
@@ -130,21 +130,25 @@ $ uv run rpipe model show
 ── Summary model ───────────────────────────────────────────────────────────────
   backend                   ollama
   model                     auto
+  summarize mode            auto (change with `rpipe model set-mode`)
+  diagrams                  auto (change with `rpipe model set-diagrams`)
+  effort                    low (only applies to the claude-code backend)
   server                    http://localhost:11434
   context window (num_ctx)  auto
-last choice: not probed yet; runs on first use, or `rpipe model fit`
+  auto: split when the model is not fully in GPU memory or the context is below 26624 tokens (Ollama); whole otherwise
+  last choice: not probed yet for these settings and installed models; it is probed on next use (or now with `rpipe model fit`)
 $ uv run rpipe model fit
-Probing Ollama: this loads and unloads models and can take a few minutes.
+  Probing Ollama: this loads and unloads models and can take a few minutes.
   trying dense-27b at 16384 tokens
   trying coder-16b at 16384 tokens
   searching the largest context for coder-16b
-Using model coder-16b with a context of 19456 tokens
+✓ Using model coder-16b with a context of 19456 tokens
 $ uv run rpipe model set qwen3:8b
-model is now qwen3:8b. Check it works with `rpipe model check`.
+✓ model is now qwen3:8b. Check it works with `rpipe model check`.
 $ uv run rpipe model set-context 16384
-context window is now 16384 tokens.
+✓ context window is now 16384 tokens.
 $ uv run rpipe model check
-Ollama is running at http://localhost:11434 and model qwen3:8b is installed.
+✓ Ollama is running at http://localhost:11434 and model qwen3:8b is installed.
 ```
 
 Illustrative output; your numbers will differ.

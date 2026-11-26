@@ -59,6 +59,14 @@ def test_header_width(monkeypatch, capsys):
     assert len(capsys.readouterr().out.strip("\n")) == 80
 
 
+def test_header_never_cuts_a_long_title(monkeypatch, capsys):
+    monkeypatch.setattr("shutil.get_terminal_size", lambda fallback=(80, 24): type("S", (), {"columns": 40})())
+    title = "Grading eval 2026-11-26: 12 paper(s) to go, a very long title indeed"
+    term.header(title)
+    out = capsys.readouterr().out
+    assert title in out and "─" * 3 not in out.split(title)[1]
+
+
 def test_fields_align(capsys):
     term.fields([("a", "one"), ("longer key", "two")])
     lines = capsys.readouterr().out.splitlines()

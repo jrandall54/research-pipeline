@@ -196,9 +196,9 @@ Example session (Alex publishes, Sam follows):
 
 ```
 $ rpipe share setup
-Display name shown to people who follow you [Alex Morgan]: Alex M.
-This makes your feed public. Anyone can read it. Copies people have already downloaded can't be pulled back if you stop.
-Publish your feed? [y/N]: y
+› Display name shown to people who follow you [Alex Morgan]: Alex M.
+! This makes your feed public. Anyone can read it. Copies people have already downloaded can't be pulled back if you stop.
+› Publish your feed? [y/N]: y
   publish ... pages ... (progress)
 ✓ Your feed is live: https://alex.github.io/rpipe-feed/feed.json
   It updates every night. Others can follow it with `rpipe share follow alex`.

@@ -6,7 +6,7 @@ Date: 2026-11-26. Owner request after Phase 10.1: "Can you clean up the formatti
 
 ## Intent
 
-The `rpipe` commands print plain, unstyled text. Headings, explanations, prompts and results all look the same, which makes long output (`rpipe init`, `rpipe status`, `rpipe share browse`) hard to scan. The goal is to give every command one consistent look that makes it easy to tell which line is which, without changing what is said.
+The `rpipe` commands print plain, unstyled text. Headings, explanations, prompts and results all look the same, which makes long output (`rpipe init`, `rpipe app status`, `rpipe schedule status`, `rpipe share status`, `rpipe share browse`) hard to scan. The goal is to give every command one consistent look that makes it easy to tell which line is which, without changing what is said.
 
 ## Goals and non-goals
 

@@ -48,7 +48,7 @@ Implement styling as `typer.style(...)` only when `use_colour()` is true, so the
 
 ## Review focus
 
-1. Piped or non-tty output (`rpipe status | cat`, the systemd journal, CliRunner) must contain no escape codes.
+1. Piped or non-tty output (`rpipe profile show | cat`, the systemd journal, CliRunner) must contain no escape codes.
 2. `NO_COLOR=1` on a real terminal gives plain text, with the marks still printed.
 3. A narrow terminal (40 columns) must not wrap the header rule.
 4. Error paths (`_fail`) still print to stderr with exit code 1.

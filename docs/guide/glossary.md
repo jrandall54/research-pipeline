@@ -364,7 +364,7 @@
 
 **Section tag** — the small `§5.1` next to a line in a summary, saying which section of the paper that claim came from. A range (`§5.1–5.2`) means the claim draws on several consecutive sections; no tag means the stored sections had no number (for example "Abstract"). See "The feed" in `app.md`.
 
-**Skim / Read** — the two levels of detail on the feed. Skim shows title, the hook (or the one-line summary when there is no hook), key numbers and why it was picked; Read adds the problem, what they did and what they found, and the diagram. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.
+**Skim / Read** — the two levels of detail on the feed. Skim shows title, the hook (or the one-line summary when there is no hook), key numbers and why it was picked; Read adds the problem, what they did and what they found. Diagrams are shown only when you open a paper. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.
 
 **Day list** — the compact list of one digest day shown beside the reader on a wide screen (1100 px or more) so you can jump between that day's papers. Hidden on phones. See "Reading a paper" in `app.md`.
 

@@ -639,6 +639,9 @@ def test_run_eval_records_diagram(vault):
     text = md.read_text()
     assert "Diagram: drawn (steps, 2 boxes)" in text
     assert "Diagram: none (no clear shape)" in text
+    assert "## Hooks, key numbers, diagrams" in text
+    assert "Diagrams: 1 drawn, 0 dropped, 1 none" in text
+    assert data.entries[0].diagram_seconds is not None and " in " in text
 
 
 def test_run_eval_without_diagrams_makes_no_diagram_call(vault):
@@ -646,3 +649,38 @@ def test_run_eval_without_diagrams_makes_no_diagram_call(vault):
     llm = AlwaysSummary([])
     md = run_eval(vault, llm, fetch, 32768, DAY)
     assert len(llm.calls) == 2 and "Diagram:" not in md.read_text()
+
+
+def test_report_shows_hook_key_numbers_and_left_out(vault):
+    from research_pipeline.summary_models import Claim, KeyNumber
+
+    class Hooked(AlwaysSummary):
+        def generate(self, system, user, schema):
+            out = super().generate(system, user, schema)
+            if schema.__name__ == "Summary":
+                out = out.model_copy(update={
+                    "hook": Claim(text="A classifier works.", sections=["2 Method"]),
+                    "key_numbers": [KeyNumber(value="91%", label="accuracy", sections=["3 Results"])]})
+            return out
+
+    add_papers(vault, 1)
+    text = run(vault, llm=Hooked([])).read_text()
+    assert "**Hook:** A classifier works." in text and "We train a classifier." in text
+    assert "**Key number:** 91% accuracy" in text
+    assert "Hooks kept: 1 of 1" in text and "Key numbers: 1 kept, 0 dropped" in text
+
+
+def test_full_text_paper_gets_real_abstract(vault, monkeypatch):
+    from research_pipeline import evaluate
+
+    add_papers(vault, 1)
+    seen = []
+    real = evaluate.summarize_paper
+
+    def spy(llm, title, abstract, *a, **k):
+        seen.append(abstract)
+        return real(llm, title, abstract, *a, **k)
+
+    monkeypatch.setattr(evaluate, "summarize_paper", spy)
+    run(vault, abstract_for=lambda pid: "UNIQUE-ABSTRACT-TEXT")
+    assert seen == ["UNIQUE-ABSTRACT-TEXT"]

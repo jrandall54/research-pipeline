@@ -1,4 +1,6 @@
 import subprocess
+import sys
+import types
 
 import pytest
 from typer.testing import CliRunner
@@ -37,9 +39,12 @@ def test_app_run_without_extra_explains_install(fake, monkeypatch):
 
 def test_app_run_starts_uvicorn(fake, monkeypatch):
     _, _, vault = fake
-    import uvicorn
+    # A stand-in uvicorn: the offline suite (and CI) runs without the `app` extra.
     got = {}
-    monkeypatch.setattr(uvicorn, "run", lambda application, **kw: got.update(app=application, **kw))
+    fake_uvicorn = types.ModuleType("uvicorn")
+    fake_uvicorn.run = lambda application, **kw: got.update(app=application, **kw)
+    monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
+    monkeypatch.setattr(cli, "_app_available", lambda: True)
     res = runner.invoke(cli.app, ["app", "run", "--host", "127.0.0.1", "--port", "8123", "--vault", str(vault)])
     assert res.exit_code == 0, res.output
     assert "Your feed is at http://127.0.0.1:8123/ (only your own devices can reach it)" in res.output

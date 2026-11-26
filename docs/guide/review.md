@@ -26,7 +26,8 @@ Worked example (illustrative output; the second paper has a stored summary, the 
 ```
 $ rpipe review
 
-Digest 2026-11-21 · paper 1 of 3 · 0 voted, 0 skipped
+── Digest 2026-11-21 · paper 1 of 3 ────────────────────────────────────────────
+  0 voted, 0 skipped
 
 Fuzzing eBPF Verifiers with Grammar-Based Mutation
 id: 2411.01234
@@ -36,9 +37,10 @@ We present a grammar-based fuzzer for the Linux eBPF verifier ...
 
 https://arxiv.org/abs/2411.01234
 
-[u]p  [d]own  [s]kip  [q]uit: u
+› [u]p  [d]own  [s]kip  [q]uit: u
 
-Digest 2026-11-21 · paper 2 of 3 · 1 voted, 0 skipped
+── Digest 2026-11-21 · paper 2 of 3 ────────────────────────────────────────────
+  1 voted, 0 skipped
 
 Universal Adversarial Attacks on LLMs
 id: 2307.15043
@@ -49,10 +51,10 @@ why: followed author
 
 https://arxiv.org/abs/2307.15043
 
-[u]p  [d]own  [s]kip  [q]uit: s
+› [u]p  [d]own  [s]kip  [q]uit: s
 ...
-[u]p  [d]own  [s]kip  [q]uit: q
-Voted 1, skipped 1 this session. 1 left in the queue.
+› [u]p  [d]own  [s]kip  [q]uit: q
+✓ Voted 1, skipped 1 this session. 1 left in the queue.
 ```
 
 The rules:

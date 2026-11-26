@@ -82,11 +82,16 @@ Every command takes `--vault PATH` (same resolution rules as `init`).
 
 ```
 $ uv run rpipe summarize
-Summarized:
-  fetched=3, summarized=3, abstract_only=0, body_cut=0, summary_failed=0
+
+── Summarized ──────────────────────────────────────────────────────────────────
+  fetched         3
+  summarized      3
+  abstract_only   0
+  body_cut        0
+  summary_failed  0
 ```
 
-Illustrative output; your numbers will differ. The candidates are tried in order of parameter count, so an older but larger model (here `coder-16b`, 15.7B) can win over newer 14B ones; pin the one you prefer with `rpipe model set NAME`. The progress lines go to stderr, the final line to stdout. The context is the measured maximum (20480 here) less a 1024-token safety margin.
+Illustrative output; your numbers will differ. The candidates are tried in order of parameter count, so an older but larger model (here `coder-16b`, 15.7B) can win over newer 14B ones; pin the one you prefer with `rpipe model set NAME`. The progress lines go to stderr, the final summary to stdout. The context is the measured maximum (20480 here) less a 1024-token safety margin.
 
 **Catching up: `rpipe summarize --backlog` and `rpipe summarize ID...`**
 
@@ -99,7 +104,7 @@ Illustrative output; your numbers will differ. The candidates are tried in order
 *How it works.* The backlog is a database query (`papers_missing_summary`): status `in_digest`, digest date not today, no `kind='summary'` row, fewer than 3 failures, ordered by digest date then row, newest first, cut at N. The cap applies only to those backlog papers; the normal candidates are not counted against it. Each paper then goes through the same loop as always (`run_summarize`): stored full text or fetch it, summarise, critique, save. Status handling: only `triaged`/`fetched` papers become `summarized`; an `in_digest` or `skipped` paper keeps its status and just gains a summary. A digest file is only rewritten by `rpipe digest`, so after the run `rpipe summarize` lists the older digests that gained summaries, ready to copy:
 
 ```
-Older digests do not show new summaries until you refresh them:
+! Older digests do not show new summaries until you refresh them:
   rpipe digest --date 2026-11-21
   rpipe digest --date 2026-11-20
 ```
@@ -121,22 +126,29 @@ Model commands (`rpipe model setup`, `rpipe model set-backend NAME`, `rpipe mode
 
 ```
 $ uv run rpipe model show
-model: auto
-server: http://localhost:11434
-context window (num_ctx): auto
-last choice: not probed yet; runs on first use, or `rpipe model fit`
+
+── Summary model ───────────────────────────────────────────────────────────────
+  backend                   ollama
+  model                     auto
+  summarize mode            auto (change with `rpipe model set-mode`)
+  diagrams                  auto (change with `rpipe model set-diagrams`)
+  effort                    low (only applies to the claude-code backend)
+  server                    http://localhost:11434
+  context window (num_ctx)  auto
+  auto: split when the model is not fully in GPU memory or the context is below 26624 tokens (Ollama); whole otherwise
+  last choice: not probed yet for these settings and installed models; it is probed on next use (or now with `rpipe model fit`)
 $ uv run rpipe model fit
-Probing Ollama: this loads and unloads models and can take a few minutes.
+  Probing Ollama: this loads and unloads models and can take a few minutes.
   trying dense-27b at 16384 tokens
   trying coder-16b at 16384 tokens
   searching the largest context for coder-16b
-Using model coder-16b with a context of 19456 tokens
+✓ Using model coder-16b with a context of 19456 tokens
 $ uv run rpipe model set qwen3:8b
-model is now qwen3:8b. Check it works with `rpipe model check`.
+✓ model is now qwen3:8b. Check it works with `rpipe model check`.
 $ uv run rpipe model set-context 16384
-context window is now 16384 tokens.
+✓ context window is now 16384 tokens.
 $ uv run rpipe model check
-Ollama is running at http://localhost:11434 and model qwen3:8b is installed.
+✓ Ollama is running at http://localhost:11434 and model qwen3:8b is installed.
 ```
 
 Illustrative output; your numbers will differ.
@@ -249,14 +261,14 @@ You asked for them with:
 
 ```
 $ rpipe requests add 2611.25005
-Request 7: summarize 2611.25005.
-It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+✓ Request 7: summarize 2611.25005.
+  It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
 $ rpipe requests add "https://arxiv.org/abs/2611.30001v2"
-Request 8: summarize 2611.30001.
-It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+✓ Request 8: summarize 2611.30001.
+  It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
 $ rpipe requests add 2611.25005
-Request 7 to summarize 2611.25005 is already waiting; nothing new was added.
-It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+! Request 7 to summarize 2611.25005 is already waiting; nothing new was added.
+  It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
 ```
 
 The third line asked again for a paper that was still waiting, so it got request 7 back instead of a second copy.
@@ -271,14 +283,17 @@ Row 7 is `done` (1 try). Row 8 is `pending` with 1 try and the 503 as its error;
 
 ```
 $ rpipe requests add 2611.30001
-Request 8 to summarize 2611.30001 is already waiting; nothing new was added.
-It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
+! Request 8 to summarize 2611.30001 is already waiting; nothing new was added.
+  It runs during tonight's `rpipe run`, or now with `rpipe requests run`. `rpipe requests list` shows how it went.
 $ rpipe requests list
 8  pending  summarize  2611.30001  1  2026-11-23T09:12:40+00:00  arXiv returned 503
 7  done     summarize  2611.25005  1  2026-11-23T09:12:02+00:00
 $ rpipe requests run
-Requests:
-  requests_done=1, requests_failed=0, requests_waiting=0
+
+── Requests ────────────────────────────────────────────────────────────────────
+  requests_done     1
+  requests_failed   0
+  requests_waiting  0
 ```
 
 `rpipe requests add PAPER` (not locked, no model) finds the paper the way `rpipe vote` does (`_resolve_paper`: an id in any spelling such as `2611.25005v2`, `arXiv:2611.25005` or an arxiv.org URL, else part of the title, with a numbered list to pick from when several titles match), then calls `library_api.request(conn, "summarize", {"paper_id": ...})`. It prints the request id and when it will run. If the same paper is already waiting (or being worked on) it says `already waiting` and gives that request's id; a paper not in your vault gives `No paper in your vault matches '...'. ... Nothing was changed.` and exit 1, with no row added. It only adds one row, a single short write, so it runs safely beside the nightly job. `rpipe requests list` (not locked, no model) prints every request newest first: id, status, kind, paper id, tries, when it was asked, and the last error if any; `No requests.` when there are none. `rpipe requests run` takes the pipeline lock, so a pipeline command started meanwhile is told `rpipe requests run is already working on <vault>; nothing was started.`; it needs a model (exit 1 with the `none` backend, or when the model is unavailable), says `No requests waiting.` and stops if no request can still run, else picks the reading mode like `rpipe summarize` and drains with progress.
@@ -301,15 +316,23 @@ This is a real run on a clean vault (profile: LLM security topics, four well-kno
 
 ```
 $ uv run rpipe run
-Digest written to <vault>/digests/2026-11-21.md
-  inserted=339, updated=11, unchanged=0, source_errors=0, triaged=15, skipped=324, embedded=339
+✓ Digest written to <vault>/digests/2026-11-21.md
+  inserted       339
+  updated        11
+  unchanged      0
+  source_errors  0
+  triaged        15
+  skipped        324
+  embedded       339
 ```
+
+The summary is one `key  value` row per count (the `term.fields` helper, see `terminal.md`); under a pipe or the systemd journal it is the same text with no colour codes. Errors, if any, follow as `✗ message` lines on stderr.
 
 It took about 13 seconds with the model already downloaded (about 2 minutes the very first time, which includes the model download and a cold start). Where the time goes:
 
-1. **collect** fetches the newest arXiv papers across the configured categories, in pages of 100 spaced 3 seconds apart because of arXiv's rate limit. It stops after the first page that contains a paper already in the vault, or at `arxiv_max_results` (default 1000), whichever comes first. (This sample run predates that rule and used a fixed limit of 300, so it fetched 3 pages.) It also fetches about 50 Hugging Face Daily Papers. `inserted=339` papers were new; `updated=11` papers appeared in both sources, so the second source merged upvotes and repos into the first source's row.
+1. **collect** fetches the newest arXiv papers across the configured categories, in pages of 100 spaced 3 seconds apart because of arXiv's rate limit. It stops after the first page that contains a paper already in the vault, or at `arxiv_max_results` (default 1000), whichever comes first. (This sample run predates that rule and used a fixed limit of 300, so it fetched 3 pages.) It also fetches about 50 Hugging Face Daily Papers. `inserted` (339) papers were new; `updated` (11) papers appeared in both sources, so the second source merged upvotes and repos into the first source's row.
 2. **seeds**: the four seed ids were not in the database, so one arXiv request fetched their abstracts and saved them to `<vault>/cache/seeds.json`. A second run makes no seed request.
-3. **triage** embedded all 339 papers (`embedded=339`; stored vectors are reused on later nights), scored them, kept 15 and skipped 324.
+3. **triage** embedded all 339 papers (`embedded` 339; stored vectors are reused on later nights), scored them, kept 15 and skipped 324.
 4. **summarize** (added in Phase 2, after this sample run was taken, so its counts and time are not in the numbers above) fetched each kept paper's arXiv HTML, asked the local model for a cited summary and critique, and moved the paper to `summarized`. It is by far the slowest stage: expect on the order of a minute per paper on a laptop-class GPU.
 5. **digest** wrote the file and marked the papers `in_digest`.
 
@@ -352,7 +375,7 @@ Each `run` adds one row, so you can see history without opening a digest. For th
 
 **What happens if a stage crashes.** Source failures, a missing model and a failed seed lookup are already handled one by one (see above). Anything *else* unexpected (a bug, a full disk) used to leave the run row with no `finished_at`. Now `run` wraps the stages: the exception is recorded in `runs.errors` as `<stage>: <message>` (the same plain-string shape as `arxiv: arXiv API returned HTTP 500`, with the stage being `collect`, `triage` or `summarize`; the rerun stage catches its own problems as `rerun: ...` and never counts as a crash), the later stages are skipped, `run` still tries to write the digest from whatever is in the database (so the health line shows the error), `finish_run` always executes, and the command exits with code 1 so cron or systemd notices. If even the digest fails, that is recorded as `digest: ...`.
 
-**What is guaranteed.** Both a crash and Ctrl-C finish the run row (`finish_run` sits in a `finally`, so it executes exactly once whichever way the command ends). After Ctrl-C the error is `<stage>: interrupted`, no digest is attempted (you wanted out), and the interrupt then propagates, so the exit code is the usual one for an interrupt. Counts are kept for stages that completed before the failure; the partial counts of the stage that crashed mid-way are lost (stage functions only return counts when they finish). `SIGTERM` (what `systemctl stop` and a plain `kill` send) is treated like Ctrl-C while `run` executes, so it is recorded the same way. An interrupt that lands while the digest is being written is recorded as `digest: interrupted`. Failing to load the embedding model is recorded as `embed: ...` (the run row is created before the model is loaded, so this and every later failure leaves a record). Only a hard kill (power cut, `kill -9`) leaves `finished_at` empty. If `finish_run` itself fails (for example a full disk) while another error is already propagating, the failure is printed as `warning: could not record the run: ...` and the original error still wins; if nothing else went wrong, the `finish_run` failure is raised.
+**What is guaranteed.** Both a crash and Ctrl-C finish the run row (`finish_run` sits in a `finally`, so it executes exactly once whichever way the command ends). After Ctrl-C the error is `<stage>: interrupted`, no digest is attempted (you wanted out), and the interrupt then propagates, so the exit code is the usual one for an interrupt. Counts are kept for stages that completed before the failure; the partial counts of the stage that crashed mid-way are lost (stage functions only return counts when they finish). `SIGTERM` (what `systemctl stop` and a plain `kill` send) is treated like Ctrl-C while `run` executes, so it is recorded the same way. An interrupt that lands while the digest is being written is recorded as `digest: interrupted`. Failing to load the embedding model is recorded as `embed: ...` (the run row is created before the model is loaded, so this and every later failure leaves a record). Only a hard kill (power cut, `kill -9`) leaves `finished_at` empty. If `finish_run` itself fails (for example a full disk) while another error is already propagating, the failure is printed on stderr as `! could not record the run: ...` and the original error still wins; if nothing else went wrong, the `finish_run` failure is raised.
 
 **One pipeline job at a time.** Every command that does pipeline work takes the same vault lock before it starts: `flock` (an operating-system file lock, see the glossary) on `<vault>/.run.lock`, non-blocking, so a second job never waits, it stops. While a command holds the lock, the lock file contains that command's name (the **lock holder**, for example `rpipe run`); the file is emptied when the command ends. A refused command reads the name and prints it, then exits at once with code `75` (the standard "try again later" code), without creating a `runs` row or touching the database:
 

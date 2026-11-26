@@ -96,26 +96,27 @@ Real output (fake embedder, fresh vault):
 
 ```
 $ rpipe shelf list
-Your shelf is empty. Add a note or file with: rpipe shelf add "your idea" (or a .md/.txt path).
+  Your shelf is empty. Add a note or file with: rpipe shelf add "your idea" (or a .md/.txt path).
 
 $ rpipe shelf add "Try retrieval for malware triage"
-Added 'try-retrieval-for-malware-triage' to your shelf. Papers close to it will now rank higher.
+✓ Added 'try-retrieval-for-malware-triage' to your shelf. Papers close to it will now rank higher.
 
 $ rpipe shelf add notes/idea.md
 File not found: notes/idea.md. Check the path, or put the note in quotes with spaces, e.g. rpipe shelf add "my idea about fuzzing".
 
 $ rpipe shelf sync          # after dropping gamma.md and paper.pdf into my_work/
-Shelf synced: 1 added, 0 updated, 0 removed.
-  Added: gamma
-Ignored 1 file(s): paper.pdf. Only .md and .txt files directly in my_work/ are indexed (if a .md and a .txt share a name, the .md is used).
+✓ Shelf synced: 1 added, 0 updated, 0 removed.
+  • Added: gamma
+! Ignored 1 file(s): paper.pdf. Only .md and .txt files directly in my_work/ are indexed (if a .md and a .txt share a name, the .md is used).
 
 $ rpipe shelf list
-Shelf: 2 items
-  gamma  1 chunk  added 2026-11-22
+
+── Shelf: 2 items ──────────────────────────────────────────────────────────────
+  gamma                             1 chunk  added 2026-11-22
   try-retrieval-for-malware-triage  1 chunk  added 2026-11-22
 
 $ rpipe shelf remove gamma
-Removed 'gamma'. The file is in my_work/.removed/ if you want it back.
+✓ Removed 'gamma'. The file is in my_work/.removed/ if you want it back.
 ```
 
 Two guards the command line adds on top of `add_to_shelf`:

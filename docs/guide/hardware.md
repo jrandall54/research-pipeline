@@ -21,12 +21,12 @@ This page covers all four: the scan, the catalog, the recommendations, the speed
 - **Free disk where Ollama keeps models** (`ollama_models_dir`): `OLLAMA_MODELS` if the server sets it, else `/usr/share/ollama/.ollama/models` for a system service, else `~/.ollama/models`. A big model download must fit there.
 - **The Ollama server** (`detect_ollama_server`): its version (`GET /api/version`) and how it runs, tried in this order: system service (`systemctl is-active ollama`), user service (`systemctl --user ...`), Docker container, then, if it answers on the network, "the Ollama app" (macOS, Windows) or "started by hand". For a systemd service it also reads the `OLLAMA_*` settings with `systemctl show ollama --property=Environment` and the drop-in files with `--property=DropInPaths`.
 
-Worked example. On a machine whose service has `Environment=PATH=/usr/bin OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_HOST=127.0.0.1:11436 "OLLAMA_ORIGINS=*"`, the parser splits the line the way a shell would (so the quoted `"OLLAMA_ORIGINS=*"` and values with spaces survive), drops `PATH`, and the report says:
+Worked example. On a machine whose service has `Environment=PATH=/usr/bin OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_HOST=127.0.0.1:11436 "OLLAMA_ORIGINS=*"`, the parser splits the line the way a shell would (so the quoted `"OLLAMA_ORIGINS=*"` and values with spaces survive), drops `PATH`, and the report (a `key  value` list under the header `What I found on this computer`, the server rows last) says:
 
 ```
-  flash attention: on (set in kv-cache.conf)
-  context memory type (KV cache): q8_0 (set in kv-cache.conf)
-  parallel slots: automatic (default)
+  flash attention                 on (set in kv-cache.conf)
+  context memory type (KV cache)  q8_0 (set in kv-cache.conf)
+  parallel slots                  automatic (default)
   note: the Ollama service listens on port 11436 but rpipe talks to localhost:11434; ...
 ```
 

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -99,6 +100,17 @@ def test_e2e_offline_run_produces_digest(vault, monkeypatch):
     ).fetchone()[0] == 0
 
 
+def test_run_output_plain_when_piped(vault, monkeypatch):
+    """The nightly run (systemd, a pipe, CliRunner) is not a terminal: no escape codes, marks still print."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    install(monkeypatch)
+    res = run_cli("run", "--vault", str(vault))
+    assert res.exit_code == 0, res.output
+    assert "\x1b" not in res.output
+    assert "✓ Digest written to" in res.output
+    assert re.search(r"triaged\s+2", res.output)
+
+
 def test_e2e_second_run_same_day_adds_no_duplicates(vault, monkeypatch):
     install(monkeypatch)
     run_cli("run", "--vault", str(vault))
@@ -188,7 +200,7 @@ def test_collect_and_digest_work_without_the_embed_extra(vault, monkeypatch):
     _no_extra_pipeline(monkeypatch)
     res = run_cli("collect", "--vault", str(vault))
     assert res.exit_code == 0, res.output
-    assert "inserted=" in res.output
+    assert re.search(r"inserted\s+3", res.output)
     res = run_cli("digest", "--vault", str(vault), "--date", "2026-01-02")
     assert res.exit_code == 0, res.output
     assert (vault / "digests" / "2026-01-02.md").exists()
@@ -344,7 +356,7 @@ def test_summarize_command_runs_stage_alone(vault, monkeypatch):
         assert run_cli(cmd, "--vault", str(vault)).exit_code == 0
     res = run_cli("summarize", "--vault", str(vault))
     assert res.exit_code == 0, res.output
-    assert "summarized=2" in res.output
+    assert re.search(r"summarized\s+2", res.output)
 
 
 def test_summarize_command_reports_ollama_down(vault, monkeypatch):
@@ -800,7 +812,7 @@ def test_summarize_backlog_prints_preface_and_respects_limit(vault, monkeypatch)
     res = run_cli("summarize", "--backlog", "--limit", "2", "--vault", str(vault))
     assert res.exit_code == 0, res.output
     assert "Backlog: 2 of 3 papers missing a summary (newest first; raise --limit for more)" in res.output
-    assert "summarized=2" in res.output
+    assert re.search(r"summarized\s+2", res.output)
     assert count_summaries(vault) == 2
 
 
@@ -872,7 +884,7 @@ def test_summarize_explicit_ids_and_unknown_id(vault, monkeypatch):
     assert count_summaries(vault) == 0
     res = run_cli("summarize", "2501.00002", "--vault", str(vault))
     assert res.exit_code == 0, res.output
-    assert "summarized=1" in res.output and count_summaries(vault) == 1
+    assert re.search(r"summarized\s+1", res.output) and count_summaries(vault) == 1
 
 
 def test_summarize_backlog_with_no_backend_refuses(vault, monkeypatch):

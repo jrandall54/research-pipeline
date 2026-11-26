@@ -124,31 +124,37 @@ Sample session (vault freshly made by `rpipe init`):
 
 ```
 $ rpipe profile add-topic "prompt injection"
-Added topic: prompt injection
+✓ Added topic: prompt injection
 $ rpipe profile add-topic "Prompt  Injection"
 "Prompt Injection" is already in your profile (topics).
 $ rpipe profile add-seed "universal transferable adversarial attacks"
   1. Universal and Transferable Adversarial Attacks on Aligned Language Models (Andy Zou, 2023)
   2. ...
-Pick 1-5 or 0 to cancel: 1
-Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
+› Pick 1-5 or 0 to cancel: 1
+✓ Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
 $ rpipe profile add-seed 2307.15043
 2307.15043 is already in your profile.
 $ rpipe profile set-top-n 10
-top_n is now 10.
+✓ top_n is now 10.
 $ rpipe profile show
-Topics:
+
+── Topics ──────────────────────────────────────────────────────────────────────
   1. security of LLM agents and prompt injection
   2. prompt injection
-Seeds:
+
+── Seeds ───────────────────────────────────────────────────────────────────────
   1. 2307.15043  Universal and Transferable Adversarial Attacks on Aligned Language Models
-Followed authors:
+
+── Followed authors ────────────────────────────────────────────────────────────
   (none)
-Keywords:
+
+── Keywords ────────────────────────────────────────────────────────────────────
   (none)
-Top N: 10
-Feedback half-life: 60 days
-arXiv categories: cs.LG, cs.CL, cs.CR, cs.OS, cs.SE
+
+── Settings ────────────────────────────────────────────────────────────────────
+  Top N               10
+  Feedback half-life  60 days
+  arXiv categories    cs.LG, cs.CL, cs.CR, cs.OS, cs.SE
 ```
 
 (The `add-seed` lines are illustrative: the exact title results depend on arXiv.)
@@ -186,7 +192,7 @@ If the model is unreachable, not installed, or returns unusable output, the comm
 
 ### The guided `rpipe init`
 
-The wizard opens with `Setup has 5 short steps...` and every step starts with `Step N of 5: <name>` (Summaries, Describe your research, Topics, arXiv categories, Seed papers) plus a few lines saying what it needs from you and why; the exact wording is in `cli.py` (`SUMMARIES_HELP`, `DESCRIBE_HELP`, `TOPICS_HELP`, `CATEGORY_HELP`, `SEEDS_HELP`). The categories step is a numbered menu of 17 common areas (`categories.COMMON`, with plain descriptions) with the current selection ticked `[x]`; you type numbers (`3,5`), arXiv codes, or `all`, and `categories.parse_choice` turns that into the list, which replaces the selection. A number outside 1-17 prints `Skipped: There is no option 18...` and keeps what you had. Categories you already have that are not on the menu are listed after it as `Also selected:`. `rpipe profile set-categories` still takes codes and `all` only. The wizard ends with the commands to run next (`rpipe run`, `schedule install`, `app install`, `share setup`).
+The wizard opens with `Setup has 5 short steps...` and every step starts with a header line `── Step N of 5 · <name> ──…` (Summaries, Describe your research, Topics, arXiv categories, Seed papers) plus a few lines saying what it needs from you and why; the exact wording is in `cli.py` (`SUMMARIES_HELP`, `DESCRIBE_HELP`, `TOPICS_HELP`, `CATEGORY_HELP`, `SEEDS_HELP`). The categories step is a numbered menu of 17 common areas (`categories.COMMON`, with plain descriptions) with the current selection ticked `✓` (unticked rows are dimmed); you type numbers (`3,5`), arXiv codes, or `all`, and `categories.parse_choice` turns that into the list, which replaces the selection. A number outside 1-17 prints `Skipped: There is no option 18...` and keeps what you had. Categories you already have that are not on the menu are listed after it as `Also selected:`. `rpipe profile set-categories` still takes codes and `all` only. The wizard ends with the commands to run next (`rpipe run`, `schedule install`, `app install`, `share setup`).
 
 In a terminal, right after the Summaries step (it comes first because this step calls the model chosen there), `rpipe init` offers `Describe your research in a few sentences (Enter to skip)`: a non-empty answer runs the same flow as `rpipe profile suggest`, and if the model is unavailable it says so and carries on with the manual steps. Then it uses the same edit functions as the commands above to ask for topics, categories and seeds one at a time (see `vault-and-config.md` for a sample session). Its seed step is literally `rpipe profile add-seed`: both call one helper, `_add_seed`, so the look-up, confirm and pick flow, and the error messages, are identical. The cache is written before the profile entry, so if saving fails (for example a full disk) you get one line such as `Could not save the seed: ... Nothing was changed.` and no profile entry without its text; the wizard then skips that seed and continues.
 

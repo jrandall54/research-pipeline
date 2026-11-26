@@ -179,24 +179,38 @@ You need `git` and the GitHub command line tool `gh` only to *publish*; followin
 | `rpipe share fetch` | Fetch every followed feed now |
 | `rpipe share mix add HANDLE` / `remove HANDLE` | Include or leave out a followed feed in Mix |
 
+`rpipe share status` looks like this (with colour on a terminal, plain in a pipe):
+
+```
+Publishing: on as 'Alex M.'
+  Address            https://alex.github.io/rpipe-feed/feed.json
+  Last local commit  2026-11-26 03:00:05
+  Last night's push  ok
+Following 1:
+  • Bo (@bo) · 212 posts, fetched 2026-11-26 · in Mix
+```
+
+In `browse`, the name is bold and the two lines under it are dimmed; the name, handle and topics are cleaned with `clean_text` before they are styled, so a hostile display name cannot inject terminal codes. The look is described in [terminal.md](terminal.md).
+
 Example session (Alex publishes, Sam follows):
 
 ```
 $ rpipe share setup
-Display name shown to people who follow you [Alex Morgan]: Alex M.
-This makes your feed public. Anyone can read it. Copies people have already downloaded can't be pulled back if you stop.
-Publish your feed? [y/N]: y
+› Display name shown to people who follow you [Alex Morgan]: Alex M.
+! This makes your feed public. Anyone can read it. Copies people have already downloaded can't be pulled back if you stop.
+› Publish your feed? [y/N]: y
   publish ... pages ... (progress)
-Your feed is live: https://alex.github.io/rpipe-feed/feed.json
+✓ Your feed is live: https://alex.github.io/rpipe-feed/feed.json
+  It updates every night. Others can follow it with `rpipe share follow alex`.
 
 $ rpipe share browse robotics            # on Sam's machine
 Alex M.  @alex
   about 8 papers a day · 1 topic in common
   robotics, reinforcement learning, compilers, +4 more
 
-Follow one with `rpipe share follow HANDLE`.
+  Follow one with `rpipe share follow HANDLE`.
 $ rpipe share follow alex
-Following alex: 212 posts downloaded.
+✓ Following alex: 212 posts downloaded.
 $ rpipe share mix remove alex            # keep their feed out of Mix
 $ rpipe share stop                       # Alex, later
 ```

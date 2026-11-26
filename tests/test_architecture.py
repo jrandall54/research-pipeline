@@ -87,7 +87,7 @@ PIPELINE = {"collect", "sources", "triage", "rank", "fulltext", "summarize", "pr
             "registry", "run_lock", "requests_queue", "seed_input", "onboarding", "share_github", "share_publish",
             "share_fetch", "share_directory"}
 APP = {"library", "shelf", "review", "serve", "library_api", "workbench", "webapp"}
-COMPOSITION = {"cli", "progress_render"}
+COMPOSITION = {"cli", "progress_render", "term"}
 GROUPS = {"shared": SHARED, "pipeline": PIPELINE, "app": APP, "composition": COMPOSITION}
 
 

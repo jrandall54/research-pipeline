@@ -352,7 +352,7 @@
 
 **App (code group)** — the modules for what you do with the papers: votes, saves, the review queue, the shelf, the browser view and `library_api`. They may not import pipeline modules; heavy work goes through the request list. See `architecture.md`.
 
-**Composition layer** — the code allowed to use both the pipeline and the app and wire them together: `cli.py` (every `rpipe` command) and `progress_render.py` (turns progress events into terminal lines). For example, `rpipe run` syncs the shelf (app) and then runs the pipeline stages. See `architecture.md`.
+**Composition layer** — the code allowed to use both the pipeline and the app and wire them together: `cli.py` (every `rpipe` command), `progress_render.py` (turns progress events into terminal lines) and `term.py` (the colours and marks every command prints with). For example, `rpipe run` syncs the shelf (app) and then runs the pipeline stages. See `architecture.md`.
 
 **One door** — the rule that the app reaches the database only through `library_api.py`, so every front end (the terminal today, a web page or MCP tool later) uses the same functions and gets the same data. See `architecture.md`.
 
@@ -399,3 +399,7 @@
 **Archive (of a feed)** — a month of older posts published as its own file, `archive/YYYY-MM.json`, so `feed.json` stays small. `feed.json` lists each archive with a SHA-256 fingerprint, and a follower downloads only the archives whose fingerprint changed. See `sharing.md`.
 
 **Repository topic** — a free-text tag on a GitHub repository. rpipe tags your `rpipe-feed` repository with the topic `rpipe-feed`; searching GitHub for that tag is how the directory finds feeds, with no list kept by anyone. See `sharing.md`.
+
+**Escape codes (ANSI)** — invisible character sequences (they start with the character `\x1b`) that a terminal reads as instructions instead of text: "print the next words in green", "make them bold". rpipe adds them only when it is writing to a terminal; in a pipe, a log file or a test it prints plain text so nothing like `\x1b[32m` shows up. See `terminal.md`. (Escape codes in text from other people are a different problem; see "Control characters (stripped)".)
+
+**NO_COLOR** — a convention (no-color.org): if the environment variable `NO_COLOR` is set to anything, programs should not use colour. rpipe obeys it, so `NO_COLOR=1 rpipe profile show` prints the same text with no colour; the marks (`✓ ! ✗ ›`) still show. See `terminal.md`.

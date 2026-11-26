@@ -131,7 +131,7 @@ def test_eval_run_cli_warns_and_reports_location(vault, monkeypatch):
     add_papers(vault, 2)
     res = erun(vault, "run")
     assert res.exit_code == 0, res.output
-    assert "fewer" in res.output.lower() or "Warning" in res.output
+    assert "! The gold set has 2 papers" in res.output  # the mark replaces the old "Warning: "
     assert "2026" in res.output and ".md" in res.output
     res = erun(vault, "run")
     assert "cleared" in res.output

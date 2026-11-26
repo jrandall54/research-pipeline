@@ -58,7 +58,7 @@ def test_wizard_saves_topics_and_seeds(tmp_path, tty, monkeypatch):
     assert profile.seeds == ["2307.15043"]
     assert "Tip: add more any time with rpipe profile add-seed" in result.output
     assert "rpipe run" in result.output
-    assert "Topics:" in result.output
+    assert "── Topics " in result.output
 
 
 def test_wizard_changes_categories(tmp_path, tty, monkeypatch):
@@ -114,7 +114,7 @@ def test_non_tty_init_unchanged(tmp_path, monkeypatch):
     result = init(tmp_path, None)
     assert result.exit_code == 0
     assert "Vault ready at" in result.output
-    assert "Next steps:" in result.output
+    assert "── Next steps " in result.output
     assert "Topic (blank to finish)" not in result.output
     assert len(load_profile(tmp_path / "v" / "profile.yaml").topics) == 3
 
@@ -268,8 +268,8 @@ def test_wizard_shows_step_headers_and_explainers(tmp_path, tty, monkeypatch):
     use(monkeypatch, StubArxiv())
     out = init(tmp_path, "\n\n\n").output
     assert "Setup has 5 short steps" in out
-    heads = ["Step 1 of 5: Summaries", "Step 2 of 5: Describe your research (optional)", "Step 3 of 5: Topics",
-             "Step 4 of 5: arXiv categories", "Step 5 of 5: Seed papers"]
+    heads = ["Step 1 of 5 · Summaries", "Step 2 of 5 · Describe your research (optional)", "Step 3 of 5 · Topics",
+             "Step 4 of 5 · arXiv categories", "Step 5 of 5 · Seed papers"]
     positions = [out.index(h) for h in heads]
     assert positions == sorted(positions)
     assert "arxiv.org" in out and "A seed paper is an example" in out
@@ -278,8 +278,8 @@ def test_wizard_shows_step_headers_and_explainers(tmp_path, tty, monkeypatch):
 def test_wizard_category_menu_ticks_current(tmp_path, tty, monkeypatch):
     use(monkeypatch, StubArxiv())
     out = init(tmp_path, "\n\n\n").output
-    assert "[x]  2. cs.LG" in out
-    assert "[ ]  4. cs.CV" in out
+    assert "  ✓   2  cs.LG" in out
+    assert "      4  cs.CV" in out and "✓   4  cs.CV" not in out
 
 
 def test_wizard_categories_by_number(tmp_path, tty, monkeypatch):
@@ -300,7 +300,7 @@ def test_wizard_bad_category_number_keeps_current(tmp_path, tty, monkeypatch):
 def test_wizard_ends_with_next_steps(tmp_path, tty, monkeypatch):
     use(monkeypatch, StubArxiv())
     out = init(tmp_path, "\n\n\n").output
-    tail = out[out.index("All set. Next:"):]
+    tail = out[out.index("── All set "):]
     for cmd in ("rpipe run", "rpipe schedule install", "rpipe app install", "rpipe share setup"):
         assert cmd in tail
 

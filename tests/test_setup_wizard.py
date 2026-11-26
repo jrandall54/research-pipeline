@@ -90,10 +90,10 @@ def test_declining_pull_saves_choice_but_not_ready(vault, monkeypatch):
     assert result.exit_code == 1
     assert "Not ready yet: model not installed" in result.output and "rpipe model setup" in result.output
     lines = result.output.splitlines()
-    assert "Not ready yet: model not installed" in lines
-    assert "Fix it, then run rpipe model setup" in lines
+    assert "! Not ready yet: model not installed" in lines
+    assert "  Fix it, then run rpipe model setup" in lines
     assert "\\n" not in result.output
-    assert "" in lines and "Recommended: ollama" in lines
+    assert "" in lines and any(ln.startswith("── Recommended: ollama ") for ln in lines)
 
 
 def test_no_ollama_prints_install_command_and_rechecks(vault, monkeypatch):
@@ -274,7 +274,7 @@ def test_setup_interrupted_says_stopped_and_changes_nothing(vault, monkeypatch):
     m = machine(gpu=GPU16, ollama_installed=True, ollama_running=True)
     before = cfg(vault)
     result, pulled = setup_run(vault, monkeypatch, [m], "")  # input ends at the first question
-    assert result.exit_code == 130 and "Stopped. Nothing further was changed" in result.output
+    assert result.exit_code == 130 and "! Stopped. Nothing further was changed; run rpipe model setup to continue." in result.output.splitlines()
     assert pulled == [] and cfg(vault) == before
 
 

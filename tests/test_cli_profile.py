@@ -42,7 +42,7 @@ def test_profile_show_lists_everything_numbered(vault, monkeypatch):
     assert "Andy Zou" in out and "jailbreak" in out
     assert "1. 2307.15043  (title not cached)" in out
     assert "2. 2301.00001  Cached one" in out
-    assert "Top N: 15" in out
+    assert "Top N               15" in out
     assert "cs.CR" in out
 
 
@@ -270,7 +270,7 @@ def test_set_categories_all_and_show(vault):
     assert res.exit_code == 0 and "all computer science (cs.*)" in res.output
     assert load_config(vault / "config.yaml").arxiv_categories == ["all"]
     res = run(vault, "show")
-    assert "arXiv categories: all computer science (cs.*)" in res.output
+    assert "arXiv categories    all computer science (cs.*)" in res.output
     res = run(vault, "set-categories", "all", "cs.CR")
     assert res.exit_code == 1 and "all" in res.output and "Traceback" not in res.output
     assert load_config(vault / "config.yaml").arxiv_categories == ["all"]

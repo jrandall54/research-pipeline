@@ -67,7 +67,7 @@ class ProbeSession:
     def warn_unload(self, model: str, why: str) -> None:
         if not self._warned:
             self._warned = True
-            self.log(f"warning: could not unload {model} after probing ({why}); it may stay "
+            self.log(f"! could not unload {model} after probing ({why}); it may stay "
                      "in GPU memory until Ollama unloads it (about 5 minutes)")
 
 

@@ -119,3 +119,9 @@ def test_continuation_lines_align_under_the_text(capsys):
     cap = capsys.readouterr()
     assert cap.out == "✓ first\n  second\n! a\n  b\n\n  c\n"
     assert cap.err == "✗ x\n  y\n! to stderr\n"
+
+
+def test_leading_newline_becomes_blank_line_before_the_mark(capsys):
+    term.warn("\nX")
+    term.ok("\n\nY")
+    assert capsys.readouterr().out == "\n! X\n\n\n✓ Y\n"

@@ -274,7 +274,7 @@ def test_setup_interrupted_says_stopped_and_changes_nothing(vault, monkeypatch):
     m = machine(gpu=GPU16, ollama_installed=True, ollama_running=True)
     before = cfg(vault)
     result, pulled = setup_run(vault, monkeypatch, [m], "")  # input ends at the first question
-    assert result.exit_code == 130 and "Stopped. Nothing further was changed" in result.output
+    assert result.exit_code == 130 and "! Stopped. Nothing further was changed; run rpipe model setup to continue." in result.output.splitlines()
     assert pulled == [] and cfg(vault) == before
 
 

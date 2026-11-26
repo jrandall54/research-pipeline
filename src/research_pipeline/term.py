@@ -66,17 +66,25 @@ def _align(text: str) -> str:
     return "\n".join([first, *(("  " + line) if line else "" for line in rest)])
 
 
+def _marked(mark: str, text: str, err: bool = False) -> None:
+    """Print `mark text`; newlines at the start of `text` come out as blank lines before the mark."""
+    body = text.lstrip("\n")
+    if lead := len(text) - len(body):
+        typer.echo("\n" * (lead - 1), err=err)
+    typer.echo(f"{mark} {_align(body)}", err=err)
+
+
 def ok(text: str) -> None:
-    typer.echo(f"{tick()} {_align(text)}")
+    _marked(tick(), text)
 
 
 def warn(text: str, err: bool = False) -> None:
     """`! text`; `err=True` sends it to stderr (for warnings a script should not read as output)."""
-    typer.echo(f"{_style('!', err=err, fg='yellow')} {_align(text)}", err=err)
+    _marked(_style("!", err=err, fg="yellow"), text, err)
 
 
 def error(text: str) -> None:
-    typer.echo(f"{_style('✗', err=True, fg='red')} {_align(text)}", err=True)
+    _marked(_style("✗", err=True, fg="red"), text, True)
 
 
 def bullet(text: str, indent: int = 2) -> None:

@@ -2592,8 +2592,8 @@ def _pin_off_gpu(vault: Path, name: str) -> None:
     """Pin model and context for a model that runs (partly) outside the GPU."""
     profile_edit.set_llm_model(vault, name)
     profile_edit.set_llm_num_ctx(vault, recommender.CPU_CTX)
-    term.ok(f"Model {name} and a context of {recommender.CPU_CTX:,} tokens are both pinned: the automatic "
-            "choice (auto) only accepts models that sit fully in GPU memory, and this one does not.")
+    term.hint(f"Model {name} and a context of {recommender.CPU_CTX:,} tokens are both pinned: the automatic "
+              "choice (auto) only accepts models that sit fully in GPU memory, and this one does not.")
 
 
 def _pick_candidate(count: int) -> int | None:
@@ -2931,7 +2931,7 @@ def model_setup(vault: VaultOption = None) -> None:
         try:
             ready = _wizard_backend(ctx.vault, offer_keep=True)
         except (typer.Abort, KeyboardInterrupt, EOFError):
-            typer.echo("\nStopped. Nothing further was changed; run rpipe model setup to continue.")
+            term.warn("\nStopped. Nothing further was changed; run rpipe model setup to continue.")
             raise typer.Exit(code=130) from None
         if not ready:
             raise typer.Exit(code=1)

@@ -56,7 +56,32 @@ Files from other people are never trusted. Reading a feed refuses one that is to
 
 ## How it works
 
-(Fetching and the directory are filled in by later tasks.)
+(The directory is filled in by a later task.)
+
+### Following
+
+`rpipe share follow <handle or https address>` adds a feed to the ones you follow, and the nightly run (`fetch_all`, stage `fetch`) keeps them current. Code: `src/research_pipeline/share_fetch.py`.
+
+**What a person types.** `alex` or `@alex` becomes the address `https://alex.github.io/rpipe-feed/feed.json` and the feed id `github:alex/rpipe-feed` (the id never changes, so following twice finds the same row). A full `https://.../feed.json` address also works, for feeds hosted elsewhere; its id is `url:<address>`. Anything else (for example `http://`) is refused with a plain message.
+
+**First fetch takes the whole past.**
+
+1. `follow` refuses your own handle ("That's your own feed.").
+2. It downloads `feed.json` first. If that fails (no such feed, not an rpipe feed, too big), it raises "No rpipe feed at <address>: <reason>" and stores nothing, not even a follow row, so a typo leaves no trace.
+3. It records the follow and runs `fetch_one`: every archive listed in `feed.json` is downloaded (there is nothing to compare against yet), then the posts of the archives and of `feed.json` are stored in one go and committed once. The feed's display name, topics and `active` flag are refreshed.
+
+**Later fetches.** `feed.json` lists each archive's SHA-256 fingerprint. rpipe keeps the fingerprints it has already downloaded (`follows.archive_hashes`) and fetches only archives whose fingerprint differs. A normal night is therefore one small request for `feed.json` plus perhaps the current month's archive. A post that appears in both `feed.json` and an archive is the same post (same paper id) and is stored once; `feed.json`'s copy wins.
+
+Worked example: Alex has 41 posts in `archive/2026-10.json`, 12 in `archive/2026-11.json` and 8 in `feed.json`, with some overlap. First fetch: 3 downloads, then every distinct post (at most 61) stored. Next night: Alex adds a post; only `feed.json` and `archive/2026-11.json` changed, so `archive/2026-10.json` is not downloaded again.
+
+**Limits.** Every download is https only (a redirect to `http://` fails the fetch), stops reading once it passes its cap (5 MB for `feed.json`, 20 MB per archive), and has a 20 second timeout. At most 500 archives per feed, and an archive path must look like `archive/YYYY-MM.json` (optionally `-N`), so a feed cannot point rpipe at an arbitrary address. Invalid items (for example a 600-character title) are skipped and counted; the rest are stored.
+
+**When a fetch fails.** Nothing new is stored, the reason is kept (`follows.last_error`) and `failures` goes up by one. One feed failing never stops the others: `fetch_all` returns an error line like "fetch Alex M.: the server answered 500" and moves on. A success resets `failures` to 0.
+
+**What "stopped publishing" means.** A feed counts as stopped (`is_stopped`) after 7 failed fetches in a row (`STOPPED_AFTER`), or when its own `_rpipe.active` is false (its owner turned sharing off). Its old posts stay, rpipe keeps trying each night, and a good download makes it active again.
+
+**Progress.** The `fetch` stage reports one step per feed ("fetching 2 of 3: Alex M."), and one per archive on a first fetch.
+
 
 ### Publishing
 
@@ -92,14 +117,18 @@ Every GitHub operation goes through a small `Runner` (it runs one command and re
 - Files are byte-stable (sorted keys, fixed separators, and `generated_at` taken from the newest post rather than the clock): a night with no new posts produces identical bytes, so git has nothing to commit. The one exception is a post aging out of the 30-day window, which changes `feed.json` on purpose.
 - Month archives with fingerprints instead of one growing file: `feed.json` stays small and a follower downloads only archives that changed.
 - Rejected: publishing everything and filtering on the reader's side. Private reasons must never leave your machine in the first place.
+- Fetch the whole feed before storing anything, then store and commit once: a feed that breaks halfway leaves your database as it was, never half a feed. Rejected: storing as each archive arrives.
+- Redirects are followed by rpipe itself, one hop at a time, so every hop can be checked as https. Rejected: letting the HTTP library follow them (it would accept a redirect to plain `http`).
+- Archive addresses are built from the feed's folder and only for paths that match the published pattern, so a hostile feed cannot make rpipe fetch some other address. Private reasons must never leave your machine in the first place.
 
 ## How to run / check it
 
-(Added with the `rpipe share` commands.) Tests: `uv run pytest tests/test_feed_format.py tests/test_share_publish.py tests/test_share_github.py -q`.
+(Added with the `rpipe share` commands.) Tests: `uv run pytest tests/test_feed_format.py tests/test_share_publish.py tests/test_share_github.py tests/test_share_fetch.py -q`.
 
 ## Where the code is
 
 - `src/research_pipeline/feed_format.py`: the file shapes, `build_files`, `parse_feed`, `parse_archive`, `parse_reason`, `public_reasons` and `shared_topics`. It is in the shared group (see [architecture.md](architecture.md)), so both the pipeline and the app can use it. It touches no database and no network.
 - `src/research_pipeline/share_publish.py`: `collect_posts`, `write_site`, `push`, `publish`, `wait_live`, `feed_url`. Pipeline group.
 - `src/research_pipeline/share_github.py`: the `Runner` protocol, `SubprocessRunner`, and the setup operations (`check_tools`, `login`, `repo_status`, `create_repo`, `set_topic`, `enable_pages`, `setup_git_credentials`, `delete_repo`). Pipeline group.
-- `tests/test_share_publish.py`, `tests/test_share_github.py`, and `FakeRunner` in `tests/fakes.py`.
+- `src/research_pipeline/share_fetch.py`: `resolve`, `get_limited`, `fetch_one`, `follow`, `fetch_all`, `is_stopped`, `STOPPED_AFTER`. Pipeline group.
+- `tests/test_share_publish.py`, `tests/test_share_github.py`, `tests/test_share_fetch.py`, and `FakeRunner` in `tests/fakes.py`.

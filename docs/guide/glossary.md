@@ -383,3 +383,7 @@
 **GitHub Pages** — GitHub's free hosting for static files: files in a repository are served as a web page at `https://<handle>.github.io/<repository>/`. rpipe publishes your feed through a repository named `rpipe-feed`, so the feed address is `https://<handle>.github.io/rpipe-feed/feed.json`. See `sharing.md`.
 
 **Runner** — a small object with one method, `run(args)`, that executes a command (such as `git push`) and returns its output. rpipe's GitHub code only ever calls a runner, so tests swap in a fake that records commands and plays back scripted replies, and nothing touches the real GitHub. See `sharing.md`.
+
+**Follow (a feed)** — telling rpipe to download another person's published feed on every nightly run and keep their posts in your database. The posts live in their own table (`followed_posts`) apart from your own papers. See "Following" in `sharing.md`.
+
+**Stopped publishing** — how rpipe describes a followed feed that has failed to download 7 nights in a row, or whose owner turned sharing off (the feed says `active: false`). Its old posts stay; rpipe keeps trying, and one good download clears the mark. See "Following" in `sharing.md`.

@@ -38,14 +38,29 @@ class KeyNumber(BaseModel):
     sections: list[str] = Field(min_length=1)
 
 
+def _summary_schema(schema: dict) -> None:
+    """Tell the model hook and key_numbers are required (Python keeps defaults so old rows load).
+
+    Ollama's grammar fills required keys first, so an optional hook would often be skipped.
+    A hook may still be `null`; key numbers are capped at 3 here and again in extras.py.
+    """
+    required = schema.setdefault("required", [])
+    for name in ("hook", "key_numbers"):
+        if name not in required:
+            required.append(name)
+    schema["properties"]["key_numbers"]["maxItems"] = 3
+
+
 class Summary(BaseModel):
+    model_config = ConfigDict(json_schema_extra=_summary_schema)
+
     one_line: str
+    hook: Claim | None = None  # the finding in one plain, checkable line (not clickbait); None when absent
+    key_numbers: list[KeyNumber] = []
     problem: Claim
     approach: Claim
     results: Claim
     limitations: Claim
-    hook: Claim | None = None  # the finding in one plain, checkable line (not clickbait); None when absent
-    key_numbers: list[KeyNumber] = []
 
 
 class Critique(BaseModel):

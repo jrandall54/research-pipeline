@@ -24,3 +24,16 @@ def test_diagram_shape_is_checked():
 
     with pytest.raises(ValueError):
         Diagram(shape="tree", nodes=[], edges=[], caption="c")
+
+
+def test_schema_requires_hook_and_key_numbers_but_hook_may_be_null():
+    from research_pipeline.summary_models import Summary
+
+    schema = Summary.model_json_schema()
+    assert {"hook", "key_numbers"} <= set(schema["required"])
+    assert schema["properties"]["key_numbers"]["maxItems"] == 3
+    assert list(schema["properties"])[:3] == ["one_line", "hook", "key_numbers"]
+    s = Summary.model_validate({**{k: {"text": "t", "sections": ["a"]} for k in
+                                   ("problem", "approach", "results", "limitations")},
+                                "one_line": "x", "hook": None, "key_numbers": []})
+    assert s.hook is None

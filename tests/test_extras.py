@@ -68,3 +68,9 @@ def test_key_number_without_a_number_fails():
 def test_missing_hook_is_not_a_failure():
     out = check_extras(make(None), SECS, ABSTRACT)
     assert out.summary.hook is None and out.checks == []
+
+
+def test_key_numbers_capped_at_three():
+    kns = [KeyNumber(value="28%", label=f"l{i}", sections=["5 Results"]) for i in range(5)]
+    out = check_extras(make(None, kns), SECS, ABSTRACT)
+    assert len(out.summary.key_numbers) == 3 and out.checks == []

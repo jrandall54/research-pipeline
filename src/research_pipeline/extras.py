@@ -38,7 +38,7 @@ def _failure(what: str, text: str, cited: list[str], sections: list[Section], ab
 
 
 def check_extras(ps: PaperSummary, sections: list[Section], abstract: str) -> PaperSummary:
-    """A copy with a failed hook set to None, failed key numbers removed, reasons in `checks`."""
+    """A copy with a failed hook set to None, failed key numbers removed, at most 3 kept, reasons in `checks`."""
     summary = ps.summary
     checks = list(ps.checks)
     hook = summary.hook
@@ -55,6 +55,6 @@ def check_extras(ps: PaperSummary, sections: list[Section], abstract: str) -> Pa
         else:
             kept.append(k)
     return ps.model_copy(
-        update={"summary": summary.model_copy(update={"hook": hook, "key_numbers": kept}),
+        update={"summary": summary.model_copy(update={"hook": hook, "key_numbers": kept[:3]}),
                 "checks": checks}
     )

@@ -150,11 +150,15 @@ def _migrate(conn: sqlite3.Connection, from_version: int) -> None:
         pass  # v3 -> v4: the `requests` table is added by CREATE TABLE IF NOT EXISTS
 
 
-def open_db(path: Path) -> sqlite3.Connection:
-    """Open (creating if needed) the database with all tables, WAL and Row access."""
+def open_db(path: Path, *, check_same_thread: bool = True) -> sqlite3.Connection:
+    """Open (creating if needed) the database with all tables, WAL and Row access.
+
+    ``check_same_thread=False`` is for the app server only: one request opens, uses and closes its
+    connection strictly one step after another, but those steps may run on different worker threads.
+    """
     # Wait up to 5 s for another connection to finish writing before failing with "database is
     # locked" (Python's default, written out: app commands write while a locked pipeline job runs).
-    conn = sqlite3.connect(path, timeout=5.0)
+    conn = sqlite3.connect(path, timeout=5.0, check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     # Check the version before anything that could write to the file (WAL, tables, migration).
     version = conn.execute("PRAGMA user_version").fetchone()[0]

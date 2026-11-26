@@ -19,8 +19,12 @@ templates = Jinja2Templates(
 
 
 def get_conn(request: Request) -> Iterator[sqlite3.Connection]:
-    """FastAPI dependency: one database connection per request, closed afterwards."""
-    conn = db.open_db(request.app.state.vault_db)
+    """FastAPI dependency: one database connection per request, closed afterwards.
+
+    Opening, using and closing can land on different worker threads, so the same-thread check is
+    off; the request still uses the connection strictly one step at a time.
+    """
+    conn = db.open_db(request.app.state.vault_db, check_same_thread=False)
     try:
         yield conn
     finally:

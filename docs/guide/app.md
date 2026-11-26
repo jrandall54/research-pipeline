@@ -18,7 +18,7 @@ Step by step, for one request:
 
 1. The browser asks for a page, for example `GET /`.
 2. **The guard** (`webapp/guard.py`, run by a middleware for every request) checks the `Host` header and, for anything that changes data, the `Origin` header. A failed check ends the request here (see Security).
-3. The route handler opens a database connection (`server.get_conn`, one per request, always closed), calls `library_api` for data objects, and fills a Jinja2 template with them.
+3. The route handler opens a database connection (`deps.get_conn`, one per request, always closed; opened with `check_same_thread=False` because FastAPI may open, use and close it on different worker threads, which is safe as the request uses it one step at a time), calls `library_api` for data objects, and fills a Jinja2 template with them.
 4. The template extends `base.html`, which supplies the head (viewport, manifest, icon, stylesheet), the navigation and the page frame. The page goes back to the browser.
 5. The CSS, script, fonts and icon come from `/static`, served by the same server. A page makes no request to any other site, so nothing about what you read leaks to a font or script host.
 

@@ -105,3 +105,16 @@ def test_cards_and_paper_page_have_vote_and_save_buttons(client):
         assert 'data-action="vote-up"' in html and "More like this" in html
         assert 'data-action="vote-down"' in html and "Less like this" in html
         assert 'data-action="save"' in html
+
+
+def test_concurrent_requests_share_no_connection_trouble(client):
+    from concurrent.futures import ThreadPoolExecutor
+
+    def hit(i):
+        if i % 2:
+            return client.get("/paper/2611.25005").status_code
+        return _post(client, "/api/paper/2611.25005/vote", {"direction": "up" if i % 4 else "clear"}).status_code
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        codes = list(pool.map(hit, range(80)))
+    assert set(codes) == {200}

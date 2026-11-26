@@ -150,6 +150,8 @@
 
 **Timer** — a systemd unit that starts a service on a schedule; with `Persistent=true` it also catches up a run missed while the machine was off. See `scheduling.md`.
 
+**Always-on service** — the app run by systemd in the background (`rpipe app install`), started at login and restarted if it crashes, so the phone icon always works. Not the same as the nightly timer. See `app.md`.
+
 **Linger** — `loginctl enable-linger $USER`: keeps your user services running while you are logged out, so the nightly timer fires with nobody logged in. `rpipe schedule install` prints it but never runs it. See `scheduling.md`.
 
 **`Type=oneshot`** — a service that runs to completion and exits; systemd treats it as finished when the process ends. See `scheduling.md`.

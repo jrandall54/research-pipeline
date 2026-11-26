@@ -115,9 +115,34 @@ Worked example: you have the app open and also visit `evil.example`, whose page 
 
 What it does not defend against: another person on your tailnet. They can use the app, as with `rpipe serve`.
 
+## Setting it up
+
+**What it does.** Two ways to run the app: `rpipe app run` in a terminal (stops when you close it; good for trying it), or `rpipe app install` to keep it running in the background, started at login, so the home-screen icon always works.
+
+**How it works.**
+
+1. Install the app extra once: `uv tool install --editable '.[embed,serve,app]' --force` (from the repo). In the repo itself, `uv sync --extra embed --extra serve --extra app`. Without it, every `rpipe app` command that needs the web libraries stops with this exact instruction and writes nothing.
+2. Try it: `rpipe app run`. It checks the extra, opens the vault once (which applies any database upgrade), works out the address, prints `Your feed is at http://100.64.0.5:8002/ (only your own devices can reach it)` and serves until Ctrl+C. It does not take the pipeline lock, so it can run while the nightly pipeline does.
+3. Keep it on: `rpipe app install`. It resolves and checks the address *now* (a refused address stops here, before anything is written), asks systemd whether its user manager is reachable, writes `~/.config/systemd/user/research-pipeline-app.service`, reloads systemd and enables the service at once. It prints the address and a reminder of `loginctl enable-linger $USER` (so the service survives logging out; the command never runs it for you).
+4. Open the address it printed, with the number, on your phone or laptop. Tailscale machine names (such as `machine.tailnet.ts.net`) are not accepted in this version: the guard allows only the exact address the app listens on. On a phone, use the browser's Add to Home Screen (iPhone: Share, then Add to Home Screen; Android: the menu, then Add to Home screen) to get the icon.
+5. `rpipe app status` says `Running at http://...`, `Installed but not running. Check: journalctl --user -u research-pipeline-app`, or `Not installed. Set it up with: rpipe app install`. `rpipe app uninstall` stops the service and deletes the file.
+
+The unit is small: it sets `RESEARCH_VAULT`, runs `rpipe app run --host H --port P`, restarts itself 10 seconds after a crash, and starts after the network and Tailscale are up. `--host` and `--port` (default 8002) can be given to `run` and `install`; the default host is this machine's Tailscale address, and only localhost, loopback and Tailscale addresses are accepted (the `netguard` allowlist). The set of Host names the guard accepts is built from the bind address by `service.allowed_hosts`: the bind address itself, plus `localhost`, `127.0.0.1` and `::1` when you bind to a loopback address.
+
+**Why it's built this way.**
+
+- **A user service, as the nightly timer is.** No root, same tools, same linger rule. Rejected: a system service (needs sudo) and a second always-on process of our own (systemd already restarts, logs and starts at login).
+- **The address is fixed in the unit.** It is read back by `status` from the unit file, so status works even when Tailscale is down. If your Tailscale address ever changes, run `rpipe app install` again.
+- **Checks before writes.** The extra, the address and systemd are all checked first, so a failed install leaves nothing half-done.
+- **Two services now.** The nightly timer (`research-pipeline.service`/`.timer`, see [scheduling.md](scheduling.md)) and this always-on one (`research-pipeline-app.service`) are independent; removing one never touches the other.
+
+**How to run / check it.** `rpipe app run`, then open the printed address. Tests: `uv run pytest tests/test_webapp_service.py tests/test_cli_app.py -q` (offline: fake `systemctl` runner, `uvicorn.run` replaced, no real server or unit file).
+
+**Where the code is.** `src/research_pipeline/webapp/service.py` (`render_service`, `install`, `remove`, `address`, `is_active`, `allowed_hosts`) and the `app` commands in `src/research_pipeline/cli.py` (`app_run`, `app_install`, `app_uninstall`, `app_status`).
+
 ## How to run / check it
 
-Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static files, a wrong `Host` (400), a cross-site and a header-less POST (403), a same-origin POST reaching the router (404, JSON under `/api/`), IPv6 hosts, the `Referer` fallback and template escaping. The `rpipe app` commands that start the server come in a later task.
+Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static files, a wrong `Host` (400), a cross-site and a header-less POST (403), a same-origin POST reaching the router (404, JSON under `/api/`), IPv6 hosts, the `Referer` fallback and template escaping. The `rpipe app` commands are covered in "Setting it up".
 
 ## Where the code is
 
@@ -130,4 +155,5 @@ Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static fi
 - `src/research_pipeline/webapp/routes_actions.py`: the `/api/paper/{id}/vote`, `save` and `summarize` endpoints; `templates/_actions.html` is the button row; the click handling is the second block of `static/app.js`.
 - `src/research_pipeline/webapp/routes_pages.py`: `/paper/{id}`, `/saved`, `/search`; `present.paper_detail` shapes the paper page.
 - `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`, `paper.html`, `list.html` (Saved and Search), `404.html`.
-- `tests/test_webapp_server.py`, `tests/test_webapp_present.py`, `tests/test_webapp_feed.py`, `tests/test_webapp_pages.py`.
+- `src/research_pipeline/webapp/service.py`: the always-on service (see Setting it up).
+- `tests/test_webapp_service.py`, `tests/test_cli_app.py`, `tests/test_webapp_server.py`, `tests/test_webapp_present.py`, `tests/test_webapp_feed.py`, `tests/test_webapp_pages.py`.

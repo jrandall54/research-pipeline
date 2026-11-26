@@ -2,6 +2,8 @@
 
 ## What it does
 
+There are now two systemd user services: this nightly timer, and the always-on app (`rpipe app install`, see [app.md](app.md), Setting it up). They are independent; `rpipe schedule remove` does not touch the app.
+
 `rpipe schedule` makes the pipeline run by itself every night, without cron and without you remembering. It writes two small files that tell systemd (the Linux service manager) to run `rpipe run` once a day at a time you choose (default 03:00), and switches them on. That nightly run also works through the request list: papers you asked to have summarized (see "The request list" in `running.md`) are done after the night's own summaries, so nothing extra needs scheduling.
 
 Commands (`install` and `show` take `--time` and `--vault`; no file editing needed):

@@ -27,6 +27,7 @@ from research_pipeline import (
     categories,
     judge,
     library_api,
+    netguard,
     ollama_fit,
     ollama_tune,
     onboarding,
@@ -3036,12 +3037,11 @@ def _platform() -> str:
     return platform.system()
 
 
-def _need_linux() -> None:
+def _need_linux(command: str = "schedule") -> None:
     if (system := _platform()) != "Linux":
-        raise _fail(
-            "rpipe schedule uses systemd, which only exists on Linux. "
-            f"On {system}, run `rpipe run` once a day from your own scheduler (see the README)."
-        )
+        hint = (f"On {system}, run `rpipe run` once a day from your own scheduler (see the README)."
+                if command == "schedule" else f"On {system}, start it by hand with `rpipe app run`.")
+        raise _fail(f"rpipe {command} uses systemd, which only exists on Linux. {hint}")
 
 
 def _need_systemctl(writes: bool = False) -> None:
@@ -3197,6 +3197,113 @@ def serve_cmd(
         signal.signal(signal.SIGTERM, old_handler)
     if code:
         raise typer.Exit(code=code)
+
+
+app_app = typer.Typer(help="Your private feed in a browser: run it, or keep it always on.", no_args_is_help=True)
+app.add_typer(app_app, name="app")
+
+_APP_MISSING = (
+    "The app is not installed. Install it with: uv sync --extra embed --extra serve --extra app (in the repo), "
+    "or for plain rpipe: uv tool install --editable '.[embed,serve,app]' --force"
+)
+
+
+def _app_available() -> bool:
+    """Are the app's web libraries importable here? (Replaced in tests.)"""
+    return all(importlib.util.find_spec(name) is not None for name in ("fastapi", "uvicorn", "jinja2"))
+
+
+def _app_host(host: str | None) -> str:
+    try:
+        return netguard.resolve_host(host, netguard.system_runner)
+    except netguard.HostError as exc:
+        raise _fail(str(exc)) from exc
+
+
+@app_app.command("run")
+def app_run(
+    host: Annotated[str | None, typer.Option(help="Address to listen on (default: this machine's Tailscale IPv4).")] = None,
+    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8002,
+    vault: VaultOption = None,
+) -> None:
+    """Start the app in this terminal (Ctrl+C stops it). For always-on, use `rpipe app install`."""
+    if not _app_available():
+        raise _fail(_APP_MISSING)
+    ctx = _open(vault)  # applies WAL mode and schema upgrades before the app opens the file
+    ctx.conn.close()
+    bind = _app_host(host)
+    import uvicorn
+
+    from research_pipeline.webapp import service as app_service
+    from research_pipeline.webapp.server import create_app
+
+    shown = f"[{bind}]" if ":" in bind else bind
+    typer.echo(f"Your feed is at http://{shown}:{port}/ (only your own devices can reach it)")
+    uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind)),
+                host=bind, port=port, log_level="warning")
+
+
+@app_app.command("install")
+def app_install(
+    host: Annotated[str | None, typer.Option(help="Address to listen on (default: this machine's Tailscale IPv4).")] = None,
+    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8002,
+    vault: VaultOption = None,
+) -> None:
+    """Keep the app running in the background, started at login (a systemd user service)."""
+    from research_pipeline.webapp import service as app_service
+
+    _need_linux("app")
+    path = _schedule_vault(vault)
+    if not _app_available():
+        raise _fail(_APP_MISSING + " Nothing was written.")
+    bind = _app_host(host)
+    rpipe_cmd = _rpipe_path()
+    _need_systemctl(writes=True)
+    try:
+        written = app_service.install(path, rpipe_cmd, bind, port, schedule.default_unit_dir(), schedule.system_runner)
+    except schedule.ScheduleError as exc:
+        raise _fail(str(exc)) from exc
+    typer.echo(f"wrote {written}")
+    typer.echo(f"The app is running. Open {app_service.address(written.parent)} on any device on your tailnet "
+               "(use the address with the number; a machine name will not work).")
+    typer.echo("On a phone, use the browser's Add to Home Screen to get an app icon.")
+    typer.echo(_LINGER_HINT)
+
+
+@app_app.command("uninstall")
+def app_uninstall() -> None:
+    """Stop the background app and delete its service file."""
+    from research_pipeline.webapp import service as app_service
+
+    _need_linux("app")
+    try:
+        removed, warnings = app_service.remove(schedule.default_unit_dir(), schedule.system_runner)
+    except schedule.ScheduleError as exc:
+        raise _fail(str(exc)) from exc
+    for w in warnings:
+        typer.echo(f"warning: {w}", err=True)
+    typer.echo("\n".join(f"removed {f}" for f in removed) or "nothing was installed")
+
+
+@app_app.command("status")
+def app_status() -> None:
+    """Say whether the background app is installed and running, and where to open it."""
+    from research_pipeline.webapp import service as app_service
+
+    _need_linux("app")
+    addr = app_service.address(schedule.default_unit_dir())
+    if addr is None:
+        typer.echo("Not installed. Set it up with: rpipe app install")
+        return
+    _need_systemctl()
+    try:
+        active = app_service.is_active(schedule.system_runner)
+    except schedule.ScheduleError as exc:
+        raise _fail(str(exc)) from exc
+    if active:
+        typer.echo(f"Running at {addr}")
+    else:
+        typer.echo("Installed but not running. Check: journalctl --user -u research-pipeline-app")
 
 
 sources_app = typer.Typer(help="List, turn on and turn off paper sources.", no_args_is_help=True)

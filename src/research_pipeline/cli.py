@@ -3297,6 +3297,38 @@ def _app_host(host: str | None) -> str:
         raise _fail(str(exc)) from exc
 
 
+def _app_settings(ctx: _Context) -> tuple[list[str], dict | None]:
+    """What the People page needs from the vault: your topic names and your sharing state.
+
+    A missing or broken profile only means no topics; it never stops the app from starting.
+    """
+    try:
+        topics = list(load_profile(ctx.vault / "profile.yaml").topics)
+    except Exception:  # noqa: BLE001 - the app needs topic names only; any profile problem means none
+        topics = []
+    share = None
+    if ctx.config.share_enabled and ctx.config.share_handle:
+        handle = ctx.config.share_handle
+        share = {"handle": handle, "display_name": ctx.config.share_display_name or handle,
+                 "address": share_publish.feed_url(handle)}
+    return topics, share
+
+
+def _restart_app_if_installed() -> None:
+    """After a sharing change, restart the background app (if installed and running) so People shows it."""
+    from research_pipeline.webapp import service as app_service
+
+    if _platform() != "Linux" or shutil.which("systemctl") is None:
+        return
+    if app_service.address(schedule.default_unit_dir()) is None:
+        return
+    try:
+        if app_service.is_active(schedule.system_runner) and app_service.restart(schedule.system_runner):
+            typer.echo("Restarted the app so it shows the change.")
+    except Exception:  # noqa: BLE001 - a restart problem must never fail a sharing command that worked
+        return
+
+
 @app_app.command("run")
 def app_run(
     host: Annotated[str | None, typer.Option(help="Address to listen on (default: this machine's Tailscale IPv4).")] = None,
@@ -3315,18 +3347,11 @@ def app_run(
     from research_pipeline.webapp.server import create_app
 
     shown = f"[{bind}]" if ":" in bind else bind
-    profile = _load_profile(ctx)
-    share = None
-    if ctx.config.share_enabled and ctx.config.share_handle:
-        from research_pipeline import share_publish
-
-        handle = ctx.config.share_handle
-        share = {"handle": handle, "display_name": ctx.config.share_display_name or handle,
-                 "address": share_publish.feed_url(handle)}
+    my_topics, share = _app_settings(ctx)
     typer.echo(f"Your feed is at http://{shown}:{port}/ (only your own devices can reach it)")
     typer.echo("Open exactly this address: a machine name such as name.tailnet.ts.net will not work.")
     uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind), f"http://{shown}:{port}/",
-                                my_topics=profile.topics, share=share),
+                                my_topics=my_topics, share=share),
                 host=bind, port=port, log_level="warning")
 
 
@@ -3607,6 +3632,7 @@ def share_setup(vault: VaultOption = None) -> None:
             profile_edit.set_share(ctx.vault, enabled=True, display_name=name, handle=handle)
         except share_github.GithubError as exc:
             raise _fail(str(exc)) from exc
+        _restart_app_if_installed()
         typer.echo(f"Your feed is live: {address}")
         typer.echo("It updates every night. Others can follow it with `rpipe share follow " + handle + "`.")
 
@@ -3691,6 +3717,7 @@ def share_set_name(
         except share_github.GithubError as exc:
             raise _fail(f"Name saved, but publishing failed (tonight's run will retry): {exc}") from exc
     typer.echo(f"Display name changed to '{name}' and published.")
+    _restart_app_if_installed()
 
 
 @share_app.command("stop")
@@ -3722,6 +3749,7 @@ def share_stop(
         except share_github.GithubError as exc:
             raise _fail(str(exc)) from exc
         profile_edit.set_share(ctx.vault, enabled=False)
+    _restart_app_if_installed()
     if delete:
         typer.echo("Deleted your rpipe-feed repository and stopped publishing.")
     else:

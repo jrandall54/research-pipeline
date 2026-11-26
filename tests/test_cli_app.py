@@ -131,3 +131,22 @@ def test_app_uninstall(fake):
     res = runner.invoke(cli.app, ["app", "uninstall"])
     assert res.exit_code == 0 and "removed" in res.output
     assert not (unit_dir / service.SERVICE_NAME).exists()
+
+
+def test_app_settings_survive_a_broken_profile(fake):
+    _, _, vault = fake
+    (vault / "profile.yaml").write_text("topics: [unclosed")
+    assert cli._app_settings(cli._open(vault)) == ([], None)
+    (vault / "profile.yaml").unlink()
+    assert cli._app_settings(cli._open(vault)) == ([], None)
+
+
+def test_app_settings_read_topics_and_share_from_config(fake):
+    from research_pipeline import profile_edit
+
+    _, _, vault = fake
+    profile_edit.set_share(vault, enabled=True, display_name="Alex M.", handle="alex")
+    topics, share = cli._app_settings(cli._open(vault))
+    assert topics == ["x"]
+    assert share == {"handle": "alex", "display_name": "Alex M.",
+                     "address": "https://alex.github.io/rpipe-feed/feed.json"}

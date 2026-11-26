@@ -120,6 +120,8 @@ Worked example: your digest on 2026-11-26 lists 3 papers. `collect_posts` return
 
 **Credentials.** rpipe stores no password or token. Pushes use the sign-in that `gh` keeps (set up in step 5). If a push fails (signed out, no network, repository deleted) the stage fails with git's own message, for example "Pushing the feed failed: remote: Permission denied", and the rest of the night's run is unaffected.
 
+**The app after a sharing change.** `setup`, `set-name` and `stop` finish by restarting the background app (`research-pipeline-app`, see app.md) if it is installed and running, because the People page reads your sharing state when the app starts. It prints "Restarted the app so it shows the change."; if the app is not installed nothing happens, and a failed restart never fails the command.
+
 **Stopping.** Turning sharing off removes the directory topic. If a push fails, the commit stays local and the next night pushes it. Deleting the feed deletes the `rpipe-feed` repository (`gh` first asks GitHub for the extra `delete_repo` permission); followers then see your feed disappear.
 
 Every GitHub operation goes through a small `Runner` (it runs one command and returns its output). The real one runs `git` and `gh` with `GIT_TERMINAL_PROMPT=0` so nothing ever waits on a hidden prompt; tests pass a `FakeRunner` that records the commands and plays back scripted replies, so no test touches GitHub.

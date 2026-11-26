@@ -5,13 +5,14 @@ import pytest
 from fakes import FakeRunner, done
 from typer.testing import CliRunner
 
-from research_pipeline import cli, profile_edit, share_publish
+from research_pipeline import cli, profile_edit, schedule, share_publish
 from research_pipeline import feed_format as ff
 from research_pipeline.vault import init_vault, load_config
 
 runner = CliRunner()
 NOW = "2026-11-26T03:00:00Z"
 BASE = "https://alex.github.io/rpipe-feed/"
+SYSTEMCTL: list = []
 
 
 def feed_files(name="Alex M."):
@@ -51,6 +52,10 @@ def vault(tmp_path, monkeypatch):
     path = tmp_path / "vault"
     init_vault(path, topics=["agents"])
     monkeypatch.setattr(share_publish, "wait_live", lambda *a, **k: True)
+    # No test may touch the real app service: the unit directory is empty and systemctl is recorded.
+    monkeypatch.setattr(schedule, "default_unit_dir", lambda: tmp_path / "units")
+    monkeypatch.setattr(schedule, "system_runner", lambda c: SYSTEMCTL.append(c) or 0)
+    SYSTEMCTL.clear()
     return path
 
 
@@ -236,3 +241,46 @@ def test_browse_filters_and_marks_followed(vault, monkeypatch):
     assert "papers a day" in out and "you follow them" not in out
     assert "No feeds found." in sh(vault, "browse", "zzz").output
     assert "@alex" in sh(vault, "browse", "AGENTS").output
+
+
+def install_app_unit(tmp_path):
+    from research_pipeline.webapp import service
+
+    unit = tmp_path / "units"
+    unit.mkdir()
+    (unit / service.SERVICE_NAME).write_text("ExecStart=/x/rpipe app run --host 127.0.0.1 --port 8002\n")
+
+
+def _linux(monkeypatch):
+    monkeypatch.setattr(cli, "_platform", lambda: "Linux")
+    monkeypatch.setattr(cli.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+
+@pytest.mark.parametrize("args", [("set-name", "Alex Morgan"), ("stop",)])
+def test_sharing_change_restarts_installed_app(vault, monkeypatch, tmp_path, args):
+    _linux(monkeypatch)
+    install_app_unit(tmp_path)
+    enable(vault)
+    use(monkeypatch, signed_in())
+    res = sh(vault, *args)
+    assert res.exit_code == 0, res.output
+    assert "Restarted the app so it shows the change." in res.output
+    assert ["systemctl", "--user", "restart", "research-pipeline-app.service"] in SYSTEMCTL
+
+
+def test_setup_restarts_installed_app(vault, monkeypatch, tmp_path):
+    _linux(monkeypatch)
+    install_app_unit(tmp_path)
+    use(monkeypatch, signed_in())
+    res = sh(vault, "setup", input="Alex M.\ny\n")
+    assert res.exit_code == 0, res.output
+    assert "Restarted the app so it shows the change." in res.output
+
+
+def test_sharing_change_without_installed_app_does_nothing(vault, monkeypatch):
+    _linux(monkeypatch)
+    enable(vault)
+    use(monkeypatch, signed_in())
+    res = sh(vault, "set-name", "Alex Morgan")
+    assert res.exit_code == 0 and "Restarted" not in res.output
+    assert SYSTEMCTL == []

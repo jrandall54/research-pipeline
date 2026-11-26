@@ -12,6 +12,7 @@ from typing import Literal
 
 # `claims` and `unknown_citations` are re-exported: callers and tests import them from here.
 from research_pipeline.citations import claims, generate_checked, unknown_citations  # noqa: F401
+from research_pipeline.extras import check_extras
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable
 from research_pipeline.llm import LLM, LlmError, LlmLimitReached, LlmTimeout
 from research_pipeline.models import Section, Status
@@ -66,7 +67,7 @@ def phase_note(name: str, pid: str) -> str:
     return f"{label.get(name, 'retrying citations for')} {pid}"
 
 
-def summarize_paper(
+def _read_paper(
     llm: LLM, title: str, abstract: str, sections: list[Section] | None, num_ctx: int,
     on_phase: Callable[[str], None] | None = None,
     *,
@@ -154,6 +155,22 @@ def summarize_paper(
         dropped=fit.dropped,
         unverified=bad_s + bad_c,
     )
+
+
+def summarize_paper(
+    llm: LLM, title: str, abstract: str, sections: list[Section] | None, num_ctx: int,
+    on_phase: Callable[[str], None] | None = None,
+    *,
+    mode: Literal["whole", "split"] = "whole",
+    fallback_above: int | None = None,
+) -> PaperSummary:
+    """Summary and critique of one paper (see `_read_paper`), then the hook and key numbers are
+    checked against the paper's text: a hook or key number that fails is dropped and the reason
+    goes to ``checks`` (extras.py)."""
+    result = _read_paper(llm, title, abstract, sections, num_ctx, on_phase,
+                         mode=mode, fallback_above=fallback_above)
+    full = sections if sections is not None else [Section(title="Abstract", text=abstract)]
+    return check_extras(result, full, abstract)
 
 
 def run_summarize(

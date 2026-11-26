@@ -84,7 +84,7 @@ A paper has sections `Abstract`, `1 Introduction`, `2 Method`, `3 Results`. The 
 - **Key numbers.** `key_numbers` is 0 to 3 numbers the paper reports that matter most. Each has a `value` (exactly as the paper writes it, e.g. "28%"), a `label` (what it measures, a few plain words) and the `sections` it comes from. Zero is allowed: a paper with no numbers has none to show.
 - **Plain words.** Both the summary and critique tasks, and the combine calls when a paper is read in parts, carry one rule: "Write for a reader who is not an expert in this field: short sentences, everyday words, and when a technical term is needed, explain it in a few words. Keep the paper's numbers." It is not in the notes or condense prompts, because those notes are internal and never shown.
 
-The hook and key numbers are checked by code against the paper before they are shown (section "Hook and key numbers: how they are checked", added with the check). The prompt only asks; code does not trust the model here.
+The hook and key numbers are checked by code against the paper before they are shown (section "Hook and key numbers: how they are checked"). The prompt only asks; code does not trust the model here.
 
 **Why a hook, and why this definition.** The owner's definition: a hook is not clickbait. It crystallizes the paper's real finding in one digestible line, so a reader can decide in a second whether to open the paper. That is why the prompt demands the finding itself, as a fact, and bans teasers (a teaser holds the answer back, which is the opposite). Phase 8.1 shows a claim's two sentences as two separate points, which is why the sentence limit says "short": each sentence should stand as one readable point. Why the plain-words rule: the digest is read by people outside the paper's field (the AI club), and a summary in the paper's own jargon does not help them. Changing the wording bumped `PROMPT_VERSION` to `2026-11-p9`, so old and new summaries can be told apart by their provenance.
 
@@ -287,6 +287,31 @@ The decision is made before any model call, so a paper that falls back costs onl
 Split passes the pass rule (`evaluation.md`: facts covered did not drop, contradictions and unverified citations did not rise), so reading in parts does not cost quality. On a GPU that holds the whole model it is about 17% slower, so `auto` keeps `whole` there; that is why the rule reads whole when the model is fully in GPU memory with room for a typical paper. Two cautions: per paper the counts swing by up to 3 facts between runs (the same whole setup scored 19 on 2026-11-22), so a difference of 2 across the set is within noise; and split's speed on a CPU-only or spilled model, the case `auto` sends to split, was not measured yet (a CPU night takes hours). Until it is, "split is faster there" is the reasoning (each prompt is a fraction of the paper, and a slow model pays most for long prompts), not a measurement.
 
 **How to check it.** `rpipe model show` prints the setting. During `rpipe run`, `rpipe summarize` and `rpipe eval run` the `reading mode` stage shows the choice and the reason. `tests/test_parts.py` checks `resolve_mode` for each case above; `tests/test_profile_edit.py` and `tests/test_cli_model.py` check `set-mode` (capitals accepted, a bad value refused with the choices listed and nothing changed, works under Claude Code) and the `model show` line; `tests/test_llm.py` checks `load()` (empty prompt, context, keep-alive, an error reply raises, waits at most `CALL_TIMEOUT`); `tests/test_spill.py` checks that `run` passes the mode and `fallback_above` (Ollama with a deadline gets the model's cap, deadline off gets `0`, Claude Code gets `whole` and `0`), that a set mode skips the load, that the load note comes before the choice, that a run with nothing queued has no `reading mode` stage and loads nothing, that a failed load reads whole with the reason in the note, and that `rpipe summarize` follows the deadline setting rather than the clock.
+
+### Hook and key numbers: how they are checked
+
+**What it does.** The model writes a hook and up to three key numbers, but it can invent a figure. Before they are saved, code checks each against the paper's own text. A hook or key number that fails is dropped (the card shows the one-line summary instead), and the reason is kept in the summary's `checks` list so you can see what was removed and why.
+
+**How it works.**
+
+1. For each hook and key number, code looks up the text of every section it cites (`citations.section_texts`). Titles match ignoring case and spaces. The title "Abstract" always also matches the paper's abstract, even when the stored full text has no Abstract section.
+2. If any cited section does not exist, it fails: `hook: cites a section the paper does not have`.
+3. `numbers.numbers_in` lists the numbers in the hook (or in the key number's `value`). Version names such as GPT-5.5 and section marks such as §5 are not claims and are skipped. Each number must be found in the cited text (`number_found`; a paper that writes 28.4% may be rounded to 28%).
+4. A hook with no numbers passes on its citations alone. A key number whose value holds no number fails: `key number many: not a number`.
+5. The whole-paper path and the reading-in-parts path both go through `generate_checked`, which counts a bad hook or key-number citation as a reason for the one citation retry. After the retry, `check_extras` (`extras.py`) drops what still fails.
+
+Worked example (the ACAP paper). Section 5.1 says "ACAP cut latency by 28%".
+- Hook "ACAP cuts latency by 28%", cites 5.1: 28% is found, so it is kept.
+- Hook "ACAP is twice as fast", cites 5.1: no digits, so only the citation is checked, and it passes.
+- Hook "ACAP is 2.5x faster", cites 5.1: 2.5x is not in that section, so the hook is dropped and `checks` gets `hook: 2.5x not found in §5.1`.
+
+**What code cannot check.** Words. "Twice as fast" for a 28% cut is an overstatement, and no number check sees it. The prompt bans hype, and the one-line summary and the cited sections stay next to the hook for a reader to compare.
+
+**Why it is built this way.** Rejected: letting the model grade its own hook (it would approve its own invention); loose matching (a number "close enough" anywhere in the paper would let a wrong figure through). Exact, local matching with a small rounding allowance is cheap, offline and explainable. Hook and key numbers never go into `unverified`: that list is only for the main claims.
+
+**How to check it.** `uv run pytest -q tests/test_extras.py tests/test_summarize.py`.
+
+**Where the code is.** `src/research_pipeline/extras.py` (`check_extras`), `citations.py` (`section_texts`, `extra_claims`), `numbers.py`, wired in `summarize.summarize_paper`.
 
 ### Provenance: which model and prompt wrote this
 

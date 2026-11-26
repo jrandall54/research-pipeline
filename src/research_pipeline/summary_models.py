@@ -44,7 +44,7 @@ class Summary(BaseModel):
     approach: Claim
     results: Claim
     limitations: Claim
-    hook: Claim | None = None  # one catchy, checkable sentence; None when the model gave none
+    hook: Claim | None = None  # the finding in one plain, checkable line (not clickbait); None when absent
     key_numbers: list[KeyNumber] = []
 
 

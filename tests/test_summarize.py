@@ -875,3 +875,21 @@ def test_failed_split_read_is_read_whole_never_map_reduced():
 
 def test_phase_note_for_unusable_notes():
     assert phase_note("notes_unusable", "2401.00001") == "notes unusable for 2401.00001; reading it whole"
+
+
+def test_summarize_paper_applies_extras_check():
+    hook = Claim(text="Reaches 99% accuracy.", sections=["3 Results"])
+    llm = FakeLLM([summary().model_copy(update={"hook": hook}), critique()])
+    result = summarize_paper(llm, "Paper T", "We study X.", SECTIONS, 32768)
+    assert result.summary.hook is None
+    assert result.checks == ["hook: 99% not found in §3"]
+    assert result.unverified == []
+
+
+def test_bad_hook_citation_triggers_the_one_retry():
+    bad = summary().model_copy(update={"hook": Claim(text="Big win.", sections=["9 Nowhere"])})
+    good = summary().model_copy(update={"hook": Claim(text="Big win.", sections=["3 Results"])})
+    llm = FakeLLM([bad, good, critique()])
+    result = summarize_paper(llm, "Paper T", "We study X.", SECTIONS, 32768)
+    assert len(llm.calls) == 3
+    assert result.summary.hook is not None and result.checks == []

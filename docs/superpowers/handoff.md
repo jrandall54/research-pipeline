@@ -4,7 +4,7 @@ Current state and next steps only. Read `ROADMAP.md` for the full list of phases
 
 ## State (2026-11-26)
 
-- Phases 1 to 9.3 merged to `main` and pushed. Phase 10 (sharing) is built on branch `phase-10-sharing`, awaiting merge. `uv run pytest -q`: 1940 passing, ruff clean.
+- Phases 1 to 10 merged to `main` and pushed (Phase 10 = sharing, 2026-11-26). `uv run pytest -q`: 1940 passing, ruff clean.
 - Phase 10 lets the owner publish their picked papers and summaries as a public feed (`rpipe share setup`), browse and follow other people's feeds (`rpipe share browse`, `follow`, or the People page in the app), and see Mine, Following and Mix in the feed. Nothing leaves the machine until sharing is turned on; with no follows the feed looks as before apart from a People link.
 - Diagrams are off (Phase 9.3 owner ruling: `rpipe model set-diagrams off`). Summaries and the app's look stay as they are (owner ruling 2026-11-26); don't bring the old redesign back unless asked.
 

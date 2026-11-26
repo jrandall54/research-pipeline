@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ d.card.title }} - Research Feed{% endblock %}
+{% block content %}
+{% set c = d.card %}
+<div class="paper-layout">
+  {% if day %}
+  <aside class="day-list" aria-label="{{ day_heading }}">
+    <h2>{{ day_heading }}</h2>
+    <ul>
+      {% for pid, title in day %}
+      <li><a href="/paper/{{ pid }}" {% if pid == c.id %}aria-current="true"{% endif %}>{{ title }}</a></li>
+      {% endfor %}
+    </ul>
+  </aside>
+  {% endif %}
+  <article class="reader" data-paper-id="{{ c.id }}">
+    <p class="back"><a href="{% if day_date %}/day/{{ day_date }}{% else %}/{% endif %}">&larr; Back</a></p>
+    {% if c.topic %}<div class="topic" style="color: var(--topic-{{ c.topic_color }})">{{ c.topic }}</div>{% endif %}
+    <h1 class="paper-title">{{ c.title }}</h1>
+    {% if d.authors_short %}<p class="authors muted">{{ d.authors_short }}</p>{% endif %}
+    {% if c.safe_url %}<p><a class="btn" href="{{ c.safe_url }}" rel="noopener noreferrer" target="_blank">Read the paper</a></p>{% endif %}
+
+    {% if c.one_line %}
+      <p class="one-line lead">{{ c.one_line }}</p>
+      {% for label, f in [("The problem", c.problem), ("What they did", c.approach), ("What they found", c.results)] %}
+        {% if f %}<p class="field"><span class="field-label">{{ label }}</span>
+          {{ f[0] }}{% if f[1] %} <span class="tag mono">{{ f[1] }}</span>{% endif %}</p>{% endif %}
+      {% endfor %}
+      {% if d.strengths or d.weaknesses or d.questions %}<h2>How solid is it?</h2>{% endif %}
+      {% if d.strengths %}
+        <h3>Strong points</h3>
+        <ul class="claims">{% for text, tag in d.strengths %}<li>{{ text }}{% if tag %} <span class="tag mono">{{ tag }}</span>{% endif %}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if d.weaknesses %}
+        <h3>Weak points</h3>
+        <ul class="claims">{% for text, tag in d.weaknesses %}<li>{{ text }}{% if tag %} <span class="tag mono">{{ tag }}</span>{% endif %}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if d.questions %}
+        <h3>Questions to ask</h3>
+        <ul class="claims">{% for q in d.questions %}<li>{{ q }}</li>{% endfor %}</ul>
+      {% endif %}
+    {% else %}
+      <p class="field-label">Abstract</p>
+      <p>{{ d.abstract }}</p>
+      <div class="summarize" data-state="{{ c.summarize_state }}">
+        {% if c.summarize_state in ("pending", "running") %}
+          <span class="muted">Summary coming tonight</span>
+        {% elif c.summarize_state == "failed" %}
+          <span class="muted">Couldn't summarize this one</span>
+          <button type="button" class="btn" data-action="summarize" data-paper-id="{{ c.id }}">Try again</button>
+        {% else %}
+          <button type="button" class="btn" data-action="summarize" data-paper-id="{{ c.id }}">Summarize this</button>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    {% if c.why %}<p class="why muted">Why you're seeing this: {{ c.why }}</p>{% endif %}
+    {% include "_actions.html" %}
+
+    {% if d.about %}
+    <details class="about">
+      <summary>About this summary</summary>
+      <ul>{% for line in d.about %}<li>{{ line }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </article>
+</div>
+{% endblock %}

@@ -5,23 +5,19 @@ started as a separate process, so this module only builds its metadata and comma
 """
 
 import importlib.util
-import ipaddress
 import subprocess
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
-Runner = Callable[[list[str]], subprocess.CompletedProcess]
+from research_pipeline import netguard
+from research_pipeline.netguard import Runner, check_host, resolve_host, system_runner, tailscale_ip
+
+ServeError = netguard.HostError
+__all__ = ["Runner", "ServeError", "check_host", "resolve_host", "system_runner", "tailscale_ip"]
 
 # Same format as db._now(): 2026-11-21T09:30:00+00:00
 _TS = "strftime('%Y-%m-%dT%H:%M:%S+00:00', 'now')"
 _EXISTS = "EXISTS (SELECT 1 FROM papers WHERE id = :paper_id)"
-_TAILSCALE_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
-_ALLOWED = "localhost, a loopback address (127.0.0.0/8, ::1), or a Tailscale address (100.64.0.0/10, fd7a:115c:a1e0::/48)"
-
-
-class ServeError(Exception):
-    pass
 
 
 def _vote(value: int, title: str) -> dict:
@@ -71,52 +67,6 @@ def build_metadata() -> dict:
         },
     }
     return {"title": "Research vault", "databases": {"vault": {"queries": queries}}}
-
-
-def system_runner(argv: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)
-
-
-def check_host(host: str) -> str:
-    """Allowlist: localhost, loopback IPs and Tailscale IPs only. Anything else is refused."""
-    h = host.strip().lower()
-    if "%" in h:  # IPv6 scope ids (fe80::1%eth0) are not supported
-        raise ServeError(f"Refusing to listen on {host!r}: scope ids ('%') are not supported. Allowed: {_ALLOWED}.")
-    if h.startswith("[") and h.endswith("]"):
-        h = h[1:-1]
-    if h == "localhost":
-        return h
-    try:
-        ip = ipaddress.ip_address(h)
-    except ValueError:
-        ip = None
-    if ip is not None:
-        if getattr(ip, "ipv4_mapped", None) is None and (
-            ip.is_loopback or any(ip in net for net in _TAILSCALE_NETS if net.version == ip.version)
-        ):
-            return h
-        reason = "is not a loopback or Tailscale address"
-    else:
-        reason = "is not an IP address (or localhost)"
-    raise ServeError(
-        f"Refusing to listen on {host!r}: it {reason}, and this server has no login. Allowed: {_ALLOWED}."
-    )
-
-
-def tailscale_ip(runner: Runner) -> str:
-    msg = "Tailscale not running; use --host 127.0.0.1 to serve locally"
-    try:
-        result = runner(["tailscale", "ip", "-4"])
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ServeError(msg) from exc
-    lines = (result.stdout or "").strip().splitlines()
-    if result.returncode != 0 or not lines:
-        raise ServeError(msg)
-    return check_host(lines[0])
-
-
-def resolve_host(host: str | None, runner: Runner) -> str:
-    return tailscale_ip(runner) if host is None else check_host(host)
 
 
 def command(vault_db: Path, host: str, port: int, metadata_path: Path) -> list[str]:

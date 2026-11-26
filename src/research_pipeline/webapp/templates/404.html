@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Not found - Research Feed{% endblock %}
+{% block content %}
+<section class="empty">
+  <h1>{{ message or "Page not found" }}</h1>
+  <p class="muted"><a href="/">Back to your feed</a> or <a href="/search">search</a>.</p>
+</section>
+{% endblock %}

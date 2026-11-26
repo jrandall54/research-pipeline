@@ -33,6 +33,8 @@ __all__ = [
     "vote", "save", "skip", "unskip", "review_queue", "later_queue", "queue_progress",
     "list_votes", "latest_digest_date", "shelf_items", "shelf_add", "shelf_remove",
     "shelf_sync", "request",
+    "ReasonView", "ProvenanceView", "plain_reasons", "digest_dates", "summarize_states",
+    "summary_provenance",
 ]
 
 
@@ -77,6 +79,27 @@ class VoteView(BaseModel):
     vote: Literal[-1, 1]
     voted_at: str
 
+
+class ReasonView(BaseModel):
+    """One "why you're seeing this" reason in plain form (see ``plain_reasons``)."""
+
+    kind: Literal["topic", "liked", "upvotes", "author", "keyword", "shelf"]
+    label: str
+    paper_id: str | None = None
+
+
+class ProvenanceView(BaseModel):
+    """Which model wrote a summary and when (``created_at`` is the stored timestamp)."""
+
+    model: str
+    created_at: str
+
+
+_TOPIC_REASON = re.compile(r"^topic: (.+?) \(\d+(?:\.\d+)?\)$")
+_PREFIX_REASONS: list[tuple[str, Literal["upvotes", "author", "keyword", "shelf"]]] = [
+    ("HF upvotes: ", "upvotes"), ("followed author: ", "author"),
+    ("keyword: ", "keyword"), ("near your shelf: ", "shelf"),
+]
 
 _DIRECTIONS: dict[str, int] = {"up": 1, "down": -1, "clear": 0}
 
@@ -298,3 +321,58 @@ def open_request_ids(conn: sqlite3.Connection) -> set[int]:
     waiting" (``request`` returns the existing id for a repeat).
     """
     return {row["id"] for row in db.requests_by_status(conn, "pending", "running")}
+
+
+# ---- reasons, dates and states for the app's feed ----
+
+
+def plain_reasons(reasons: list[str]) -> list[ReasonView]:
+    """Turn stored triage reason strings into typed reasons, in order.
+
+    ``disliked similar: ...`` and any string not recognised are dropped (the feed only
+    explains what drew a paper in).
+    """
+    out: list[ReasonView] = []
+    for text in reasons:
+        if m := _TOPIC_REASON.match(text):
+            out.append(ReasonView(kind="topic", label=m.group(1)))
+        elif text.startswith("liked similar: "):
+            out.append(ReasonView(kind="liked", label="", paper_id=text.removeprefix("liked similar: ")))
+        else:
+            for prefix, kind in _PREFIX_REASONS:
+                if text.startswith(prefix):
+                    out.append(ReasonView(kind=kind, label=text.removeprefix(prefix)))
+                    break
+    return out
+
+
+def digest_dates(conn: sqlite3.Connection, limit: int = 60) -> list[str]:
+    """Distinct digest dates (``YYYY-MM-DD``), newest first, at most ``limit``."""
+    rows = conn.execute(
+        "SELECT DISTINCT digest_date FROM papers WHERE digest_date IS NOT NULL"
+        " ORDER BY digest_date DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def summarize_states(
+    conn: sqlite3.Connection, paper_ids: list[str]
+) -> dict[str, Literal["pending", "running", "done", "failed"]]:
+    """Status of the newest ``summarize`` request for each paper; papers with none are absent."""
+    if not paper_ids:
+        return {}
+    marks = ", ".join("?" * len(paper_ids))
+    rows = conn.execute(
+        f"SELECT json_extract(payload, '$.paper_id') AS pid, status, MAX(id) FROM requests"
+        f" WHERE kind = 'summarize' AND json_extract(payload, '$.paper_id') IN ({marks})"
+        f" GROUP BY pid", paper_ids
+    ).fetchall()
+    return {r["pid"]: r["status"] for r in rows}
+
+
+def summary_provenance(conn: sqlite3.Connection, paper_id: str) -> ProvenanceView | None:
+    """Which model made the stored summary and when, or None if unknown (no summary or older row)."""
+    prov = db.get_provenance(conn, paper_id)
+    if not prov or not prov.get("model") or not prov.get("created_at"):
+        return None
+    return ProvenanceView(model=prov["model"], created_at=prov["created_at"])

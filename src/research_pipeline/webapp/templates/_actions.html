@@ -1,0 +1,6 @@
+<div class="actions" data-paper-id="{{ c.id }}">
+  <button type="button" class="btn" data-action="vote-up" aria-pressed="{{ 'true' if c.vote == 1 else 'false' }}">More like this</button>
+  <button type="button" class="btn" data-action="vote-down" aria-pressed="{{ 'true' if c.vote == -1 else 'false' }}">Less like this</button>
+  <button type="button" class="btn" data-action="save" aria-pressed="{{ 'true' if c.saved else 'false' }}">{{ "Saved" if c.saved else "Save" }}</button>
+  <span class="status muted" role="status" aria-live="polite"></span>
+</div>

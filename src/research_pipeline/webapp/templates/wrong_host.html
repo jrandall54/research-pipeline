@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Wrong address - Research Feed{% endblock %}
+{% block content %}
+<section class="empty">
+  <h1>This isn't the address of your feed</h1>
+  <p>This address isn't the one the app listens on, so it won't show your library.</p>
+  {% if address %}<p>Open it at <a href="{{ address }}">{{ address }}</a></p>{% endif %}
+</section>
+{% endblock %}

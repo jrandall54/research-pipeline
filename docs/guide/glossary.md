@@ -150,6 +150,8 @@
 
 **Timer** — a systemd unit that starts a service on a schedule; with `Persistent=true` it also catches up a run missed while the machine was off. See `scheduling.md`.
 
+**Always-on service** — the app run by systemd in the background (`rpipe app install`), started at login and restarted if it crashes, so the phone icon always works. Not the same as the nightly timer. See `app.md`.
+
 **Linger** — `loginctl enable-linger $USER`: keeps your user services running while you are logged out, so the nightly timer fires with nobody logged in. `rpipe schedule install` prints it but never runs it. See `scheduling.md`.
 
 **`Type=oneshot`** — a service that runs to completion and exits; systemd treats it as finished when the process ends. See `scheduling.md`.
@@ -349,3 +351,17 @@
 **Composition layer** — the code allowed to use both the pipeline and the app and wire them together: `cli.py` (every `rpipe` command) and `progress_render.py` (turns progress events into terminal lines). For example, `rpipe run` syncs the shelf (app) and then runs the pipeline stages. See `architecture.md`.
 
 **One door** — the rule that the app reaches the database only through `library_api.py`, so every front end (the terminal today, a web page or MCP tool later) uses the same functions and gets the same data. See `architecture.md`.
+
+**Web server** — a program that stays running and answers requests from a browser: "show me this page" or "record this vote". `rpipe app` is one (built with FastAPI and run by uvicorn). It builds each page when asked, so the page always shows what is in the database right now. See `app.md`.
+
+**Template** — a page written once with blanks in it (`{{ paper.title }}`), which the web server fills in with real data for each request. The app uses Jinja2 templates in `webapp/templates/`; the filling-in escapes special characters, so a paper title containing `<script>` is shown as text and never runs. See `app.md`.
+
+**Web app manifest** — a small JSON file (`manifest.webmanifest`) that tells a phone browser an app's name, icon and that it may open full-screen. It is what makes "Add to Home Screen" give you an icon that opens the feed like an app. See `app.md`.
+
+**Same-origin check** — the server refuses any request that changes something (anything but GET or HEAD) unless the browser says it came from a page on one of the server's own allowed addresses (the `Origin` or `Referer` header). It stops another website you have open from making your browser vote or save on your behalf (cross-site request forgery). See "Security" in `app.md`.
+
+**Section tag** — the small `§5.1` next to a line in a summary, saying which section of the paper that claim came from. A range (`§5.1–5.2`) means the claim draws on several consecutive sections; no tag means the stored sections had no number (for example "Abstract"). See "The feed" in `app.md`.
+
+**Skim / Read** — the two levels of detail on the feed. Skim shows title, one-line summary and why it was picked; Read adds the problem, what they did and what they found. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.
+
+**Day list** — the compact list of one digest day shown beside the reader on a wide screen (1100 px or more) so you can jump between that day's papers. Hidden on phones. See "Reading a paper" in `app.md`.

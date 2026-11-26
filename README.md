@@ -44,6 +44,7 @@ Your digest appears in the vault under `digests/` (default vault `~/research-vau
 - Add your own notes with `rpipe shelf add`; papers close to them rank higher.
 - Check summary accuracy with `rpipe gold` (your answer key) and `rpipe eval`.
 - Browse and vote from your phone with `rpipe serve` (needs the `serve` extra).
+- Your private feed as a phone app: install the `app` extra (`uv tool install --editable '.[embed,serve,app]' --force`), then `rpipe app install` and open the address it prints (see `docs/guide/app.md`).
 
 Your votes shape the next night's ranking. `rpipe --help` lists every command; `rpipe sources list` shows paper sources and `rpipe plugins` shows installed plug-ins.
 

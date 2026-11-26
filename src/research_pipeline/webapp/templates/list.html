@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }} - Research Feed{% endblock %}
+{% block content %}
+<header class="feed-head">
+  <h1>{{ heading }}</h1>
+  {% if cards %}
+  <div class="depth" role="group" aria-label="Detail">
+    <button type="button" data-depth-set="skim" aria-pressed="true">Skim</button>
+    <button type="button" data-depth-set="read" aria-pressed="false">Read</button>
+  </div>
+  {% endif %}
+</header>
+{% if search %}
+<form class="search-form" action="/search" method="get" role="search">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search titles and abstracts" aria-label="Search" autofocus>
+  <button type="submit" class="btn">Search</button>
+</form>
+{% endif %}
+{% if cards %}
+  <div class="cards">
+    {% for c in cards %}{% include "_card.html" %}{% endfor %}
+  </div>
+{% elif empty %}
+  <p class="empty muted">{{ empty }}</p>
+{% endif %}
+{% endblock %}

@@ -36,9 +36,9 @@ No files were moved; the groups are lists in `tests/test_architecture.py`, check
 
 | Group | Modules | In plain words | May import |
 | --- | --- | --- | --- |
-| **Shared** | `models`, `summary_models`, `db`, `vault`, `embed`, `llm`, `backends`, `defaults`, `seeds`, `profile_edit`, `ids`, `progress`, `categories`, `schedule` | The building blocks both halves need: data shapes, the database connection and schema, the vault folders, the embedding and language-model clients, the profile and config editors, paper-id clean-up, progress events | shared only |
+| **Shared** | `models`, `summary_models`, `db`, `vault`, `embed`, `llm`, `backends`, `defaults`, `seeds`, `profile_edit`, `ids`, `progress`, `categories`, `schedule`, `netguard` | The building blocks both halves need: data shapes, the database connection and schema, the vault folders, the embedding and language-model clients, the profile and config editors, paper-id clean-up, progress events, the host allowlist for servers with no login | shared only |
 | **Pipeline** | `collect`, `sources`, `triage`, `rank`, `fulltext`, `summarize`, `prompts`, `digest`, `evaluate`, `gold`, `judge`, `pruning`, `parts`, `citations`, `spill`, `ollama_fit`, `ollama_tune`, `bench`, `scan`, `catalog`, `recommender`, `machine`, `registry`, `run_lock`, `requests_queue`, `seed_input`, `onboarding` | Getting and processing papers, plus everything about choosing, fitting and tuning the model that does it, the lock, and draining the request list | shared, plus the read functions of `library` listed in `library.PIPELINE_READS` |
-| **App** | `library`, `shelf`, `review`, `serve`, `library_api`, `workbench` | What you do with the papers: votes, saves, skips, the shelf, the review queue, the browser view, the one door, and `workbench/` (an empty package waiting for the app's future features) | shared and app; never pipeline |
+| **App** | `library`, `shelf`, `review`, `serve`, `library_api`, `workbench`, `webapp` | What you do with the papers: votes, saves, skips, the shelf, the review queue, the browser view, the one door, and `workbench/` (an empty package waiting for the app's future features) and `webapp/` (the web app server, see [app.md](app.md)) | shared and app; never pipeline |
 | **Composition** | `cli`, `progress_render` | The `rpipe` commands, and turning progress events into terminal lines | anything |
 
 Placements that are not obvious:
@@ -78,7 +78,7 @@ Two pipeline jobs never run at once on one vault. Every pipeline command takes a
 Places that still cross the line, written down on purpose:
 
 - **`db.py` holds pipeline writes.** `db` is shared, but functions such as `save_summary`, `start_run` and `mark_request` are writes only the pipeline should make. No test stops an app module from calling them; `test_app_commands_use_only_library_api` covers the app commands in `cli.py` only. Moving them into a pipeline module is later work.
-- **Datasette's canned write queries.** `rpipe serve` (Datasette) lets you vote and save from the browser with its own SQL (`serve.py`), not through `library_api`. It is a stopgap until the app has its own web view; see [browsing.md](browsing.md).
+- **Datasette's canned write queries.** `rpipe serve` (Datasette) lets you vote and save from the browser with its own SQL (`serve.py`), not through `library_api`. The app (`rpipe app`) now has its own web view through `library_api`; `rpipe serve` stays for raw database browsing until it is retired; see [browsing.md](browsing.md).
 - **`_resolve_paper` in `cli.py`** runs its own SQL to turn an id or a title fragment into a paper id, and asks you to pick when several titles match. Picking from a numbered list is a terminal feature, so it stays with the terminal.
 - **`_refresh_hint` in `cli.py`** (used by `rpipe summarize`) reads stored summaries with its own SQL to suggest a refresh. It belongs to a pipeline command, not the app.
 - **`test_app_commands_use_only_library_api` is a denylist.** It reads the bodies of the listed app command functions in `cli.py` and fails on a direct call to a database or pipeline function (by name, or by a write-looking name such as `record_...` or `save_...`). It does not follow calls into helper functions, does not see new commands until they are added to its list, and does not look at other modules. It catches the common slip, not every possible one.
@@ -112,6 +112,7 @@ To see the request list of a vault: `rpipe requests list`.
 - `src/research_pipeline/requests_queue.py`: the pipeline side of the request list.
 - `src/research_pipeline/run_lock.py`: the lock.
 - `src/research_pipeline/workbench/`: empty home for future app features.
+- `src/research_pipeline/webapp/`: the web app server, templates and static files ([app.md](app.md)).
 - `src/research_pipeline/cli.py`: the composition layer.
 
 ## The app's door in detail
@@ -135,6 +136,13 @@ rpipe has two kinds of commands. The **pipeline** gets material on its own, usua
 | `SyncResult` | `added`, `updated`, `removed`, `ignored` (lists of names) | `shelf_sync` |
 
 The changes it makes: `vote(conn, id, "up" | "down" | "clear")`, `save(conn, id, True | False)`, `skip` and `unskip` (the review-later list), `shelf_add`, `shelf_remove`, `shelf_sync`, and `request` (ask the pipeline to do work later; see "The request list" in [data-model.md](data-model.md); the pipeline side, `requests_queue.drain_requests`, does the work in the nightly `rpipe run` or `rpipe requests run`, see "The request list" in [running.md](running.md)). Each change is one short transaction and commits. A paper id that is not in the database raises `UnknownPaperError`. One plain read goes with `request`: `open_request_ids(conn)` returns the ids (a set of numbers) of requests still waiting or being worked on, so `rpipe requests add` can tell "queued now" from "already waiting" (a repeat `request` returns the existing id).
+
+Added for the web app's feed page (all plain reads, no writes):
+
+- `plain_reasons(reasons)` turns the stored triage strings (`topic: agentic workflow (0.80)`, `liked similar: 2611.25905`, `HF upvotes: 56`, `followed author: ...`, `keyword: ...`, `near your shelf: ...`) into `ReasonView` objects (`kind`, `label`, `paper_id`) the page can word in plain language. It keeps the order and drops `disliked similar: ...` and anything it does not recognise.
+- `digest_dates(conn, limit=60)` lists the distinct digest dates, newest first, for the "Earlier days" list.
+- `summarize_states(conn, paper_ids)` gives the status (`pending`, `running`, `done`, `failed`) of the newest `summarize` request for each paper; a paper nobody asked about is absent.
+- `summary_provenance(conn, paper_id)` returns a `ProvenanceView` (`model`, `created_at`) saying which model wrote the stored summary and when, or none when there is no summary or it predates provenance. The page shows it under "About this summary".
 
 `library_api` does not hold rules of its own about votes or the shelf. It passes each change on to the module that already owns it: `library.py` for votes, saves and skips, `shelf.py` for the shelf, `review.py` for the queue queries, `db.py` for papers and summaries.
 

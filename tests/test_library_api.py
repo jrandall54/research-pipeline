@@ -6,7 +6,7 @@ from datetime import date
 import pytest
 from conftest import FakeEmbedder
 
-from research_pipeline import library_api, review
+from research_pipeline import db, library_api, review
 from research_pipeline.db import UnknownPaperError, mark_in_digest, open_db, save_summary, set_status, upsert_paper
 from research_pipeline.library import current_votes, record_vote, set_saved
 from research_pipeline.library_api import PaperView, QueueProgress, ShelfItemView, VoteView
@@ -24,12 +24,12 @@ def _add(conn, pid, title, day=None, score=None, reasons=None, abstract="An abst
         mark_in_digest(conn, [pid], date.fromisoformat(day))
 
 
-def _summary(conn, pid):
+def _summary(conn, pid, **kw):
     c = Claim(text="claim", sections=["1 Intro"])
     save_summary(conn, pid, PaperSummary(
         summary=Summary(one_line="one", problem=c, approach=c, results=c, limitations=c),
         critique=Critique(strengths=[c], weaknesses=[], questions=[]),
-        basis="full_text", unverified=[], read_mode="split", parts=3), "m")
+        basis="full_text", unverified=[], read_mode="split", parts=3), "m", **kw)
     conn.commit()
 
 
@@ -191,3 +191,33 @@ def test_views_serialize_to_json(conn, tmp_path):
     json.loads(library_api.queue_progress(conn, "2026-11-02").model_dump_json())
     item = library_api.shelf_add(conn, tmp_path / "w", FakeEmbedder(), "a note")
     json.loads(item.model_dump_json())
+
+
+def test_plain_reasons_maps_each_kind_and_drops_disliked_and_unknown():
+    got = library_api.plain_reasons([
+        "topic: agentic workflow (0.80)", "liked similar: 2611.25905", "disliked similar: 2611.25673",
+        "HF upvotes: 56", "followed author: Ada Lovelace", "keyword: eBPF",
+        "near your shelf: thesis-notes.md", "something new: x"])
+    assert [(r.kind, r.label, r.paper_id) for r in got] == [
+        ("topic", "agentic workflow", None), ("liked", "", "2611.25905"), ("upvotes", "56", None),
+        ("author", "Ada Lovelace", None), ("keyword", "eBPF", None), ("shelf", "thesis-notes.md", None)]
+
+
+def test_digest_dates_newest_first(conn):
+    assert library_api.digest_dates(conn) == ["2026-11-02", "2026-11-01"]
+
+
+def test_summarize_states_reports_newest_request_per_paper(conn):
+    first = library_api.request(conn, "summarize", {"paper_id": "2611.25008"})
+    db.mark_request(conn, first, "failed", error="x")
+    library_api.request(conn, "summarize", {"paper_id": "2611.25008"})
+    assert library_api.summarize_states(conn, ["2611.25008", "2611.25005"]) == {"2611.25008": "pending"}
+
+
+def test_summary_provenance_returns_model_and_date_or_none(conn):
+    _summary(conn, "2611.25005", prompt_version="v1", paper_version=1)
+    prov = library_api.summary_provenance(conn, "2611.25005")
+    assert isinstance(prov, library_api.ProvenanceView) and prov.model == "m" and prov.created_at
+    _summary(conn, "2611.25006")  # saved without prompt_version: no provenance
+    assert library_api.summary_provenance(conn, "2611.25006") is None
+    assert library_api.summary_provenance(conn, "2611.25007") is None

@@ -38,7 +38,8 @@ I'll check this computer and recommend one.
 **Step 2, Describe (before the prompt; only when a model is set up):**
 ```
 A shortcut: describe what you research or want to follow, in a few sentences, and the
-model proposes topics and seed papers for you to accept or reject one by one.
+model you just chose in step 1 proposes topics and seed papers for you to accept or
+reject one by one.
 Example: "I study security of LLM agents, especially prompt injection, and I teach an
 intro AI course." Press Enter to skip and add them yourself.
 ```

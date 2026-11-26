@@ -1092,7 +1092,8 @@ SUMMARIES_HELP = (
 )
 DESCRIBE_HELP = (
     "A shortcut: describe what you research or want to follow, in a few sentences, and the\n"
-    "model proposes topics and seed papers for you to accept or reject one by one.\n"
+    "model you just chose in step 1 proposes topics and seed papers for you to accept or\n"
+    "reject one by one.\n"
     'Example: "I study security of LLM agents, especially prompt injection, and I teach an\n'
     'intro AI course." Press Enter to skip and add them yourself.'
 )

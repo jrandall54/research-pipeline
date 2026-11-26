@@ -2,24 +2,20 @@
 
 Current state and next steps only. Read `ROADMAP.md` for the full list of phases; history is in git, each phase's files and `archive/`.
 
-## State (2026-11-25)
+## State (2026-11-26)
 
-- Phases 1 to 9.2 merged to `main` and pushed. `uv run pytest -q`: 1765 passing, ruff clean. GitHub's test run passes again (it had failed on every push since Phase 8: a test needed uvicorn, which GitHub's setup does not install).
-- **Phase 9 (hooks, key numbers, plain words, diagrams):** every new summary gets a hook line under the title, up to 3 key numbers and plain-words fields, each checked against the paper text; papers whose method has a shape also get a diagram drawn in the app. Prompts are `2026-11-p9b`. Phase 9.1 made diagrams stricter (no diagram by default, generic loops dropped, boxes must cite method sections). The model still draws one for nearly every paper (reviews get their review process), so Phase 9.2 shows diagrams only on the paper screen, not in the feed (owner's choice). Gold-set eval passed (facts 11 → 11, contradicted 2 → 1); Claude read the 9 hooks shown and found all true. Results are in `docs/guide/summaries.md`, "Measured".
-- Diagrams: setting `auto` (on here, since the model is fully in GPU memory; off on CPU-only machines). `rpipe model set-diagrams on|off|auto`.
-- Old papers keep their one-line summary and long fields; only papers summarized from now on (nightly or "Summarize this") get the new parts.
-- The app service was restarted on the merged code.
-- The nightly run (03:00) uses whatever is checked out in the main repo folder (editable install). Never check out a pre-Phase-7 commit there: the vault moves to database version 4 on the 2026-11-26 run, and older code refuses it.
+- Phases 1 to 9.3 merged to `main` and pushed. `uv run pytest -q`: 1769 passing, ruff clean.
+- The 2026-11-26 nightly run (first on Phase 7-9 code) worked: 15 papers summarized whole, 13 diagrams, 2 requests done, no errors, finished 03:15. Database is at version 4.
+- **Diagrams are off** (Phase 9.3, owner ruling): `rpipe model set-diagrams off` is set, so none are drawn, and the app hides the ones already stored. The owner found them pointless (labels in boxes repeating "What they did"). Diagrams worth having would be the paper's own figures, tables and graphics brought into the app; that is a future phase, not now.
+- **Summaries are hidden in the app (not fixed yet).** They are all stored and the markdown digest shows them in full, but: the feed opens in Skim, which shows one line per card; since Phase 9 that line is the hook (a single stat) instead of the one-line summary on 12 of 15 papers; Limitations is never shown in the app. The owner saw "no summaries".
+- The owner also questioned the summary format itself: one sentence is not an overview of a paper, and Problem/Approach/Results/Limitations + Strengths/Weaknesses was chosen so code can check citations, not from research on how people learn from summaries.
 
 ## Next
 
-1. **Check the 2026-11-26 nightly run.** It is the first on Phase 7, 8 and 9 code.
-   - Finished, with a digest: `rpipe runs`, or simply open the app and see today's feed.
-   - Hooks and diagrams: today's cards show a hook line and key-number chips under the title; opening a paper shows a "How it works" diagram on most papers (diagrams are on the paper screen only since Phase 9.2). `journalctl --user -u research-pipeline --since today | grep -E "reading mode|diagram"` shows `diagrams on` and `drawing a diagram for ...` lines.
-   - Papers read whole, not in parts: the same journal shows `whole` for the reading mode.
-   - Database at version 4: `uv run python -c "import sqlite3,os; print(sqlite3.connect(os.path.expanduser('~/research-vault/vault.sqlite')).execute('PRAGMA user_version').fetchone())"` prints `(4,)`.
-   - Night length: the diagram call adds about 12 s per paper on this machine; check the run still finishes well before morning.
-2. **Phase 10: sharing.** Start with the design conversation (what it's for), then the design file, plan and build.
+1. **Summary display fix (small, first).** Default view shows the real summary; the one-line summary comes before the hook, never replaced by it; Limitations shown. Ask the owner before building: drop Skim, or keep it as an opt-in.
+2. **Summary redesign (a phase, starts with a design conversation).** What a summary is for (e.g. "after reading it I know what the paper is about and whether to open it"); a short look at what research on summaries and learning supports (structured abstracts are the closest evidence); likely a real paragraph overview first, then the parts. Hooks stay only if they earn a place.
+3. **Phase 10: sharing.** Design conversation first.
+4. Later: diagrams from the paper's own figures and tables (owner's idea, 2026-11-26).
 
 ## Parked (small, not urgent)
 

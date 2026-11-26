@@ -326,7 +326,7 @@
 
 **Summarize mode (`summarize_mode`)** — the setting that says how papers are read: `whole` (the model reads the whole paper in one go), `split` (notes on the front matter and the body, then combined; see *Task splitting*) or `auto` (the default: split when the model is not fully in GPU memory, runs on the CPU, or has a context below 26,624 tokens; whole otherwise and for Claude Code). Change it with `rpipe model set-mode`; `rpipe eval run --mode` overrides it for one eval without saving. See "Choosing the mode" in `summaries.md` and "Comparing reading modes" in `evaluation.md`.
 
-**Diagrams setting (`diagrams`)** — the setting that says whether each paper also gets a diagram (one more model call): `on`, `off` or `auto` (the default: off when the Ollama model runs on the CPU only, on otherwise and for Claude Code). Change it with `rpipe model set-diagrams`. See "The diagrams setting" in `llm.md`.
+**Diagrams setting (`diagrams`)** — the setting that says whether each paper also gets a diagram (one more model call): `on`, `off` or `auto` (the default: off when the Ollama model runs on the CPU only, on otherwise and for Claude Code). Change it with `rpipe model set-diagrams`. `off` also hides diagrams already drawn in the app (Phase 9.3). See "The diagrams setting" in `llm.md`.
 
 **Context cap (model cap)** — the biggest context window a model can be run at here: the context it was trained for, as Ollama reports it, but at most `CONTEXT_CEILING` (131,072 tokens). `spill.model_cap` reads it. A paper needing more than this can never be read whole.
 

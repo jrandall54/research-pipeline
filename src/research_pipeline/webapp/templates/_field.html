@@ -22,6 +22,6 @@
 <p class="{{ cls }}">{{ c.one_line }}</p>
 {% endif %}
 {% if c.key_numbers %}
-<ul class="key-numbers">{% for value, label, tag in c.key_numbers %}<li><strong>{{ value }}</strong> {{ label }}</li>{% endfor %}</ul>
+<ul class="key-numbers">{% for value, label, _ in c.key_numbers %}<li><strong>{{ value }}</strong> {{ label }}</li>{% endfor %}</ul>
 {% endif %}
 {%- endmacro %}

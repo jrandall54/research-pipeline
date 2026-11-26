@@ -42,7 +42,7 @@ def _box(node: DiagramNode, x: float, y: float, w: float, h: float, css: str) ->
     first = y + h / 2 - (len(lines) - 1) * 7 + 4.5
     spans = "".join(f'<tspan x="{cx:.1f}" dy="{0 if i == 0 else 14}">{escape(ln)}</tspan>' for i, ln in enumerate(lines))
     return (
-        f'<g class="d-node {css}"><rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h}" rx="10"/>'
+        f'<g class="d-node {css}"><title>{escape(node.label)}</title><rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h}" rx="10"/>'
         f'<text x="{cx:.1f}" y="{first:.1f}" text-anchor="middle">{spans}</text></g>'
     )
 
@@ -68,24 +68,25 @@ def _parts(d: Diagram) -> tuple[list[str], float]:
     rest = [n for n in d.nodes if n is not top]
     per_row = len(rest) if len(rest) <= 4 else -(-len(rest) // 2)
     rows = [rest[i : i + per_row] for i in range(0, len(rest), per_row)]
-    out: list[str] = []
+    lines: list[str] = []  # every connector is emitted before any box, so no line paints over a label
+    boxes: list[str] = []
     top_w = 150.0
     top_x = (WIDTH - top_w) / 2
     y = PAD
-    out.append(_box(top, top_x, y, top_w, BOX_H, "d-top"))
+    boxes.append(_box(top, top_x, y, top_w, BOX_H, "d-top"))
     y += BOX_H + 26
     for row in rows:
         w = (WIDTH - 2 * PAD - (len(row) - 1) * GAP) / len(row)
         bar_y = y - 13
         centres = [PAD + i * (w + GAP) + w / 2 for i in range(len(row))]
         # Connectors: a stem down from the coordinating box, a bar across, and a drop to each box.
-        out.append(_line(WIDTH / 2, PAD + BOX_H, WIDTH / 2, bar_y))  # drawn first; boxes cover it where it passes behind
-        out.append(_line(min(centres + [WIDTH / 2]), bar_y, max(centres + [WIDTH / 2]), bar_y))
+        lines.append(_line(WIDTH / 2, PAD + BOX_H, WIDTH / 2, bar_y))
+        lines.append(_line(min(centres + [WIDTH / 2]), bar_y, max(centres + [WIDTH / 2]), bar_y))
         for n, cx in zip(row, centres, strict=True):
-            out.append(_line(cx, bar_y, cx, y))
-            out.append(_box(n, cx - w / 2, y, w, BOX_H, ""))
+            lines.append(_line(cx, bar_y, cx, y))
+            boxes.append(_box(n, cx - w / 2, y, w, BOX_H, ""))
         y += BOX_H + 26
-    return out, y - 26 + PAD
+    return lines + boxes, y - 26 + PAD
 
 
 def _step_order(d: Diagram) -> list[DiagramNode]:

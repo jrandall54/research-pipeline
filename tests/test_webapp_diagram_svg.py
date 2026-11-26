@@ -34,6 +34,7 @@ def test_svg_escapes_labels():
     out = str(diagram_svg.render(d))
     assert "<b>" not in out and "&lt;b&gt;" in out
     assert "<i>" not in out
+    assert 'aria-label="a &#34;quoted&#34; &lt;i&gt;caption&lt;/i&gt;"' in out
 
 
 @pytest.mark.parametrize("n", range(2, 9))
@@ -57,3 +58,14 @@ def test_svg_draws_any_valid_graph(n):
 def test_svg_wraps_long_labels_to_two_lines():
     out = str(diagram_svg.render(_diagram("parts", 6, labels=["Hub"] + ["Extraordinarily long words"] * 5)))
     assert out.count("<tspan") >= 11
+
+
+@pytest.mark.parametrize("n", [6, 7, 8])
+def test_svg_parts_connectors_come_before_boxes(n):
+    out = str(diagram_svg.render(_diagram("parts", n)))
+    assert out.rindex("<line") < out.index("<g class=\"d-node")
+
+
+def test_svg_box_has_full_label_title():
+    out = str(diagram_svg.render(_diagram("parts", 5, labels=["Hub"] + ["Extraordinarily long words"] * 4)))
+    assert "<title>Extraordinarily long words</title>" in out

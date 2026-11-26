@@ -1042,7 +1042,8 @@ def _seed_titles(vault: Path) -> dict[str, str]:
 
 
 def _numbered(items: list[str]) -> str:
-    return "\n".join(f"  {i}. {x}" for i, x in enumerate(items, 1)) or "  (none)"
+    w = len(str(len(items)))
+    return "\n".join(f"  {i:>{w}}. {x}" for i, x in enumerate(items, 1)) or "  (none)"
 
 
 @profile_app.command("show")

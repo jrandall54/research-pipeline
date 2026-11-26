@@ -17,6 +17,46 @@ def test_wrong_host_refused(client):
     assert client.get("/static/app.css", headers={"host": "evil.example"}).status_code == 400
 
 
+def test_wrong_host_page_is_friendly_html_with_escaped_address(tmp_path):
+    c = TestClient(create_app(tmp_path / "v.sqlite", {"testserver"}, address='http://1.2.3.4:8002/"><b>'))
+    r = c.get("/", headers={"host": "evil.example"})
+    assert r.status_code == 400 and r.headers["content-type"].startswith("text/html")
+    assert "isn't the one the app listens on" in r.text
+    assert "Open it at" in r.text and "http://1.2.3.4:8002/" in r.text and "&lt;b&gt;" in r.text
+    assert "<b>" not in r.text
+
+
+def test_wrong_host_page_without_address_omits_link(client):
+    r = client.get("/", headers={"host": "evil.example"})
+    assert r.status_code == 400 and "isn't the one the app listens on" in r.text
+    assert "Open it at" not in r.text
+
+
+def test_png_icons_served_and_linked(client):
+    for n in (180, 192, 512):
+        r = client.get(f"/static/icon-{n}.png")
+        assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+        assert r.content.startswith(b"\x89PNG")
+    assert 'rel="apple-touch-icon" href="/static/icon-180.png"' in client.get("/nothing").text
+    icons = client.get("/static/manifest.webmanifest").json()["icons"]
+    assert {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"} in icons
+    assert all(i["purpose"] == "any" for i in icons)
+
+
+def test_database_busy_gives_friendly_page_but_json_for_api(client, monkeypatch):
+    import sqlite3
+
+    from research_pipeline import library_api
+
+    def locked(*a, **k):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(library_api, "digest_dates", locked)
+    r = client.get("/")
+    assert r.status_code == 503 and "Your library is busy. Try again in a moment." in r.text
+    assert "Research Feed" in r.text  # inside the normal frame
+
+
 def test_cross_site_post_refused(client):
     r = client.post("/static/app.css", headers={"origin": "http://evil.example"})
     assert r.status_code == 403

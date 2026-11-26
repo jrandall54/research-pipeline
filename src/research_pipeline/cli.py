@@ -3223,7 +3223,7 @@ def _app_host(host: str | None) -> str:
 @app_app.command("run")
 def app_run(
     host: Annotated[str | None, typer.Option(help="Address to listen on (default: this machine's Tailscale IPv4).")] = None,
-    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8002,
+    port: Annotated[int, typer.Option(min=1, max=65535, help="Port to listen on.")] = 8002,
     vault: VaultOption = None,
 ) -> None:
     """Start the app in this terminal (Ctrl+C stops it). For always-on, use `rpipe app install`."""
@@ -3239,14 +3239,15 @@ def app_run(
 
     shown = f"[{bind}]" if ":" in bind else bind
     typer.echo(f"Your feed is at http://{shown}:{port}/ (only your own devices can reach it)")
-    uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind)),
+    typer.echo("Open exactly this address: a machine name such as name.tailnet.ts.net will not work.")
+    uvicorn.run(create_app(ctx.vault / "vault.sqlite", app_service.allowed_hosts(bind), f"http://{shown}:{port}/"),
                 host=bind, port=port, log_level="warning")
 
 
 @app_app.command("install")
 def app_install(
     host: Annotated[str | None, typer.Option(help="Address to listen on (default: this machine's Tailscale IPv4).")] = None,
-    port: Annotated[int, typer.Option(help="Port to listen on.")] = 8002,
+    port: Annotated[int, typer.Option(min=1, max=65535, help="Port to listen on.")] = 8002,
     vault: VaultOption = None,
 ) -> None:
     """Keep the app running in the background, started at login (a systemd user service)."""

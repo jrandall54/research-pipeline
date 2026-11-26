@@ -63,6 +63,24 @@ def test_paper_page_shows_brief_and_critique_with_tags(client):
     assert "Read the paper" in html and "https://arxiv.org/abs/2611.25005" in html
 
 
+def test_paper_page_critique_headings(client):
+    html = client.get("/paper/2611.25005").text
+    for h in ("How solid is it?", "Strong points", "Weak points", "Questions to ask"):
+        assert h in html
+    assert "Strengths" not in html and "Weaknesses" not in html
+
+
+def test_unsafe_paper_url_is_not_a_link(vault):
+    c, p = vault
+    c.execute("update papers set url = 'javascript:alert(1)' where id = '2611.25005'")
+    c.commit()
+    html = TestClient(create_app(p, {"testserver"})).get("/paper/2611.25005").text
+    assert "javascript:" not in html and "Read the paper" not in html
+    assert present.safe_url("javascript:alert(1)") is None
+    assert present.safe_url("https://a.org/x") == "https://a.org/x"
+    assert present.safe_url("HTTP://a.org/x") == "HTTP://a.org/x"
+
+
 def test_paper_page_includes_day_list(client):
     html = client.get("/paper/2611.25005").text
     start = html.index('class="day-list"')

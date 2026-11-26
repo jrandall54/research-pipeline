@@ -1,16 +1,16 @@
 # Handoff — after app project 1 built (2026-11-25)
 
+Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
+
 ## App project 1 built (2026-11-25, branch app-project1-feed, not merged)
 
-Spec `specs/2026-11-25-app-project1-my-feed-design.md`. `uv run pytest -q`: 1626 passing, ruff clean. A private web app over the pipeline: a phone-friendly feed of each day's digest (Skim/Read cards with "Why you're seeing this"), paper pages, Saved and Search, and buttons for More/Less like this, Save and "Summarize this" (queued as a request for the nightly run). It runs as its own always-on service (`rpipe app run|install|uninstall|status`), reachable only on the Tailscale address, and guards every request (allowed Host, same-origin POST). Guide page: `docs/guide/app.md`.
+Spec `specs/2026-11-25-app-project1-my-feed-design.md`. `uv run pytest -q`: 1636 passing, ruff clean. A private web app over the pipeline: a phone-friendly feed of each day's digest (Skim/Read cards with "Why you're seeing this"), paper pages, Saved and Search, and buttons for More/Less like this, Save and "Summarize this" (queued as a request for the nightly run). It runs as its own always-on service (`rpipe app run|install|uninstall|status`), reachable on the Tailscale address (or localhost if you choose it), and guards every request (allowed Host, same-origin POST). Guide page: `docs/guide/app.md`.
 
 - **Owner installs it:** `uv tool install --editable '.[embed,serve,app]' --force`, then `rpipe app install`, open the printed address on the phone, Add to Home Screen. (After merging to `main`.)
-- **What to look at:** phone width, dark mode, Skim/Read, and that a vote shows up in `rpipe show ID`. The checklist is in `app.md`, "What to check after installing".
+- **What to look at:** phone width, dark mode, Skim/Read, and that a vote shows up in `rpipe feedback`. The checklist is in `app.md`, "What to check after installing".
 - **Checked end to end** on a throwaway vault: feed 200, paper 200, unknown paper 404 page, save 200 then listed under Saved, POST without Origin 403, wrong Host 400.
-- **Parked:** iOS needs a PNG apple-touch-icon; `/day/<date>` is limited to the last 60 digest days; a "done" summarize request without a summary shows "Summarize this"; `--port` is not range-checked; MagicDNS names are not accepted as hosts; old-style arXiv ids with "/" cannot open the paper page; a 405 under `/api/` returns `{"detail"}` not `{"error"}`.
+- **Parked:** `/day/<date>` is limited to the last 60 digest days; a "done" summarize request without a summary shows "Summarize this"; MagicDNS names are not accepted as hosts; old-style arXiv ids with "/" cannot open the paper page; a 405 under `/api/` returns `{"detail"}` not `{"error"}`.
 - **Start here next session:** merge the branch (owner decision), install the app, go through the checklist above on the phone, then continue with the list below.
-
-Read this first in a new session. The master plan (Claude Docs, "Research Pipeline — Master Implementation Plan") is the source for what comes next; this note holds what the plan is too coarse for.
 
 ## Phase 7 built and merged to `main` (2026-11-25, not pushed)
 

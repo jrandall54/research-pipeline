@@ -45,6 +45,18 @@ def test_app_run_starts_uvicorn(fake, monkeypatch):
     assert "Your feed is at http://127.0.0.1:8123/ (only your own devices can reach it)" in res.output
     assert got["host"] == "127.0.0.1" and got["port"] == 8123 and got["log_level"] == "warning"
     assert got["app"].state.vault_db == vault / "vault.sqlite"
+    assert got["app"].state.allowed_hosts == service.allowed_hosts("127.0.0.1")
+    assert got["app"].state.address == "http://127.0.0.1:8123/"
+    assert "Open exactly this address" in res.output
+
+
+@pytest.mark.parametrize("cmd", ["run", "install"])
+@pytest.mark.parametrize("port", ["0", "70000"])
+def test_app_port_out_of_range_refused_before_anything_is_written(fake, cmd, port):
+    calls, unit_dir, vault = fake
+    res = runner.invoke(cli.app, ["app", cmd, "--host", "127.0.0.1", "--port", port, "--vault", str(vault)])
+    assert res.exit_code == 2 and "port" in res.output.lower()
+    assert calls == [] and not unit_dir.exists()
 
 
 def test_app_run_refuses_public_host(fake):

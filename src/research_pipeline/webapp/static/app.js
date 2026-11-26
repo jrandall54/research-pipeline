@@ -31,6 +31,8 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {})
+    }).catch(function () {
+      throw new Error("Couldn't reach your library. Check your connection.");
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
         if (!r.ok) throw new Error(data.error || "Something went wrong. Try again.");

@@ -88,6 +88,7 @@ class CardData:
     id: str
     title: str
     url: str
+    safe_url: str | None
     topic: str | None
     topic_color: int
     one_line: str | None
@@ -105,12 +106,17 @@ def _field(claim: Claim | None) -> Field | None:
     return (claim.text, section_tag(claim.sections)) if claim else None
 
 
+def safe_url(url: str) -> str | None:
+    """The paper's address, only when it is a plain web link (never ``javascript:`` and the like)."""
+    return url if url.lower().startswith(("http://", "https://")) else None
+
+
 def card(view: PaperView, state: str | None) -> CardData:
     reasons = plain_reasons(view.triage_reasons)
     topic = topic_of(reasons)
     s = view.summary.summary if view.summary else None
     return CardData(
-        id=view.id, title=view.title, url=view.url, topic=topic,
+        id=view.id, title=view.title, url=view.url, safe_url=safe_url(view.url), topic=topic,
         topic_color=topic_color(topic) if topic else 0,
         one_line=s.one_line if s else None, abstract=excerpt(view.abstract),
         problem=_field(s.problem if s else None), approach=_field(s.approach if s else None),

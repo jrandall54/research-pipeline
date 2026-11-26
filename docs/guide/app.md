@@ -4,7 +4,7 @@
 
 A private web app over your paper library: your feed of recent picks, saved papers and search, laid out for a phone (one column, bottom navigation) and for a desktop (sidebar). You open it from the home-screen icon on your phone or at an address in any browser on your tailnet. It reads and writes the same vault database the nightly pipeline uses, so a vote you tap in the morning shapes tonight's ranking.
 
-This page covers the server itself: how it is put together and how it protects itself. The screens (feed, paper, saved, search) are described as each is built; the feed is below; the design is in `docs/superpowers/specs/2026-11-25-app-project1-my-feed-design.md`.
+This page covers the server itself: how it is put together and how it protects itself. The screens (feed, paper, saved, search) and the buttons are described in the sections below; the design is in `docs/superpowers/specs/2026-11-25-app-project1-my-feed-design.md`.
 
 ## How it works
 
@@ -20,7 +20,7 @@ Step by step, for one request:
 2. **The guard** (`webapp/guard.py`, run by a middleware for every request) checks the `Host` header and, for anything that changes data, the `Origin` header. A failed check ends the request here (see Security).
 3. The route handler opens a database connection (`deps.get_conn`, one per request, always closed; opened with `check_same_thread=False` because FastAPI may open, use and close it on different worker threads, which is safe as the request uses it one step at a time), calls `library_api` for data objects, and fills a Jinja2 template with them.
 4. The template extends `base.html`, which supplies the head (viewport, manifest, icon, stylesheet), the navigation and the page frame. The page goes back to the browser.
-5. The CSS, script, fonts and icon come from `/static`, served by the same server. A page makes no request to any other site, so nothing about what you read leaks to a font or script host.
+5. The CSS, script, fonts and icons come from `/static`, served by the same server. A page makes no request to any other site, so nothing about what you read leaks to a font or script host.
 
 The base layout: under 900 px wide, a single column with a bottom navigation bar (Feed, Saved, Search); at 900 px and wider, a left sidebar with the same three links. Light colours come from mockup look A, the dark palette from look C, picked automatically from the device setting (`prefers-color-scheme`). Eight topic colours (`--topic-0` to `--topic-7`) are defined for light and dark, each at least 4.5:1 contrast on the card background. `env(safe-area-inset-*)` padding and a band behind the status bar keep content clear of the notch and home indicator when launched from the home screen. The manifest (`name` "Research Feed", `display` "standalone") is what lets the phone offer "Add to Home Screen".
 
@@ -43,7 +43,7 @@ Fonts are self-hosted from `webapp/static/fonts/` (Literata 600 for titles, Inte
 1. The stored reasons (`topic: agentic workflow (0.80)`, `HF upvotes: 56`) become reason objects (`library_api.plain_reasons`), and `why_sentence` joins them into one sentence: one reason `x.`, two `x and y.`, three or more `x, y, and z.` No reasons, no sentence.
 2. The topic label is the first topic reason with its first letter upper-cased. Its colour is `crc32(topic.lower()) % 8`, an index into the eight `--topic-N` colours, so "agentic workflow" is the same colour on every day and device.
 3. Each summary field (problem, approach, results) carries a section tag from `section_tag`: the first word of a section title counts as a number when it looks like `5.1`, `IV-B` or `A.1`; titles like "Abstract" are ignored. One number gives `§5.1`, several give `§5.1–5.2`.
-4. A digest paper with no summary stays in its ranked place as an abstract card: the first 300 characters of the abstract, cut at a word with "…", and a control that depends on the latest summarize request: none gives "Summarize this", pending or running gives "Summary coming tonight", failed gives "Couldn't summarize this one" and "Try again". The buttons carry `data-action="summarize"` and are wired up in a later task.
+4. A digest paper with no summary stays in its ranked place as an abstract card: the first 300 characters of the abstract, cut at a word with "…", and a control that depends on the latest summarize request: none gives "Summarize this", pending or running gives "Summary coming tonight", failed gives "Couldn't summarize this one" and "Try again". The buttons carry `data-action="summarize"`; `static/app.js` posts the request (see "Voting, saving and asking for a summary").
 
 Worked example: a paper with reasons `topic: agentic workflow (0.80)` and `HF upvotes: 56` is shown with the label "Agentic workflow" and "Why you're seeing this: you follow agentic workflow and 56 people upvoted it on Hugging Face."
 
@@ -68,7 +68,7 @@ Built from the stored reasons; unknown reason formats are skipped, never shown r
 
 ## Reading a paper
 
-**What it does.** `GET /paper/{id}` shows one paper: topic, title, authors ("A, B, C and 2 others" when there are more than three), a "Read the paper" button to the original, the one-line summary, the problem / what they did / what they found fields, then Strengths, Weaknesses and "Questions to ask" from the critique, and "Why you're seeing this". Each claim carries its section tag (for example `§4`). A paper with no summary yet shows its full abstract and the same "Summarize this" control as a card. An id with a version (`2611.25005v2`) or an arXiv URL form works; an unknown or malformed id gives the 404 page "That paper isn't in your library." inside the normal app frame (the same page serves any other missing address). Cards on the feed, Saved and Search link to this page from their titles.
+**What it does.** `GET /paper/{id}` shows one paper: topic, title, authors ("A, B, C and 2 others" when there are more than three), a "Read the paper" button to the original (shown only when the paper's address starts with `http://` or `https://`; anything else, such as a `javascript:` address, is left out so a bad record cannot run code when tapped), the one-line summary, the problem / what they did / what they found fields, then the critique under the heading "How solid is it?" (subheadings "Strong points", "Weak points" and "Questions to ask"), and "Why you're seeing this". Each claim carries its section tag (for example `§4`). A paper with no summary yet shows its full abstract and the same "Summarize this" control as a card. An id with a version (`2611.25005v2`) or an arXiv URL form works; an unknown or malformed id gives the 404 page "That paper isn't in your library." inside the normal app frame (the same page serves any other missing address). Cards on the feed, Saved and Search link to this page from their titles.
 
 **How it works.** `routes_pages.paper` runs the id through `ids.normalise_paper_id`, loads the paper with `library_api.get_paper`, and asks `present.paper_detail` to shape it into a `DetailData` (the card plus authors, critique, questions, "about" lines). Two small clean-ups happen there: each critique question loses a trailing `[sections: ...]` note (the model sometimes appends one; it is noise on a screen), and claims get section tags as on cards. The route also loads that paper's digest day and passes the titles to the template.
 
@@ -108,10 +108,10 @@ At the foot of a paper with a summary, a collapsed "About this summary" lists in
 
 There is no login. The threat model is the one in [browsing.md](browsing.md): anyone who can reach the address can read and vote, and the address is only your own machine (localhost) or its Tailscale address, checked by the same allowlist as `rpipe serve` (`netguard`). The guard adds two checks that `rpipe serve` lacks:
 
-- **Host check.** The `Host` header (port and IPv6 brackets removed, lower-cased) must be in the allowed set (the bind host; for a loopback bind also `localhost` and `127.0.0.1`), otherwise the answer is `400 Unknown host`. This blocks DNS rebinding: a malicious site you have open could otherwise point its own name at your tailnet address and have your browser read the app, but such a request carries the attacker's name in `Host`.
+- **Host check.** The `Host` header (port and IPv6 brackets removed, lower-cased) must be in the allowed set (the bind host; for a loopback bind also `localhost`, `127.0.0.1` and `::1`), otherwise the answer is `400` with a small friendly page saying this address is not the one the app listens on and, when the server knows it, "Open it at http://HOST:PORT/" (`rpipe app run` and the service pass it in; a machine name like `name.tailnet.ts.net` lands here, because only the numeric address is allowed). This blocks DNS rebinding: a malicious site you have open could otherwise point its own name at your tailnet address and have your browser read the app, but such a request carries the attacker's name in `Host`.
 - **Same-origin check.** A request that is not GET or HEAD must carry an `Origin` header (or, if absent, a `Referer`) with scheme `http` and an allowed host, otherwise `403 Cross-site request refused`. This blocks cross-site request forgery: another site's page cannot make your browser vote or save, because the browser attaches that page's real origin. A request with neither header is refused too. Plain `http` is correct here because the tailnet already encrypts the traffic.
 
-Worked example: you have the app open and also visit `evil.example`, whose page submits a hidden form to `http://100.64.0.5:8002/vote`. Your browser sends `Origin: http://evil.example`; the guard sees that host is not allowed and answers 403, so no vote is recorded.
+Worked example: you have the app open and also visit `evil.example`, whose page submits a hidden form to `http://100.64.0.5:8002/api/paper/2611.25005/vote`. Your browser sends `Origin: http://evil.example`; the guard sees that host is not allowed and answers 403, so no vote is recorded. (The Origin check compares the host only, not the port: another program on the same machine or tailnet host could pass it. That is acceptable under this threat model, because anyone who can run code there or reach the address could already read and vote directly; the check exists to stop *other websites* in your browser.)
 
 What it does not defend against: another person on your tailnet. They can use the app, as with `rpipe serve`.
 
@@ -136,7 +136,7 @@ The unit is small: it sets `RESEARCH_VAULT`, runs `rpipe app run --host H --port
 - **Checks before writes.** The extra, the address and systemd are all checked first, so a failed install leaves nothing half-done.
 - **Two services now.** The nightly timer (`research-pipeline.service`/`.timer`, see [scheduling.md](scheduling.md)) and this always-on one (`research-pipeline-app.service`) are independent; removing one never touches the other.
 
-**How to run / check it.** `rpipe app run`, then open the printed address. Tests: `uv run pytest tests/test_webapp_service.py tests/test_cli_app.py -q` (offline: fake `systemctl` runner, `uvicorn.run` replaced, no real server or unit file).
+**How to run / check it.** `rpipe app run`, then open the printed address exactly as shown. `--port` must be 1 to 65535 (checked before anything is written). Tests: `uv run pytest tests/test_webapp_service.py tests/test_cli_app.py -q` (offline: fake `systemctl` runner, `uvicorn.run` replaced, no real server or unit file).
 
 **Where the code is.** `src/research_pipeline/webapp/service.py` (`render_service`, `install`, `remove`, `address`, `is_active`, `allowed_hosts`) and the `app` commands in `src/research_pipeline/cli.py` (`app_run`, `app_install`, `app_uninstall`, `app_status`).
 
@@ -147,24 +147,24 @@ Once `rpipe app install` has printed the address and you have opened it on your 
 1. The feed shows today's date and your papers; the layout fits the phone width with no sideways scrolling.
 2. Switch the phone to dark mode; the pages follow it.
 3. Try Skim and Read, and open a paper from a card.
-4. Tap "More like this" on a paper, then run `rpipe show ID` on the computer: the vote is listed there.
+4. Tap "More like this" on a paper, then run `rpipe feedback` on the computer: the vote is listed there.
 5. Save a paper; it appears under Saved.
-6. Use "Add to Home Screen" so it opens like an app.
+6. Use "Add to Home Screen" so it opens like an app (iPhone uses the 180 px PNG icon, Android the 192 and 512 px ones).
 
 ## How to run / check it
 
-Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static files, a wrong `Host` (400), a cross-site and a header-less POST (403), a same-origin POST reaching the router (404, JSON under `/api/`), IPv6 hosts, the `Referer` fallback and template escaping. The `rpipe app` commands are covered in "Setting it up".
+Tests (offline): `uv run pytest tests/test_webapp_server.py -q` covers static files and the PNG icons, a wrong `Host` (the friendly 400 page, with the address escaped), the "Your library is busy. Try again in a moment." page (503; when the database stays locked past its 5-second wait, pages show it and `/api/` answers JSON), a cross-site and a header-less POST (403), a same-origin POST reaching the router (404, JSON under `/api/`), IPv6 hosts, the `Referer` fallback and template escaping. The `rpipe app` commands are covered in "Setting it up".
 
 ## Where the code is
 
-- `src/research_pipeline/webapp/server.py`: `create_app` and the 404 page handler. `deps.py`: `get_conn` and the shared `templates` (routers import these from `deps`; `server` re-exports them).
+- `src/research_pipeline/webapp/server.py`: `create_app(vault_db, allowed_hosts, address=None)` (the optional `address` is what the wrong-host page offers), the 404 page handler and the "library busy" handler. `deps.py`: `get_conn` and the shared `templates` (routers import these from `deps`; `server` re-exports them).
 - `src/research_pipeline/webapp/guard.py`: `check`, the Host and same-origin checks.
 - `src/research_pipeline/webapp/templates/base.html`: the page frame and navigation.
-- `src/research_pipeline/webapp/static/`: `app.css` (palette, type, layout), `app.js`, `icon.svg`, `manifest.webmanifest`, `fonts/`.
+- `src/research_pipeline/webapp/static/`: `app.css` (palette, type, layout), `app.js`, `icon.svg` and its PNG copies `icon-180.png` (iPhone home screen), `icon-192.png` and `icon-512.png` (Android, listed in the manifest) rendered from the SVG, `manifest.webmanifest`, `fonts/`.
 - `src/research_pipeline/webapp/present.py`: `why_sentence`, `topic_of`, `topic_color`, `section_tag`, `day_heading`, `card`/`CardData` (pure shaping).
 - `src/research_pipeline/webapp/routes_feed.py`: the `/` and `/day/{date}` routes.
 - `src/research_pipeline/webapp/routes_actions.py`: the `/api/paper/{id}/vote`, `save` and `summarize` endpoints; `templates/_actions.html` is the button row; the click handling is the second block of `static/app.js`.
 - `src/research_pipeline/webapp/routes_pages.py`: `/paper/{id}`, `/saved`, `/search`; `present.paper_detail` shapes the paper page.
 - `src/research_pipeline/webapp/templates/`: `feed.html`, `_card.html`, `_empty.html`, `paper.html`, `list.html` (Saved and Search), `404.html`.
 - `src/research_pipeline/webapp/service.py`: the always-on service (see Setting it up).
-- `tests/test_webapp_service.py`, `tests/test_cli_app.py`, `tests/test_webapp_server.py`, `tests/test_webapp_present.py`, `tests/test_webapp_feed.py`, `tests/test_webapp_pages.py`.
+- Tests: `tests/test_webapp_server.py` (guard, static files, error pages), `tests/test_webapp_feed.py` (feed and Skim/Read), `tests/test_webapp_pages.py` (paper, Saved, Search), `tests/test_webapp_actions.py` (vote, save, summarize), `tests/test_webapp_present.py` (card shaping, safe links), `tests/test_webapp_service.py` (the systemd unit), `tests/test_cli_app.py` (the `rpipe app` commands, port range, allowed hosts).

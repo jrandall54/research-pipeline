@@ -381,3 +381,5 @@
 **Atom** — an older standard XML format for a list of posts. rpipe also writes `feed.xml` in Atom, so ordinary feed readers (which show title, link and a one-line summary) can follow a feed without rpipe. See `sharing.md`.
 
 **GitHub Pages** — GitHub's free hosting for static files: files in a repository are served as a web page at `https://<handle>.github.io/<repository>/`. rpipe publishes your feed through a repository named `rpipe-feed`, so the feed address is `https://<handle>.github.io/rpipe-feed/feed.json`. See `sharing.md`.
+
+**Runner** — a small object with one method, `run(args)`, that executes a command (such as `git push`) and returns its output. rpipe's GitHub code only ever calls a runner, so tests swap in a fake that records commands and plays back scripted replies, and nothing touches the real GitHub. See `sharing.md`.

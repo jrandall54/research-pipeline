@@ -1,6 +1,7 @@
 """Shared test doubles (import with `from fakes import ...`)."""
 
 import json
+import subprocess
 
 import httpx
 import respx
@@ -92,3 +93,32 @@ class StubArxiv:
         if self.error:
             raise self.error
         return self.by_title
+
+
+class FakeRunner:
+    """A scripted command runner (the share_github Runner protocol).
+
+    ``script`` maps an args prefix to a ``CompletedProcess`` (or a list of them, used in order);
+    the longest matching prefix wins; anything unscripted succeeds with empty output.
+    Every call is recorded in ``calls`` as the args list.
+    """
+
+    def __init__(self, script: dict[tuple[str, ...], "subprocess.CompletedProcess | list"] | None = None):
+        self.script = script or {}
+        self.calls: list[list[str]] = []
+        self.inputs: list[str | None] = []
+
+    def run(self, args, cwd=None, input=None):
+        self.calls.append(list(args))
+        self.inputs.append(input)
+        matches = [k for k in self.script if tuple(args[: len(k)]) == k]
+        if not matches:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        reply = self.script[max(matches, key=len)]
+        if isinstance(reply, list):
+            reply = reply.pop(0) if len(reply) > 1 else reply[0]
+        return reply
+
+
+def done(returncode=0, stdout="", stderr="") -> "subprocess.CompletedProcess[str]":
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)

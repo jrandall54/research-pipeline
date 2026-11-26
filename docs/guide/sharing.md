@@ -56,8 +56,36 @@ Files from other people are never trusted. Reading a feed refuses one that is to
 
 ## How it works
 
-(Filled in by later tasks: publishing, fetching, the directory.)
+(Fetching and the directory are filled in by later tasks.)
 
+### Publishing
+
+Publishing turns your database into the three kinds of file above and pushes them to a GitHub repository of yours named `rpipe-feed`, which GitHub Pages then serves at `https://<your handle, lowercase>.github.io/rpipe-feed/feed.json`.
+
+**One-time setup** (the `rpipe share` commands run these steps for you, with prompts; you never type `git` or `gh` yourself):
+
+1. Check that `git` and the GitHub command line tool `gh` are installed; if not, say which and how to install it.
+2. Sign in with `gh auth login` if needed, then read your GitHub handle.
+3. Look at `<handle>/rpipe-feed`. Not there: create it (public, with a first commit so the `main` branch exists) and clone it into rpipe's data folder. Already an rpipe feed: reuse it. Something else under that name: stop and ask, never overwrite someone's other repository.
+4. Turn on GitHub Pages for branch `main`, folder `/`. If it is already on, that is fine.
+5. Run `gh auth setup-git` so a plain `git push` uses your GitHub sign-in. Without this the nightly run would wait for a password nobody is there to type.
+6. Optionally add the repository topic `rpipe-feed`, which is how the public directory finds feeds. Turning sharing off removes the topic.
+
+**Each night** (the `publish` stage, after the digest is written):
+
+1. `collect_posts` reads every paper that has appeared in a digest, ranked within its day by triage score (ties by paper id), with its summary and provenance. Reasons pass through `public_reasons`, and diagrams are never read.
+2. `feed_format.build_files` builds the files. Papers older than 30 days move into month archives.
+3. `write_site` writes them into the clone and deletes any `archive/*.json` that is no longer built. It reports whether anything changed.
+4. `push` runs `git add -A`; if something is staged it commits ("rpipe feed 2026-11-26") and runs `git push`. If nothing changed, nothing is pushed: because the files are byte-stable, a quiet night makes no commit at all.
+5. The first time only, `wait_live` polls the feed address every 10 seconds (up to 5 minutes) until GitHub Pages serves a valid rpipe feed, so setup can say "your feed is live" and not just "pushed".
+
+Worked example: your digest on 2026-11-26 lists 3 papers. `collect_posts` returns 3 posts ranked 1 to 3 (plus all earlier ones). Two of them were picked for "liked similar: 2611.01234"; that reason is dropped, the topic reason stays. The files differ from last night's, so one commit and one push happen, and the progress line reads "Pushing to GitHub".
+
+**Credentials.** rpipe stores no password or token. Pushes use the sign-in that `gh` keeps (set up in step 5). If a push fails (signed out, no network, repository deleted) the stage fails with git's own message, for example "Pushing the feed failed: remote: Permission denied", and the rest of the night's run is unaffected.
+
+**Stopping.** Turning sharing off removes the directory topic. Deleting the feed deletes the `rpipe-feed` repository (`gh` first asks GitHub for the extra `delete_repo` permission); followers then see your feed disappear.
+
+Every GitHub operation goes through a small `Runner` (it runs one command and returns its output). The real one runs `git` and `gh` with `GIT_TERMINAL_PROMPT=0` so nothing ever waits on a hidden prompt; tests pass a `FakeRunner` that records the commands and plays back scripted replies, so no test touches GitHub.
 ## Why it's built this way
 
 - JSON Feed plus Atom: one open, boring format that other tools can read, with the rpipe extras tucked under `_rpipe` so readers that don't know them ignore them.
@@ -72,3 +100,6 @@ Files from other people are never trusted. Reading a feed refuses one that is to
 ## Where the code is
 
 - `src/research_pipeline/feed_format.py`: the file shapes, `build_files`, `parse_feed`, `parse_archive`, `parse_reason`, `public_reasons` and `shared_topics`. It is in the shared group (see [architecture.md](architecture.md)), so both the pipeline and the app can use it. It touches no database and no network.
+- `src/research_pipeline/share_publish.py`: `collect_posts`, `write_site`, `push`, `publish`, `wait_live`, `feed_url`. Pipeline group.
+- `src/research_pipeline/share_github.py`: the `Runner` protocol, `SubprocessRunner`, and the setup operations (`check_tools`, `login`, `repo_status`, `create_repo`, `set_topic`, `enable_pages`, `setup_git_credentials`, `delete_repo`). Pipeline group.
+- `tests/test_share_publish.py`, `tests/test_share_github.py`, and `FakeRunner` in `tests/fakes.py`.

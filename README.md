@@ -25,9 +25,13 @@ Add `serve` (`research-pipeline[embed,serve]`) if you want to browse and vote fr
 ## First run
 
 ```
-rpipe init              # creates your vault, then guides you through backend, topics, categories and seed papers
-rpipe run               # collect, rank, summarise, write today's digest
-rpipe schedule install  # Linux: run it every night by itself
+uv tool install "research-pipeline[embed,app] @ git+https://github.com/jrandall54/research-pipeline.git"
+rpipe init              # tells you what each answer is for: summaries, topics, arXiv categories, seed papers
+rpipe run               # collect today's papers, rank them against your profile, summarise the top ones
+rpipe schedule install  # Linux: do that every night by itself
+loginctl enable-linger $USER   # Linux: keep the nightly run going when you are logged out
+rpipe app install       # read your feed on your phone and desktop
+rpipe share setup       # optional: publish your feed so others can follow it
 ```
 
 On macOS and Windows, `rpipe schedule install` is not available: run `rpipe run` from your own scheduler (launchd, Task Scheduler, cron).
@@ -44,7 +48,7 @@ Your digest appears in the vault under `digests/` (default vault `~/research-vau
 - Add your own notes with `rpipe shelf add`; papers close to them rank higher.
 - Check summary accuracy with `rpipe gold` (your answer key) and `rpipe eval`.
 - Browse and vote from your phone with `rpipe serve` (needs the `serve` extra).
-- Your private feed as a phone app: install the `app` extra (`uv tool install --editable '.[embed,serve,app]' --force`), then `rpipe app install` and open the address it prints (see `docs/guide/app.md`).
+- Your private feed as a phone app: run `rpipe app install` and open the address it prints (see `docs/guide/app.md`).
 
 Your votes shape the next night's ranking. `rpipe --help` lists every command; `rpipe sources list` shows paper sources and `rpipe plugins` shows installed plug-ins.
 

@@ -6,9 +6,11 @@
 
 **Vault** — the folder (default `~/research-vault/`) holding everything personal: config, profile, database, digests. Kept outside the repo.
 
-**arXiv category** — the subject tag every arXiv paper carries, such as `cs.CR` (security) or `cs.LG` (machine learning). Only papers in your configured categories are collected; the single value `all` means every computer-science category (`cs.*`; not physics, maths or stat). Codes are checked against a packaged copy of arXiv's list, so `cs.ML` is refused with a did-you-mean (`cs.LG`). See "Choosing categories" in `profile.md`.
+**arXiv** — arxiv.org, the free site where most computer-science and AI research is posted first, often before it is published anywhere else. rpipe collects its papers by subject category. See `sources.md`.
 
-**Seed** — an arXiv id of a paper you like; new papers are ranked by similarity to your seeds. You can add one from an arXiv link, an id or a title search (see `profile.md`).
+**arXiv category** — the subject tag every arXiv paper carries (the `rpipe init` wizard offers 17 common ones as a numbered menu, or you can type codes), such as `cs.CR` (security) or `cs.LG` (machine learning). Only papers in your configured categories are collected; the single value `all` means every computer-science category (`cs.*`; not physics, maths or stat). Codes are checked against a packaged copy of arXiv's list, so `cs.ML` is refused with a did-you-mean (`cs.LG`). See "Choosing categories" in `profile.md`.
+
+**Seed (seed paper)** — an example of exactly the kind of paper you want more of; you don't need to have read it, it just has to be on target. It is stored as an arXiv id, and new papers are compared with its title and abstract, which says far more than a short topic; new papers are ranked by similarity to your seeds. You can add one from an arXiv link, an id or a title search (see `profile.md`).
 
 **FTS5** — SQLite's full-text search module. It builds an index of the words in a table so you can find rows by word quickly (`MATCH 'attention'`) and rank them, instead of scanning every row.
 

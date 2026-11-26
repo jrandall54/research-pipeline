@@ -101,20 +101,44 @@ Add topic 'agent sandboxing'? [Y/n]: > n
 Found 1 of 1 proposed papers on arXiv (the rest were dropped).
 Add seed Universal and Transferable Adversarial Attacks on Aligned Language Models (Andy Zou, 2023)? [Y/n]: > y
 Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
-Topics are short phrases for what you care about, e.g. prompt injection attacks on LLM agents.
+
+Step 3 of 5: Topics
+Topics are short phrases for what you want to read about. Every new paper is compared
+with each topic, and the closest matches rank highest. Specific phrases work better
+than broad fields: "prompt injection attacks on LLM agents" beats "security".
+5 to 15 topics is plenty; near-duplicates add nothing, so use one per idea.
 Topic (blank to finish): > 
-An arXiv category is the subject tag every paper carries (cs.CR = security). Only papers in your categories are collected.
-Common ones: cs.CR security, cs.LG machine learning, cs.AI AI, cs.CL language/LLMs, cs.OS operating systems, cs.SE software engineering, cs.DC distributed computing, cs.NI networking, stat.ML statistical ML.
-Full list: https://arxiv.org/category_taxonomy
-Press Enter to keep the default, or type all if you are not sure (every computer-science category (cs.*); more to fetch and rank). Change it any time with rpipe profile set-categories.
-arXiv categories (comma-separated) [cs.LG, cs.CL, cs.CR, cs.OS, cs.SE]: > 
-Seed papers are papers you like; the ranker finds new papers similar to them.
+
+Step 4 of 5: arXiv categories
+arXiv (arxiv.org) is the free site where most computer-science and AI research appears
+first. Every paper is filed under subject categories, and rpipe only collects papers
+from the categories you pick here; your topics then rank what was collected. Pick the
+areas your topics fall in. More categories means more papers to sort (slower, a bit
+noisier); too few means good papers are never seen.
+
+  [ ]  1. cs.AI   Artificial intelligence (general)
+  [x]  2. cs.LG   Machine learning
+  [x]  3. cs.CL   Language and LLMs
+  ...
+  [ ] 17. stat.ML Statistical machine learning
+
+Type the numbers you want, separated by commas (e.g. 1,2,5), or arXiv codes, or all
+for every computer-science category. Press Enter to keep the ticked ones.
+Change it any time with rpipe profile set-categories. Full list: https://arxiv.org/category_taxonomy
+Categories [cs.LG, cs.CL, cs.CR, cs.OS, cs.SE]: > 
+
+Step 5 of 5: Seed papers
+A seed paper is an example of exactly the kind of paper you want more of. You don't
+need to have read it; it just has to be on target. New papers are compared with each
+seed's title and abstract, which says far more than a short topic, so seeds are the
+strongest way to sharpen your feed. Paste an arXiv link, its id (e.g. 2307.15043) or
+its title; I look it up and you confirm. 3 to 10 is a good start.
 Paper link, arXiv id or title (blank to finish): > https://arxiv.org/abs/2307.15043
 Universal and Transferable Adversarial Attacks on Aligned Language Models (Andy Zou, 2023)
 Add this paper? [Y/n]: > y
 Added seed 2307.15043: Universal and Transferable Adversarial Attacks on Aligned Language Models
 Paper link, arXiv id or title (blank to finish): > 
-Tip: 10-20 seeds work best; add more later with rpipe profile add-seed
+Tip: add more any time with rpipe profile add-seed. "More like this" in the app also nudges ranking, but fades over weeks; seeds don't.
 
 Topics:
   1. prompt injection attacks on LLM agents
@@ -122,7 +146,12 @@ Seeds:
   1. 2307.15043  Universal and Transferable Adversarial Attacks on Aligned Language Models
 ...
 
-Next step: rpipe run
+All set. Next:
+  rpipe run               collect today's papers, rank them and summarize the top ones
+                          (the first run can take an hour or more with a local model)
+  rpipe schedule install  do that every night by itself
+  rpipe app install       read your feed on your phone and desktop
+  rpipe share setup       optional: publish your feed so others can follow it
 ```
 
 **Interrupting.** Ctrl-C (or end of input) at any prompt prints `Saved what you entered so far. Re-run rpipe init to continue.` and exits with code 130 (the conventional "interrupted" code). Every answer you already confirmed is saved, because each one is written by its own atomic edit; nothing is ever half-written. Re-running `init` is safe: it never overwrites your files, and on an existing vault it asks before adding or changing anything, so earlier answers are never silently dropped.

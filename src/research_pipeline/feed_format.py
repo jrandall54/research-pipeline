@@ -27,6 +27,7 @@ FEED_MAX_ITEMS = 300
 FEED_MAX_BYTES = 5_000_000
 ARCHIVE_MAX_ITEMS = 2000
 ARCHIVE_MAX_BYTES = 20_000_000
+STOPPED_AFTER = 7  # consecutive failed fetches before a feed counts as "stopped publishing"
 PUBLIC_REASON_KINDS = ("topic", "upvotes", "author", "keyword")
 
 JSON_FEED_VERSION = "https://jsonfeed.org/version/1.1"

@@ -391,6 +391,22 @@ def upsert_paper(
     return "updated"
 
 
+def insert_feed_paper(conn: sqlite3.Connection, post: sqlite3.Row) -> None:
+    """Copy a followed post into `papers` as a `source='feed'`, `skipped` row, indexed for search.
+
+    Used when you vote on or save a post of a feed you follow. No commit. The collector's
+    `upsert_paper` takes such a row over if it later finds the real paper.
+    """
+    now = _now()
+    cur = conn.execute(
+        "INSERT INTO papers (id, title, abstract, authors, source, url, published, status,"
+        " created_at, updated_at) VALUES (?, ?, ?, ?, 'feed', ?, ?, 'skipped', ?, ?)",
+        (post["paper_id"], post["title"], post["abstract"], post["authors"], post["url"],
+         post["published"], now, now),
+    )
+    _index(conn, cur.lastrowid, post["title"], post["abstract"])
+
+
 def upsert_follow(
     conn: sqlite3.Connection, feed_id: str, feed_url: str, handle: str, display_name: str,
     topics: list[str],

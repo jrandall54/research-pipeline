@@ -21,7 +21,7 @@ from research_pipeline.feed_format import FeedError, Item
 from research_pipeline.progress import Reporter, StageHandle, stage
 from research_pipeline.share_publish import feed_url
 
-STOPPED_AFTER = 7  # consecutive failed fetches before a feed counts as "stopped publishing"
+STOPPED_AFTER = feed_format.STOPPED_AFTER  # the library_api shares this constant
 TIMEOUT_S = 20
 MAX_REDIRECTS = 5
 _HANDLE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")

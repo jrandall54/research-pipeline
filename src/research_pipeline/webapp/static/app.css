@@ -174,8 +174,15 @@ h1, h2, h3 { font-family: var(--font-title); font-weight: 600; line-height: 1.25
 .card-title { font-size: 19px; margin: 0 0 8px; }
 .one-line { margin: 0 0 8px; }
 .one-line.abstract { color: var(--muted); font-size: 15px; }
-.field { margin: 0 0 8px; font-size: 15px; }
-.field-label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+/* Summary fields: label on its own line, roomy text, longer fields as points (Phase 8.1). */
+.read-more:not(:empty) { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 12px; }
+.field { margin: 0 0 16px; font-size: 15px; line-height: 1.6; }
+.field:last-child { margin-bottom: 4px; }
+.field-label { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.field-text { margin: 0; }
+.points { margin: 0; padding-left: 20px; }
+.points li { margin-bottom: 6px; }
+.points li:last-child { margin-bottom: 0; }
 .tag { color: var(--muted); margin-left: 4px; }
 .why { font-size: 14px; margin: 8px 0 0; }
 .summarize { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 14px; }
@@ -197,10 +204,12 @@ body[data-depth="skim"] .read-more { display: none; }
 .reader .back { margin: 0 0 12px; font-size: 14px; }
 .paper-title { font-size: 26px; line-height: 1.25; margin: 0 0 8px; }
 .authors { margin: 0 0 12px; font-size: 15px; }
-.lead { font-size: 18px; }
-.reader h2 { font-size: 16px; margin: 24px 0 8px; }
+.lead { font-size: 18px; line-height: 1.55; margin: 0 0 24px; }
+.reader .field { font-size: 16px; margin-bottom: 20px; }
+.reader h2 { font-size: 16px; margin: 32px 0 12px; }
+.reader h3 { font-size: 15px; margin: 20px 0 8px; }
 .claims { margin: 0; padding-left: 20px; }
-.claims li { margin-bottom: 8px; }
+.claims li { margin-bottom: 12px; line-height: 1.6; }
 a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .about { margin-top: 24px; font-size: 14px; color: var(--muted); }
 .about summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; }

@@ -1,0 +1,14 @@
+{# One summary field: its label on its own line, then the text. Two or more sentences show as
+   points, one per sentence, with the section tag after the last (Phase 8.1). #}
+{% macro field(label, f) -%}
+{% if f %}{% set points = f[0] | sentences %}
+<div class="field">
+  <p class="field-label">{{ label }}</p>
+  {% if points | length > 1 -%}
+  <ul class="points">{% for p in points %}<li>{{ p }}{% if loop.last and f[1] %} <span class="tag mono">{{ f[1] }}</span>{% endif %}</li>{% endfor %}</ul>
+  {%- else -%}
+  <p class="field-text">{{ f[0] }}{% if f[1] %} <span class="tag mono">{{ f[1] }}</span>{% endif %}</p>
+  {%- endif %}
+</div>
+{% endif %}
+{%- endmacro %}

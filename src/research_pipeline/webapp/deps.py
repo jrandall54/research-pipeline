@@ -9,6 +9,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.templating import Jinja2Templates
 
 from research_pipeline import db
+from research_pipeline.webapp import present
 
 HERE = Path(__file__).parent
 
@@ -16,6 +17,8 @@ HERE = Path(__file__).parent
 templates = Jinja2Templates(
     env=Environment(loader=FileSystemLoader(HERE / "templates"), autoescape=select_autoescape(default=True))
 )
+# Splits a summary field into points, so no field shows as one long block (Phase 8.1).
+templates.env.filters["sentences"] = present.sentences
 
 
 def get_conn(request: Request) -> Iterator[sqlite3.Connection]:

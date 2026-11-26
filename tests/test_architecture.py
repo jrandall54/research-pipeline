@@ -12,6 +12,7 @@ CLI = PACKAGE_ROOT / "cli.py"
 APP_COMMANDS = {
     "vote", "_save_command", "feedback", "review", "show", "_show_paper",
     "shelf_add", "shelf_list", "shelf_remove", "shelf_sync", "requests_add",
+    "share_unfollow", "share_following", "share_mix_add", "share_mix_remove",
 }
 # Write helpers: by name pattern, wherever they come from.
 WRITE_PREFIXES = ("record_", "upsert_", "delete_", "mark_", "save_")

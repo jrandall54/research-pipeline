@@ -2,7 +2,7 @@
 
 ## What it does
 
-Lets you publish the papers rpipe picked for you, with their short summaries, so other rpipe users can follow your feed, and lets you follow theirs. Publishing is opt-in: nothing leaves your machine unless sharing is turned on. This page is filled in step by step; this first part describes the files that get published. The commands, following and the browsing screens are added as they are built.
+Lets you publish the papers rpipe picked for you, with their short summaries, so other rpipe users can follow your feed, and lets you follow theirs. Publishing is opt-in: nothing leaves your machine unless sharing is turned on. This page is filled in step by step; this first part describes the files that get published. The commands are described under "How to run / check it"; the browsing screens are added as they are built.
 
 ## What is published
 
@@ -136,10 +136,53 @@ Every GitHub operation goes through a small `Runner` (it runs one command and re
 
 ## How to run / check it
 
-(Added with the `rpipe share` commands.) Tests: `uv run pytest tests/test_feed_format.py tests/test_share_publish.py tests/test_share_github.py tests/test_share_fetch.py -q`.
+You need `git` and the GitHub command line tool `gh` only to *publish*; following needs neither. Every setting is a command; you never edit a file.
+
+| Command | What it does |
+| --- | --- |
+| `rpipe share setup` | Guided first-time publishing; run it again to repair things |
+| `rpipe share status` | Publishing on/off, your address, last push and its result, then each followed feed |
+| `rpipe share publish` | Rebuild and push now (the nightly run does this on its own) |
+| `rpipe share set-name NAME` | Change your display name (republishes) |
+| `rpipe share stop [--delete]` | Stop publishing and leave the directory; `--delete` also deletes the repository (asks first) |
+| `rpipe share browse [SEARCH]` | Refresh the directory and list it, optionally filtered |
+| `rpipe share follow HANDLE` | Follow a feed (or an `https://` feed address) and fetch it now |
+| `rpipe share unfollow HANDLE` | Stop following; posts you saved or voted on are kept |
+| `rpipe share following` | List who you follow |
+| `rpipe share fetch` | Fetch every followed feed now |
+| `rpipe share mix add HANDLE` / `remove HANDLE` | Include or leave out a followed feed in Mix |
+
+Example session (Alex publishes, Sam follows):
+
+```
+$ rpipe share setup
+Display name shown to people who follow you [Alex Morgan]: Alex M.
+This makes your feed public. Anyone can read it. Copies people have already downloaded can't be pulled back if you stop.
+Publish your feed? [y/N]: y
+  publish ... pages ... (progress)
+Your feed is live: https://alex.github.io/rpipe-feed/feed.json
+
+$ rpipe share browse robotics            # on Sam's machine
+Alex M. · @alex · robotics, reinforcement learning · about 8 papers a day · shares 1 of your topics
+Follow one with `rpipe share follow HANDLE`.
+$ rpipe share follow alex
+Following alex: 212 posts downloaded.
+$ rpipe share mix remove alex            # keep their feed out of Mix
+$ rpipe share stop                       # Alex, later
+```
+
+What `setup` does, in order: checks `git` and `gh` (and says how to install a missing one), signs you in with `gh auth login` if needed (it lets go of the vault lock while you do), looks at `<you>/rpipe-feed` (if something that is not an rpipe feed lives there it stops and tells you to rename or delete it), asks for the display name, shows the public warning and asks you to confirm, creates the repository (or, if it exists but this computer has no copy, clones it), runs `gh auth setup-git`, publishes, adds the directory topic, turns on Pages, waits until the address answers, runs a test push with no prompts allowed (`git push --dry-run`), and only then records `share_enabled` in `config.yaml`. A failure at any step leaves sharing off, and running `setup` again carries on. `stop` publishes once more with `active: false` (so followers see "stopped publishing"), removes the topic and turns sharing off; with `--delete` it asks, deletes the repository and removes the local copy under `<vault>/share/rpipe-feed/`.
+
+**Progress.** Every waiting step (publishing, waiting for Pages, fetching, refreshing the directory) shows a progress line; see "Progress" in [running.md](running.md). The nightly run's two sharing stages are described under "The sharing stages" in running.md.
+
+**Decisions.** `follow`, `browse`, `publish`, `fetch`, `setup` and `stop` take the pipeline lock (they write in bulk and use the network); `status`, `following`, `unfollow`, `mix` do not, because they are quick. `following`, `unfollow` and `mix` go through `library_api` like the app does, and map the handle you type (any case, with or without `@`) to the feed. The HTTP client sends `User-Agent: research-pipeline/0.1` because GitHub's API refuses requests without one, and it never follows redirects by itself (`get_limited` does, https only). Rejected: asking the user to run `git` or `gh` themselves, and editing `config.yaml` by hand.
+
+Tests: `uv run pytest tests/test_cli_share.py tests/test_runs.py tests/test_feed_format.py tests/test_share_publish.py tests/test_share_github.py tests/test_share_fetch.py -q`.
 
 ## Where the code is
 
+- `src/research_pipeline/cli.py`: the `share` command group (`share_setup`, `share_status`, `share_publish_now`, `share_set_name`, `share_stop`, `share_browse`, `share_follow`, `share_unfollow`, `share_following`, `share_fetch_now`, `share_mix_add`, `share_mix_remove`), the factories `_share_runner` and `_share_http` that tests replace, `_publish_feed`, and `_share_stages` (the nightly stages).
+- `tests/test_cli_share.py`: the commands.
 - `src/research_pipeline/feed_format.py`: the file shapes, `build_files`, `parse_feed`, `parse_archive`, `parse_reason`, `public_reasons` and `shared_topics`. It is in the shared group (see [architecture.md](architecture.md)), so both the pipeline and the app can use it. It touches no database and no network.
 - `src/research_pipeline/share_publish.py`: `collect_posts`, `write_site`, `push`, `publish`, `wait_live`, `feed_url`. Pipeline group.
 - `src/research_pipeline/share_github.py`: the `Runner` protocol, `SubprocessRunner`, and the setup operations (`check_tools`, `login`, `repo_status`, `create_repo`, `set_topic`, `enable_pages`, `setup_git_credentials`, `delete_repo`). Pipeline group.

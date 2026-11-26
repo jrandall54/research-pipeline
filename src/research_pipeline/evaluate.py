@@ -43,6 +43,7 @@ class EvalEntry(BaseModel):
     diagram: Diagram | None = None  # the drawn diagram (eval never writes it to the vault database)
     diagram_problems: list[str] = []  # why the diagram was dropped, or that the call failed
     diagram_asked: bool = False  # the diagram call was made (to tell "no clear shape" from "off")
+    diagram_abstract_only: bool = False  # not asked: an abstract-only paper cannot have a diagram
     diagram_seconds: float | None = None  # how long the diagram call(s) took
 
 
@@ -171,7 +172,9 @@ def _entry_md(entry: EvalEntry, gold: GoldPaper | None, sections: list[Section])
         how = f" (read in parts: {mode}, {s.parts} notes call{'s' if s.parts != 1 else ''})"
     cut = " (body cut to fit the context)" if s.body_cut else ""
     lines += [f"Basis: {basis}{how}{cut}", ""]
-    if entry.diagram_asked:
+    if entry.diagram_abstract_only:
+        lines += ["Diagram: none (abstract only)", ""]
+    elif entry.diagram_asked:
         took = f" in {entry.diagram_seconds:.1f}s" if entry.diagram_seconds is not None else ""
         if entry.diagram is not None:
             lines += [f"Diagram: drawn ({entry.diagram.shape}, {len(entry.diagram.nodes)} boxes){took}", ""]
@@ -294,7 +297,9 @@ def run_eval(
                     key_facts=list(g.key_facts),
                 )
                 entries.append(entry)
-                if diagrams:
+                if diagrams and sections is None:
+                    entry.diagram_abstract_only = True
+                elif diagrams:
                     entry.diagram_asked = True
                     started = time.monotonic()
                     try:

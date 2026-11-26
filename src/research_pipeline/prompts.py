@@ -20,7 +20,7 @@ from research_pipeline.summary_models import Claim
 # Stamped on every stored summary (its provenance). Bump it whenever SHARED_SYSTEM or
 # the task texts change (the notes and combine prompts included), so old summaries can be
 # told apart from new ones.
-PROMPT_VERSION = "2026-11-p9"
+PROMPT_VERSION = "2026-11-p9b"
 
 # Both block tags are defused everywhere: paper text could fake </notes> and notes could fake </paper>.
 _BLOCK_TAG = re.compile(r"<(/?)(paper|notes)", re.IGNORECASE)
@@ -144,8 +144,11 @@ def citation_feedback(bad: list[str], valid: list[str]) -> str:
 
 DIAGRAM_TASK = f"""\
 Task: draw one small diagram of how the paper's method works, as data. Answer with
-{{"diagram": {{...}}}}, or {{"diagram": null}} when the method has no clear shape (a survey, a
-theory paper, a list of results). null is a normal answer; do not force a diagram.
+{{"diagram": {{...}}}}, or {{"diagram": null}}. null is the default answer: give a diagram only when
+the paper itself describes a method or system with distinct, named parts or stages, in its method
+section or in a figure of its method. A generic agent loop (observe, think, act; input, process, output)
+or a plain "the model is evaluated on a benchmark" flow does not count. A survey, a theory
+paper, a benchmark paper or a list of results gets null. Expect most papers to get null.
 Fields of a diagram:
 - shape: "parts" (one thing coordinating several parts), "steps" (a pipeline: A, then B, then C)
   or "loop" (steps that repeat).

@@ -45,6 +45,28 @@ def _stems(text: str) -> set[str]:
     return {_stem(w) for w in _WORD.findall(text.lower()) if w not in _STOP}
 
 
+# Words that fit almost any paper's diagram; a box needs a word outside this list (compared by
+# stem) to count as naming something specific. See "The diagram" in docs/guide/summaries.md.
+GENERIC_WORDS = frozenset(
+    "agent action observation thought input output feedback evaluation evaluator user environment "
+    "model result query response llm data step task final process system module tool memory plan "
+    "answer prompt utterance natural language".split()
+)
+_GENERIC_STEMS = frozenset(_stem(w) for w in GENERIC_WORDS)
+MIN_SPECIFIC_NODES = 2
+TOO_GENERIC = "too generic (fewer than 2 boxes name something specific to this paper)"
+# A leading section label (3, 3.1, IV, IV-B, A.) is skipped, then the title must be one of the
+# front-matter words as a whole word ("Abstraction layer" is not the abstract; the title must be
+# just "Abstract", so "Abstract syntax trees" is a real section).
+_LABEL = re.compile(r"^(?:[\divxlc]+[.\s)-]+|[a-z][.)]\s)*", re.I)
+_FRONT = re.compile(r"(?:abstract$|(?:introduction|conclusions?)\b)", re.I)
+
+
+def _is_front(title: str) -> bool:
+    """An abstract, introduction or conclusion title (after any leading section label)."""
+    return _FRONT.match(_LABEL.sub("", title.strip(), count=1)) is not None
+
+
 def check_diagram(d: Diagram, sections: list[Section], abstract: str) -> list[str]:
     """Plain-words problems with a diagram; empty means it passes."""
     problems: list[str] = []
@@ -64,9 +86,13 @@ def check_diagram(d: Diagram, sections: list[Section], abstract: str) -> list[st
             problems.append(f"label {x.label!r} is more than {MAX_LABEL_WORDS} words")
         if section_texts(x.sections, sections, abstract) is None:
             problems.append(f"node {x.label!r} cites a section the paper does not have: {x.sections}")
+        if x.sections and all(_is_front(t) for t in x.sections):
+            problems.append(f"node {x.label!r} cites only the abstract, introduction or conclusion")
         missing = sorted(_stems(x.label) - paper_words)
         if missing:
             problems.append(f"label {x.label!r} uses words the paper never uses: {', '.join(missing)}")
+    if sum(1 for x in d.nodes if _stems(x.label) - _GENERIC_STEMS) < MIN_SPECIFIC_NODES:
+        problems.append(TOO_GENERIC)
     return problems
 
 
@@ -77,13 +103,15 @@ def make_diagram(
     """Ask for a diagram, check it, retry once with the problems listed, then drop it.
 
     Returns ``(diagram, [])``; ``(None, [])`` when the model says the paper has no clear shape;
-    ``(None, ["diagram: <problems>"])`` when it is dropped. ``sections=None`` means abstract only.
+    ``(None, ["diagram: <problems>"])`` when it is dropped. ``sections=None`` means abstract only:
+    no call is made (a diagram must cite a method section). A diagram whose only problem is
+    `TOO_GENERIC` is dropped without the retry (a retry would relabel the same generic loop).
     ``on_phase`` is told ``diagram``, then ``diagram_retry`` before the second call. A model failure
     raises `LlmError` (the caller decides what that means).
     """
-    basis = "full_text"
     if sections is None:
-        sections, basis = [Section(title="Abstract", text=abstract)], "abstract"
+        return None, []
+    basis = "full_text"
     shown = fit_to_budget(sections, num_ctx).sections
     system, user = build_diagram_prompt(title, shown, basis)
     if on_phase is not None:
@@ -94,6 +122,8 @@ def make_diagram(
     problems = check_diagram(answer.diagram, sections, abstract)
     if not problems:
         return answer.diagram, []
+    if problems == [TOO_GENERIC]:
+        return None, ["diagram: " + TOO_GENERIC]
     if on_phase is not None:
         on_phase("diagram_retry")
     answer = llm.generate(system, user + diagram_feedback(problems, [s.title for s in shown]), DiagramAnswer)

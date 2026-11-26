@@ -4,8 +4,8 @@ Current state and next steps only. Read `ROADMAP.md` for the full list of phases
 
 ## State (2026-11-25)
 
-- Phases 1 to 9 merged to `main` and pushed. `uv run pytest -q`: 1755 passing, ruff clean.
-- **Phase 9 (hooks, key numbers, plain words, diagrams):** every new summary gets a hook line under the title, up to 3 key numbers and plain-words fields, each checked against the paper text; papers whose method has a shape also get a diagram drawn in the app. Prompts are `2026-11-p9`. Gold-set eval passed (facts 11 → 11, contradicted 2 → 1); Claude read the 9 hooks shown and found all true. Results are in `docs/guide/summaries.md`, "Measured".
+- Phases 1 to 9.1 merged to `main` and pushed. `uv run pytest -q`: 1765 passing, ruff clean. GitHub's test run passes again (it had failed on every push since Phase 8: a test needed uvicorn, which GitHub's setup does not install).
+- **Phase 9 (hooks, key numbers, plain words, diagrams):** every new summary gets a hook line under the title, up to 3 key numbers and plain-words fields, each checked against the paper text; papers whose method has a shape also get a diagram drawn in the app. Prompts are `2026-11-p9b`. Phase 9.1 made diagrams stricter (no diagram by default, generic loops dropped, boxes must cite method sections). Gold-set eval passed (facts 11 → 11, contradicted 2 → 1); Claude read the 9 hooks shown and found all true. Results are in `docs/guide/summaries.md`, "Measured".
 - Diagrams: setting `auto` (on here, since the model is fully in GPU memory; off on CPU-only machines). `rpipe model set-diagrams on|off|auto`.
 - Old papers keep their one-line summary and long fields; only papers summarized from now on (nightly or "Summarize this") get the new parts.
 - The app service was restarted on the merged code.
@@ -19,7 +19,8 @@ Current state and next steps only. Read `ROADMAP.md` for the full list of phases
    - Papers read whole, not in parts: the same journal shows `whole` for the reading mode.
    - Database at version 4: `uv run python -c "import sqlite3,os; print(sqlite3.connect(os.path.expanduser('~/research-vault/vault.sqlite')).execute('PRAGMA user_version').fetchone())"` prints `(4,)`.
    - Night length: the diagram call adds about 12 s per paper on this machine; check the run still finishes well before morning.
-2. **Phase 10: sharing.** Start with the design conversation (what it's for), then the design file, plan and build.
+2. **Owner decision on diagrams (open):** the model still draws a diagram for nearly every paper, including literature reviews (it draws the review process) and theory papers. Options put to the owner: keep as is, show diagrams only on the paper screen, or turn them off by default (`rpipe model set-diagrams off`). See `summaries.md`, "Measured after Phase 9.1".
+3. **Phase 10: sharing.** Start with the design conversation (what it's for), then the design file, plan and build.
 
 ## Parked (small, not urgent)
 

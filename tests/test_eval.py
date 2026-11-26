@@ -684,3 +684,18 @@ def test_full_text_paper_gets_real_abstract(vault, monkeypatch):
     monkeypatch.setattr(evaluate, "summarize_paper", spy)
     run(vault, abstract_for=lambda pid: "UNIQUE-ABSTRACT-TEXT")
     assert seen == ["UNIQUE-ABSTRACT-TEXT"]
+
+
+def test_run_eval_abstract_only_paper_gets_no_diagram_call_and_no_time(vault):
+    def none(pid):
+        raise FullTextUnavailable("no html")
+
+    add_papers(vault, 1)
+    llm = AlwaysSummary([])
+    md = run_eval(vault, llm, none, 32768, DAY, lambda pid: "We study X.", diagrams=True)
+    text = md.read_text()
+    assert "Diagram: none (abstract only)" in text
+    assert "no clear shape" not in text and "mean" not in text
+    assert not any("DiagramAnswer" in str(c) for c in llm.calls)
+    data = load_eval(vault, DAY)
+    assert data.entries[0].diagram_seconds is None

@@ -52,8 +52,8 @@ def test_check_diagram_invented_label():
 
 
 def test_check_diagram_plural_and_ing_match():
-    secs = [Section(title="2 Method", text="Each agent does plan work.")]
-    d = Diagram(shape="steps", nodes=[node("a", "Agents"), node("b", "Planning work")],
+    secs = [Section(title="2 Method", text="Each scheduler agent does plan work.")]
+    d = Diagram(shape="steps", nodes=[node("a", "Scheduler agents"), node("b", "Planning work")],
                 edges=[DiagramEdge(source="a", target="b")], caption="c")
     assert check_diagram(d, secs, "") == []
 
@@ -88,13 +88,89 @@ def test_make_diagram_retry_succeeds():
     assert make_diagram(llm, "T", SECS, "We study X.", 32768) == (good(), [])
 
 
-def test_make_diagram_abstract_only():
-    d = Diagram(shape="steps", nodes=[node("a", "Study", "Abstract"), node("b", "X", "Abstract")],
-                edges=[DiagramEdge(source="a", target="b")], caption="c")
-    llm = FakeLLM([DiagramAnswer(diagram=d)])
-    got, probs = make_diagram(llm, "T", None, "We study X.", 32768)
-    assert got == d and probs == []
-    assert "only the abstract" in llm.calls[0][1]
+def test_make_diagram_abstract_only_makes_no_call():
+    llm = FakeLLM([])
+    phases: list[str] = []
+    assert make_diagram(llm, "T", None, "We study X.", 32768, phases.append) == (None, [])
+    assert llm.calls == [] and phases == []
+
+
+CODEREACT = Diagram(
+    shape="loop",
+    nodes=[node("u", "Natural Language Utterance"), node("t", "Thought"), node("a", "Action"),
+           node("o", "Observation"), node("f", "Final Output")],
+    edges=[DiagramEdge(source="u", target="t"), DiagramEdge(source="t", target="a"),
+           DiagramEdge(source="a", target="o"), DiagramEdge(source="o", target="t")],
+    caption="c",
+)
+LOOP_SECS = [Section(title="2 Method", text="A natural language utterance starts a thought, an action, "
+                                            "an observation and a final output.")]
+GENERIC = "diagram: too generic (fewer than 2 boxes name something specific to this paper)"
+
+
+def test_check_diagram_generic_loop_is_too_generic():
+    assert check_diagram(CODEREACT, LOOP_SECS, "") == [GENERIC[len("diagram: "):]]
+
+
+def test_check_diagram_robot_agents_is_specific():
+    d = Diagram(shape="parts",
+                nodes=[node("h", "Hyper-agent"), node("a", "Arm + gripper"), node("t", "Torso"),
+                       node("c", "Chassis")],
+                edges=[DiagramEdge(source="h", target="a")], caption="c")
+    secs = [Section(title="2 Method", text="A hyper-agent, arm and gripper, torso and chassis.")]
+    assert check_diagram(d, secs, "") == []
+
+
+def test_check_diagram_front_matter_only_citation_fails():
+    for title in ("1 Introduction", "Abstract", "6. Conclusions", "introduction"):
+        secs = [Section(title=title, text="A hyper-agent plans tasks for the arm agent and the torso agent.")]
+        d = good().model_copy(update={"nodes": [node("h", "Hyper-agent", title), node("a", "Arm agent", title)],
+                                      "edges": []})
+        probs = check_diagram(d, secs, "")
+        assert any("'Hyper-agent' cites only the abstract, introduction or conclusion" in p for p in probs), title
+
+
+def test_check_diagram_method_and_results_sections_pass():
+    secs = [Section(title="3 Method", text="hyper-agent"), Section(title="5.1 Main Results", text="arm agent")]
+    d = good().model_copy(update={"nodes": [node("h", "Hyper-agent", "3 Method"),
+                                            node("a", "Arm agent", "5.1 Main Results")], "edges": []})
+    assert check_diagram(d, secs, "") == []
+
+
+def test_check_diagram_one_method_citation_is_enough():
+    secs = [Section(title="1 Introduction", text="hyper-agent"), Section(title="3 Method", text="hyper-agent arm")]
+    n = DiagramNode(id="h", label="Hyper-agent", sections=["1 Introduction", "3 Method"])
+    d = good().model_copy(update={"nodes": [n, node("a", "Arm agent", "3 Method")], "edges": []})
+    assert check_diagram(d, secs, "") == []
+
+
+def test_make_diagram_too_generic_is_dropped_without_retry():
+    llm = FakeLLM([DiagramAnswer(diagram=CODEREACT)])
+    phases: list[str] = []
+    got = make_diagram(llm, "T", LOOP_SECS, "", 32768, phases.append)
+    assert got == (None, [GENERIC])
+    assert len(llm.calls) == 1 and phases == ["diagram"]
+
+
+def test_make_diagram_front_matter_citation_still_retries():
+    secs = [Section(title="1 Introduction", text="hyper-agent arm agent"),
+            Section(title="3 Method", text="hyper-agent arm agent")]
+    bad = good().model_copy(update={"nodes": [node("h", "Hyper-agent", "1 Introduction"),
+                                              node("a", "Arm agent", "1 Introduction")], "edges": []})
+    fixed = good().model_copy(update={"nodes": [node("h", "Hyper-agent", "3 Method"),
+                                                node("a", "Arm agent", "3 Method")], "edges": []})
+    llm = FakeLLM([DiagramAnswer(diagram=bad), DiagramAnswer(diagram=fixed)])
+    assert make_diagram(llm, "T", secs, "", 32768) == (fixed, [])
+    assert len(llm.calls) == 2
+
+
+def test_diagram_task_makes_null_the_default():
+    from research_pipeline.prompts import DIAGRAM_TASK, PROMPT_VERSION
+
+    assert PROMPT_VERSION == "2026-11-p9b"
+    assert "null is the default answer" in DIAGRAM_TASK
+    assert "observe, think, act" in DIAGRAM_TASK and "input, process, output" in DIAGRAM_TASK
+    assert "most papers" in DIAGRAM_TASK
 
 
 def test_check_diagram_es_plurals_match():
@@ -116,3 +192,14 @@ def test_stem_silent_e_meets_inflections():
                  ("processes", "process"), ("classes", "class"), ("boxes", "box"),
                  ("matches", "match")):
         assert _stem(a) == _stem(b), (a, b)
+
+
+def test_front_matter_titles_ieee_and_lettered_styles():
+    from research_pipeline.diagram import _is_front
+
+    for t in ("I. Introduction", "V. Conclusion", "A. Introduction", "1 Introduction", "6. Conclusions",
+              "Abstract", "II) Abstract", "VI-Conclusion"):
+        assert _is_front(t), t
+    for t in ("IV-B Effectiveness", "3 Method", "5.1 Main Results", "Abstraction layer",
+              "Abstract syntax trees", "III. Method"):
+        assert not _is_front(t), t

@@ -16,6 +16,30 @@ _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 _SECTION_NUMBER = re.compile(r"^(\d+(\.\d+)*|[IVXLC]+(-[A-Z])?|[A-Z](\.\d+)+)$")
 
 
+# A sentence ends at . ! or ? (perhaps inside a closing bracket or quote), then space and a
+# capital, digit, bracket or quote.
+_SENTENCE_BREAK = re.compile(r"(?:(?<=[.!?])|(?<=[.!?][)\"\u201d]))\s+(?=[A-Z0-9(\"\u201c])")
+# Words whose full stop is not a sentence end; a break after one of these is undone.
+_ABBREVIATIONS = ("e.g.", "i.e.", "et al.", "vs.", "cf.", "etc.", "approx.", "Fig.", "Figs.", "Eq.", "Eqs.",
+                  "Sec.", "Tab.", "No.", "Ref.", "Refs.", "Dr.", "Mr.", "Ms.", "St.")
+_INITIAL = re.compile(r"(?:^|\s)[A-Z]\.$")
+
+
+def sentences(text: str) -> list[str]:
+    """Split a summary field into sentences for display as points.
+
+    Careful on purpose: when unsure it keeps text together, because a missed split leaves one
+    block (harmless) while a wrong split cuts a sentence in two.
+    """
+    parts: list[str] = []
+    for piece in _SENTENCE_BREAK.split(text.strip()):
+        if parts and (parts[-1].endswith(_ABBREVIATIONS) or _INITIAL.search(parts[-1])):
+            parts[-1] += " " + piece
+        elif piece:
+            parts.append(piece)
+    return parts
+
+
 def _phrase(r: ReasonView) -> str:
     return {
         "topic": f"you follow {r.label}",

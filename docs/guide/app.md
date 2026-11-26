@@ -51,6 +51,24 @@ Worked example: a paper with reasons `topic: agentic workflow (0.80)` and `HF up
 
 Every card always contains the Skim fields (topic, title, one line, why) and, in a `<div class="read-more">`, the Read fields (problem, what they did, what they found, each with its section tag). The page's `<body data-depth="skim|read">` decides which show: CSS hides `.read-more` when it is `skim`. The Skim / Read buttons (`aria-pressed` marks the active one) are handled by `app.js`, which sets the attribute and saves the choice in the browser's `localStorage["depth"]`, wrapped in try/catch because private windows can refuse storage (the buttons then still work for that page). Without JavaScript the page stays in Skim. An unsummarized card has no problem/approach/results, so it shows the abstract excerpt at both depths.
 
+### How a summary field is laid out
+
+**What it does.** Each field (The problem, What they did, What they found) is its own block: the label on a line of its own, then the text. A field of two or more sentences is shown as short points, one sentence each, with the section tag after the last point. On a card the Read fields sit below a thin line, apart from the Skim part. (Phase 8.1: the owner found the fields hard to read as single dense blocks.)
+
+**How it works.** The template filter `sentences` (`present.sentences`, registered in `deps.py`) splits the field's text; the macro in `templates/_field.html` draws one field and is shared by the card and the paper screen. A sentence break is a `.`, `!` or `?` (perhaps inside a closing bracket or quote) followed by a space and a capital letter, digit, bracket or quote. A break right after a common abbreviation (`e.g.`, `i.e.`, `et al.`, `vs.`, `Fig.`, `Eq.`, `Sec.` and a few more) or a single initial (`J.`) is undone. Example:
+
+```
+"Across 25 tasks it took 28% less time. In 8 team tasks it won every time."  §5.1
+→ • Across 25 tasks it took 28% less time.
+  • In 8 team tasks it won every time. §5.1
+```
+
+`1.37x` and `13.8` never split, because no space follows their full stop.
+
+**Why this way.** The splitter is careful on purpose: a missed split leaves one block, as before, while a wrong split would cut a sentence in two, so it splits only when it is sure. On the 58 summaries in the owner's vault (2026-11-25) it turned 151 fields into two points and left 23 single sentences, with no sentence cut. Rejected: asking the model for bullet points (that changes the prompts and needs a gold-set check, so it belongs with Phase 9's plain-words rewrite) and a "show more" fold per field (one more tap for text already on screen; Read mode is already the fold). The wording itself is still the model's, often long and full of the paper's jargon; Phase 9 rewrites it in plain words.
+
+**How to check it.** `tests/test_webapp_present.py` (`test_sentences_*`: sentence ends, abbreviations, initials, decimals, empty text) and `tests/test_webapp_pages.py` (`test_long_field_shows_as_points_with_tag_on_last`).
+
 Why this way: the choice lives in the browser, not the database, because it is a per-device taste (a phone may want Skim, a desktop Read), and a CSS switch means no reload and no server round trip. Rejected: two separate pages (loses your place) and fetching the Read text on demand (needless delay for text already on the page).
 
 ## Why you're seeing this
@@ -68,7 +86,7 @@ Built from the stored reasons; unknown reason formats are skipped, never shown r
 
 ## Reading a paper
 
-**What it does.** `GET /paper/{id}` shows one paper: topic, title, authors ("A, B, C and 2 others" when there are more than three), a "Read the paper" button to the original (shown only when the paper's address starts with `http://` or `https://`; anything else, such as a `javascript:` address, is left out so a bad record cannot run code when tapped), the one-line summary, the problem / what they did / what they found fields, then the critique under the heading "How solid is it?" (subheadings "Strong points", "Weak points" and "Questions to ask"), and "Why you're seeing this". Each claim carries its section tag (for example `§4`). A paper with no summary yet shows its full abstract and the same "Summarize this" control as a card. An id with a version (`2611.25005v2`) or an arXiv URL form works; an unknown or malformed id gives the 404 page "That paper isn't in your library." inside the normal app frame (the same page serves any other missing address). Cards on the feed, Saved and Search link to this page from their titles.
+**What it does.** `GET /paper/{id}` shows one paper: topic, title, authors ("A, B, C and 2 others" when there are more than three), a "Read the paper" button to the original (shown only when the paper's address starts with `http://` or `https://`; anything else, such as a `javascript:` address, is left out so a bad record cannot run code when tapped), the one-line summary, the problem / what they did / what they found fields (laid out as described in "How a summary field is laid out"), then the critique under the heading "How solid is it?" (subheadings "Strong points", "Weak points" and "Questions to ask"), and "Why you're seeing this". Each claim carries its section tag (for example `§4`). A paper with no summary yet shows its full abstract and the same "Summarize this" control as a card. An id with a version (`2611.25005v2`) or an arXiv URL form works; an unknown or malformed id gives the 404 page "That paper isn't in your library." inside the normal app frame (the same page serves any other missing address). Cards on the feed, Saved and Search link to this page from their titles.
 
 **How it works.** `routes_pages.paper` runs the id through `ids.normalise_paper_id`, loads the paper with `library_api.get_paper`, and asks `present.paper_detail` to shape it into a `DetailData` (the card plus authors, critique, questions, "about" lines). Two small clean-ups happen there: each critique question loses a trailing `[sections: ...]` note (the model sometimes appends one; it is noise on a screen), and claims get section tags as on cards. The route also loads that paper's digest day and passes the titles to the template.
 

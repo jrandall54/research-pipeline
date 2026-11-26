@@ -65,3 +65,27 @@ def test_card_summarized():
     c = present.card(_view(summary=s, triage_reasons=["topic: llm agents (0.5)"]), "failed")
     assert c.one_line == "one" and c.problem == ("p", "§5.1") and c.approach == ("a", None)
     assert c.summarize_state == "done" and c.topic == "Llm agents"
+
+
+def test_sentences_splits_on_sentence_ends_only():
+    assert present.sentences("First point. Second point.") == ["First point.", "Second point."]
+    assert present.sentences("It won. 13.8 vs 26.0 minutes.") == ["It won.", "13.8 vs 26.0 minutes."]
+    assert present.sentences("Is it? (Yes.) Done!") == ["Is it?", "(Yes.)", "Done!"]
+
+
+def test_sentences_keeps_abbreviations_initials_and_decimals_together():
+    for text in [
+        "Methods, e.g. LoRA, are used.",
+        "As in Smith et al. The result holds.",
+        "Shown in Fig. 3 and Eq. 2.",
+        "Written by J. Smith and colleagues.",
+        "RePrism achieves 1.37x the throughput.",
+        "A beats B vs. C here.",
+    ]:
+        assert present.sentences(text) == [text], text
+
+
+def test_sentences_one_and_empty():
+    assert present.sentences("Only one sentence") == ["Only one sentence"]
+    assert present.sentences("   ") == []
+    assert present.sentences("Spaced  out.   Next one.") == ["Spaced  out.", "Next one."]

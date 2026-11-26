@@ -149,3 +149,15 @@ def test_search_no_match_message_escapes_query(client):
     raw = client.get("/search", params={"q": "<b>zzz</b>"}).text
     assert "&lt;b&gt;zzz&lt;/b&gt;" in raw and "<b>zzz" not in raw
     assert 'No papers match "<b>zzz</b>".' in htmllib.unescape(raw)
+
+
+def test_long_field_shows_as_points_with_tag_on_last(vault):
+    c, p = vault
+    _summarize(c, "2611.25006", summary=Summary(
+        one_line="one", problem=Claim(text="First sentence. Second sentence.", sections=["2 Background"]),
+        approach=Claim(text="single sentence", sections=["3 Method"]),
+        results=Claim(text="r", sections=["5 Results"]), limitations=Claim(text="l", sections=["6 Limits"])))
+    html = TestClient(create_app(p, {"testserver"})).get("/paper/2611.25006").text
+    assert '<ul class="points"><li>First sentence.</li><li>Second sentence. <span class="tag mono">§2</span></li></ul>' in html
+    assert '<p class="field-text">single sentence <span class="tag mono">§3</span></p>' in html
+    assert '<p class="field-label">The problem</p>' in html

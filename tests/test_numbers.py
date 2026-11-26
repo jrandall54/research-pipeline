@@ -23,3 +23,17 @@ def test_number_found_rejects_unit_and_form_changes():
 
 def test_number_found_unparseable_is_false():
     assert not number_found("abc", "12 things")
+
+
+def test_numbers_in_skips_unicode_hyphen_names():
+    assert numbers_in("GPT\u20115.5 beats Llama\u20113 and Foo\u22122") == []
+
+
+def test_number_found_survives_very_long_digit_runs():
+    assert not number_found("5", "hash 123456789012345678901234567890 end")
+    assert number_found("5", "hash 123456789012345678901234567890 and 5 items")
+
+
+def test_numbers_in_plain_and_rounding_regressions():
+    assert numbers_in("5 apples") == ["5"]
+    assert number_found("28%", "27.5%")

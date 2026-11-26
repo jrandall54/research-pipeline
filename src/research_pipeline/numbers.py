@@ -16,11 +16,15 @@ _NUM = re.compile(
 )
 
 
+# ASCII hyphen, U+2010 to U+2015 (various dashes) and the minus sign U+2212
+_HYPHENS = "-" + "".join(chr(c) for c in range(0x2010, 0x2016)) + "\u2212"
+
+
 def _extract(text: str, skip_names: bool) -> list[str]:
     found: list[str] = []
     for m in _NUM.finditer(text):
         before = text[m.start("num") - 1] if m.start("num") > 0 else ""
-        if skip_names and (before.isalpha() or before in ("-", "§")):
+        if skip_names and (before.isalpha() or before and (before in _HYPHENS or before == "§")):
             continue
         sign = (m.group("sign") or "").replace("\\", "").replace("×", "x")
         # a trailing "x" glued to a word (e.g. "5xyz") is not a sign
@@ -46,7 +50,10 @@ def _split(number: str) -> tuple[Decimal, str] | None:
 
 
 def number_found(number: str, text: str) -> bool:
-    """True if ``text`` has this number, exactly or rounded to its decimal places."""
+    """True if ``text`` has this number, exactly or rounded to its decimal places.
+
+    ``number`` must already be normalized by ``numbers_in`` (e.g. "28%", "1.4x").
+    """
     parsed = _split(number)
     if parsed is None:
         return False
@@ -56,6 +63,10 @@ def number_found(number: str, text: str) -> bool:
         o = _split(other)
         if o is None or o[1] != sign:
             continue
-        if o[0].quantize(step, rounding=ROUND_HALF_UP) == value:
+        try:
+            rounded = o[0].quantize(step, rounding=ROUND_HALF_UP)
+        except InvalidOperation:  # absurdly long digit runs (IDs, checksums)
+            continue
+        if rounded == value:
             return True
     return False

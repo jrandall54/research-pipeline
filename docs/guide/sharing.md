@@ -2,7 +2,7 @@
 
 ## What it does
 
-Lets you publish the papers rpipe picked for you, with their short summaries, so other rpipe users can follow your feed, and lets you follow theirs. Publishing is opt-in: nothing leaves your machine unless sharing is turned on. The files that get published come first, then following, publishing, the commands and the People page in the app (see app.md).
+Lets you publish the papers rpipe picked for you, with their short summaries, so other rpipe users can follow your feed, and lets you follow theirs. Publishing is opt-in: nothing leaves your machine unless sharing is turned on. This page covers the files that get published, how the directory finds feeds, following, publishing, the reasons behind the design, and the commands. The People page in the app is described in app.md.
 
 ## What is published
 
@@ -96,7 +96,7 @@ Worked example: Alex has 41 posts in `archive/2026-10.json`, 12 in `archive/2026
 
 **When a fetch fails.** Nothing new is stored, the reason is kept (`follows.last_error`) and `failures` goes up by one. One feed failing never stops the others: `fetch_all` returns an error line like "fetch Alex M.: the server answered 500" and moves on. A success resets `failures` to 0.
 
-**What "stopped publishing" means.** A feed counts as stopped (`is_stopped`) after 7 failed fetches in a row (`STOPPED_AFTER`), or when its own `_rpipe.active` is false (its owner turned sharing off). Its old posts stay, rpipe keeps trying each night, and a good download makes it active again.
+**What "stopped publishing" means.** A feed counts as stopped (`is_stopped`) after 7 failed fetches in a row (`STOPPED_AFTER`), or when its own `_rpipe.active` is false (its owner turned sharing off). Its old posts stay, rpipe keeps trying each night, and a good download makes it active again. The message says only "stopped publishing": it does not show the date, because rpipe does not record when a feed stopped (a deliberate simplification of the design).
 
 **Progress.** The `fetch` stage reports one step per feed ("fetching 2 of 3: Alex M."), and one per archive on a first fetch.
 
@@ -136,6 +136,9 @@ Worked example: your digest on 2026-11-26 lists 3 papers. `collect_posts` return
 
 **Stopping.** Turning sharing off removes the directory topic. If a push fails, the commit stays local and the next night pushes it. Deleting the feed deletes the `rpipe-feed` repository; followers then see your feed disappear. Deleting needs an extra GitHub permission (`delete_repo`): `rpipe share stop --delete` checks whether your sign-in already has it and, if not, says so and runs `gh auth refresh` on your terminal (it shows a one-time code and may open a browser). While it waits for you the command lets go of the vault lock (like every question rpipe asks), so a nightly run is never held up by an unanswered prompt.
 
+
+**What GitHub can see.** Commits carry timestamps, so anyone looking at your public `rpipe-feed` history can tell roughly when your nightly run happens and which time zone you are in. This comes with publishing through git and cannot be hidden; it is one more reason publishing is opt-in.
+
 Every GitHub operation goes through a small `Runner` (it runs one command and returns its output). The real one runs `git` and `gh` with `GIT_TERMINAL_PROMPT=0` so nothing ever waits on a hidden prompt; tests pass a `FakeRunner` that records the commands and plays back scripted replies, so no test touches GitHub.
 ## Why it's built this way
 
@@ -146,7 +149,17 @@ Every GitHub operation goes through a small `Runner` (it runs one command and re
 - Fetch the whole feed before storing anything, then store and commit once: a feed that breaks halfway leaves your database as it was, never half a feed. Rejected: storing as each archive arrives.
 - Redirects are followed by rpipe itself, one hop at a time, so every hop can be checked as https. Rejected: letting the HTTP library follow them (it would accept a redirect to plain `http`).
 - The fingerprint in `feed.json` is only a change marker (is this archive new to me?), not a security check; every download is validated by its own parse.
-- Archive addresses are built from the feed's folder and only for paths that match the published pattern, so a hostile feed cannot make rpipe fetch some other address. Private reasons must never leave your machine in the first place.
+- Archive addresses are built from the feed's folder and only for paths that match the published pattern, so a hostile feed cannot make rpipe fetch some other address.
+
+**How feeds could have travelled between people** (the choice was made in the design conversation). Chosen: static feed files on free GitHub Pages. Each night your rpipe pushes its files to your own public repository and followers' rpipe downloads them. It costs nothing, needs no server, exposes nothing on your computer and still works while your computer is off. The price: you need a free GitHub account to publish (not to follow), and GitHub can see the addresses of readers. This is the same idea as podcasts: a stable address per feed, with the files behind it updated nightly, so there is no central database.
+
+- Rejected: a shared sync folder (Syncthing, Drive, Dropbox). Fine inside one club, but it is not public, everyone gets every file, and Syncthing needs both computers on. It stays a possible fallback for a group that wants privacy; not built.
+- Rejected: one shared cloud storage bucket. Smooth, but someone has to own and pay for it and hand out keys, which makes them a gatekeeper.
+- Rejected: Tailscale Funnel or node sharing. Little to build, but your home computer becomes the server and must stay on; the most intrusive option.
+- Rejected: open networks (Nostr, IPFS, the AT Protocol). No company in the middle, but they are young, relays drop old posts, and they are close to social-media infrastructure.
+- Rejected: sending a file by hand. It works today but is not following: nothing updates.
+
+**How people find each other.** Chosen: a GitHub tag. Each feed repository carries the topic `rpipe-feed`, browsing searches GitHub for it, and only repositories that really serve a valid rpipe feed are listed. Rejected: a shared list in one repository where joining is a pull request that someone approves. That is a gatekeeper, and the owner ruled out any gatekeeper.
 
 ## How to run / check it
 

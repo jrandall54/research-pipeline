@@ -1,6 +1,6 @@
 # Phase 10 — Sharing: Implementation Plan
 
-> **Phase 10** · Status: building · Design: [phase-10-sharing-design.md](../specs/phase-10-sharing-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+> **Phase 10** · Status: built (awaiting merge) · Design: [phase-10-sharing-design.md](../specs/phase-10-sharing-design.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -1,6 +1,6 @@
 # Phase 10 — Sharing: publish your feed, find feeds, follow people (design)
 
-> **Phase 10** · Status: designed · Plan: [phase-10-sharing.md](../plans/phase-10-sharing.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
+> **Phase 10** · Status: built (awaiting merge) · Plan: [phase-10-sharing.md](../plans/phase-10-sharing.md) · Roadmap: [ROADMAP.md](../ROADMAP.md)
 
 Date: 2026-11-26. Vision and earlier decisions: [phase-08-15-app-roadmap-design.md](phase-08-15-app-roadmap-design.md). Screens: the "Research Feed — App Design" canvas (https://claude.ai/artifact/JnycnAXpyjtqyybVmv9xMK): `Main` (feed switcher, People tab), `Directory` (People screen), `Desktop` ("Showing" list, name labels on cards).
 

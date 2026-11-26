@@ -393,3 +393,7 @@
 **Noreply address** — GitHub's private email form, `<handle>@users.noreply.github.com`. rpipe sets it as the git email inside your `rpipe-feed` clone so the public commit history never shows your real email. See `sharing.md`.
 
 **Control characters (stripped)** — invisible characters such as the ANSI escape codes that terminals read as commands (move the cursor, recolour or hide text). A stranger's feed could put them in a name or title, so rpipe removes them when it stores downloaded text and before it prints it (`feed_format.clean_text`). See `sharing.md`.
+
+**Archive (of a feed)** — a month of older posts published as its own file, `archive/YYYY-MM.json`, so `feed.json` stays small. `feed.json` lists each archive with a SHA-256 fingerprint, and a follower downloads only the archives whose fingerprint changed. See `sharing.md`.
+
+**Repository topic** — a free-text tag on a GitHub repository. rpipe tags your `rpipe-feed` repository with the topic `rpipe-feed`; searching GitHub for that tag is how the directory finds feeds, with no list kept by anyone. See `sharing.md`.

@@ -16,8 +16,11 @@ SEARCH_LIMIT = 30
 
 
 def _with_publisher_summary(conn: sqlite3.Connection, v: library_api.PaperView) -> library_api.PaperView:
-    """A paper copied in from a followed post has no summary of its own: show the publisher's."""
-    if v.summary is None:
+    """A paper copied in from a followed post has no summary of its own: show the publisher's.
+
+    Only for ``source='feed'`` copies; your own papers keep what you have (or nothing).
+    """
+    if v.summary is None and library_api.is_feed_copy(conn, v.id):
         post = library_api.followed_post(conn, v.id)
         if post is not None and post.paper.summary is not None:
             return v.model_copy(update={"summary": post.paper.summary})
@@ -54,7 +57,7 @@ def paper(paper_id: str, request: Request, conn: Conn):
         view = None
     # Your own summary wins. Otherwise a followed feed's post (with its summary) stands in.
     post = None
-    if view is None or view.summary is None:
+    if view is None or (view.summary is None and library_api.is_feed_copy(conn, pid)):
         post = library_api.followed_post(conn, pid)
         if post is not None and view is not None and post.paper.summary is None:
             post = None

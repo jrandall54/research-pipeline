@@ -152,3 +152,14 @@ def test_vote_on_followed_post_via_api(vault):
     r = c.post(f"/api/paper/{FOLLOWED}/save", json={"saved": True}, headers={"Origin": "http://testserver"})
     assert r.status_code == 200
     assert "publisher one line" in c.get("/saved").text  # copied-in paper shows the publisher's summary
+
+
+def test_own_paper_without_summary_keeps_own_card_and_no_label(vault):
+    """I7: a followed post of the same id never takes over your own paper (paper screen, Saved)."""
+    _follow(vault[0], [_post(OWN, summary=_publisher_summary())])
+    c = _client(vault)
+    html = c.get(f"/paper/{OWN}").text
+    assert "publisher one line" not in html and "Alex M." not in html
+    assert "Summarize this" in html and 'view=following' not in html
+    c.post(f"/api/paper/{OWN}/save", json={"saved": True}, headers={"Origin": "http://testserver"})
+    assert "publisher one line" not in c.get("/saved").text

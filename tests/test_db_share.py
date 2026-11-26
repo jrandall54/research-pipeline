@@ -126,3 +126,21 @@ def test_collector_takes_over_feed_row(tmp_path):
     assert conn.execute(
         "SELECT COUNT(*) FROM papers_fts WHERE papers_fts MATCH 'New'"
     ).fetchone()[0] == 1
+
+
+def test_refollow_forgets_archives_and_failures(tmp_path):
+    from research_pipeline import db
+    c = db.open_db(tmp_path / "t.db")
+    db.upsert_follow(c, "f", "https://x/feed.json", "x", "X", [])
+    db.record_fetch(c, "f", ok=True, error=None, archive_hashes={"archive/2026-10.json": "a" * 64})
+    db.record_fetch(c, "f", ok=False, error="boom")
+    db.mark_unfollowed(c, "f", set())
+    row = db.get_follow(c, "f")
+    assert row["archive_hashes"] == "{}" and row["failures"] == 0
+    db.record_fetch(c, "f", ok=True, error=None, archive_hashes={"archive/2026-10.json": "a" * 64})
+    db.upsert_follow(c, "f", "https://x/feed.json", "x", "X", [])  # re-follow after unfollow
+    assert db.get_follow(c, "f")["archive_hashes"] == "{}"
+    db.record_fetch(c, "f", ok=True, error=None, archive_hashes={"archive/2026-10.json": "a" * 64})
+    db.upsert_follow(c, "f", "https://x/feed.json", "x", "X2", [])  # still followed: hashes stay
+    assert db.get_follow(c, "f")["archive_hashes"] != "{}"
+    c.close()

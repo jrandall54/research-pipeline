@@ -389,3 +389,7 @@
 **Stopped publishing** — how rpipe describes a followed feed that has failed to download 7 nights in a row, or whose owner turned sharing off (the feed says `active: false`). Its old posts stay; rpipe keeps trying, and one good download clears the mark. See "Following" in `sharing.md`.
 
 **Directory (of feeds)** — the cached list of published rpipe feeds found by searching GitHub for repositories tagged with the topic `rpipe-feed`. Each candidate's feed is downloaded and validated before it is listed; there is no approval step. See "The directory" in `sharing.md`.
+
+**Noreply address** — GitHub's private email form, `<handle>@users.noreply.github.com`. rpipe sets it as the git email inside your `rpipe-feed` clone so the public commit history never shows your real email. See `sharing.md`.
+
+**Control characters (stripped)** — invisible characters such as the ANSI escape codes that terminals read as commands (move the cursor, recolour or hide text). A stranger's feed could put them in a name or title, so rpipe removes them when it stores downloaded text and before it prints it (`feed_format.clean_text`). See `sharing.md`.

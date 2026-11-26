@@ -14,22 +14,29 @@ router = APIRouter()
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
 
 
+def _own_handle(request: Request) -> str | None:
+    share = request.app.state.share
+    return share["handle"] if share else None
+
+
 @router.get("/people")
 def people(request: Request, conn: Conn):
     state = request.app.state
     ctx = {
         "nav": "people", "share": state.share,
-        "directory": library_api.directory(conn, state.my_topics),
+        "directory": library_api.directory(conn, state.my_topics, _own_handle(request)),
         "follows": library_api.follows(conn),
     }
     return templates.TemplateResponse(request, "people.html", ctx)
 
 
 @router.post("/api/feed/{handle}/follow")
-def follow(handle: str, conn: Conn):
+def follow(handle: str, request: Request, conn: Conn):
     try:
-        library_api.follow_request(conn, handle)
-    except ValueError:
+        library_api.follow_request(conn, handle, _own_handle(request))
+    except ValueError as exc:
+        if "own feed" in str(exc):
+            return _error(400, str(exc))
         return _error(404, "That feed isn't in the directory.")
     return JSONResponse({"following": True})
 

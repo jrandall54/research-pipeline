@@ -17,11 +17,8 @@ from research_pipeline import feed_format
 from research_pipeline.db import get_provenance, get_summary
 from research_pipeline.feed_format import PaperBlock, Post
 from research_pipeline.progress import Reporter, stage
-from research_pipeline.share_github import GithubError, Runner
-
-
-def feed_url(handle: str) -> str:
-    return f"https://{handle.lower()}.github.io/rpipe-feed/feed.json"
+from research_pipeline.share_fetch import FetchFailed, get_limited
+from research_pipeline.share_github import GithubError, Runner, feed_url
 
 
 def collect_posts(conn: sqlite3.Connection) -> list[Post]:
@@ -115,12 +112,10 @@ def wait_live(http: httpx.Client, url: str, reporter: Reporter | None = None, *,
     waited = 0
     with stage(reporter, "pages", label="Waiting for GitHub Pages to go live") as st:
         while True:
-            try:
-                r = http.get(url)
-                if r.status_code == 200:
-                    feed_format.parse_feed(r.content)
-                    return True
-            except (httpx.HTTPError, feed_format.FeedError):
+            try:  # get_limited follows https redirects, so a custom Pages domain works
+                feed_format.parse_feed(get_limited(http, url, feed_format.FEED_MAX_BYTES))
+                return True
+            except (FetchFailed, feed_format.FeedError):
                 pass
             if waited >= timeout_s:
                 return False

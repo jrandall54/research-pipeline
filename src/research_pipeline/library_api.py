@@ -37,7 +37,7 @@ __all__ = [
     "summary_provenance",
     "SourceView", "FollowedPostView", "FollowView", "DirectoryEntryView",
     "follows", "follow_request", "unfollow", "set_in_mix", "following_days", "following_posts",
-    "mix_days", "mix_posts", "directory", "followed_post",
+    "mix_days", "mix_posts", "directory", "followed_post", "is_feed_copy",
 ]
 
 
@@ -150,6 +150,7 @@ class DirectoryEntryView(BaseModel):
     preview: list[dict]
     shared_topics: int
     following: bool
+    is_you: bool = False  # your own feed (it is in the directory too, but you cannot follow yourself)
 
 
 _DIRECTIONS: dict[str, int] = {"up": 1, "down": -1, "clear": 0}
@@ -502,11 +503,17 @@ def follows(conn: sqlite3.Connection) -> list[FollowView]:
     ]
 
 
-def follow_request(conn: sqlite3.Connection, handle: str) -> None:
+def _is_own(handle: str, own_handle: str | None) -> bool:
+    return bool(own_handle) and handle.strip().removeprefix("@").lower() == own_handle.removeprefix("@").lower()
+
+
+def follow_request(conn: sqlite3.Connection, handle: str, own_handle: str | None = None) -> None:
     """Follow the directory's feed with this handle. Commits; posts arrive at the next fetch.
 
-    ValueError if no directory entry has that handle.
+    ValueError if no directory entry has that handle, or it is your own (``own_handle``).
     """
+    if _is_own(handle, own_handle):
+        raise ValueError("That's your own feed.")
     row = conn.execute(
         "SELECT * FROM directory_entries WHERE lower(handle) = lower(?)", (handle.strip(),)
     ).fetchone()
@@ -603,8 +610,9 @@ def mix_posts(conn: sqlite3.Connection, day: str) -> list[FollowedPostView]:
     return out
 
 
-def directory(conn: sqlite3.Connection, my_topics: list[str]) -> list[DirectoryEntryView]:
-    """The public directory, most shared topics first, then by name."""
+def directory(conn: sqlite3.Connection, my_topics: list[str],
+              own_handle: str | None = None) -> list[DirectoryEntryView]:
+    """The public directory, most shared topics first, then by name. Your own feed is marked ``is_you``."""
     following = {r["feed_id"] for r in db.list_follows(conn)}
     views = []
     for r in conn.execute("SELECT * FROM directory_entries"):
@@ -613,6 +621,7 @@ def directory(conn: sqlite3.Connection, my_topics: list[str]) -> list[DirectoryE
             feed_id=r["feed_id"], handle=r["handle"], display_name=r["display_name"], topics=topics,
             posts_per_day=r["posts_per_day"], preview=json.loads(r["preview"]),
             shared_topics=feed_format.shared_topics(topics, my_topics), following=r["feed_id"] in following,
+            is_you=_is_own(r["handle"], own_handle),
         ))
     return sorted(views, key=lambda v: (-v.shared_topics, v.display_name.lower()))
 
@@ -621,3 +630,9 @@ def followed_post(conn: sqlite3.Connection, paper_id: str) -> FollowedPostView |
     """The newest post of this paper from any feed you follow (or followed and kept), or None."""
     post = _newest_post(conn, paper_id)
     return None if post is None else _post_view(conn, post, [post])
+
+
+def is_feed_copy(conn: sqlite3.Connection, paper_id: str) -> bool:
+    """True when this paper's row was copied in from a followed post (``source='feed'``), not collected by you."""
+    row = db.get_paper(conn, paper_id)
+    return row is not None and row["source"] == "feed"

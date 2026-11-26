@@ -73,6 +73,7 @@ from research_pipeline.evaluate import (
     ungraded,
 )
 from research_pipeline.evaluate import report as eval_report
+from research_pipeline.feed_format import clean_text
 from research_pipeline.fulltext import FullTextUnavailable, ensure_usable, fetch_fulltext
 from research_pipeline.gold import (
     GOLD_TARGET,
@@ -386,7 +387,7 @@ def health_line(
     previous_unfinished: bool = False,
     unknown_categories: list[str] | None = None,
 ) -> str:
-    detail = "; ".join(" ".join(e.split()) for e in errors) or "none"
+    detail = "; ".join(" ".join(clean_text(e).split()) for e in errors) or "none"
     extras = ""
     if counts.get("abstract_only"):
         extras += f" · abstract-only {counts['abstract_only']}"
@@ -3514,6 +3515,12 @@ def _gh_login_interactive() -> int:
     return subprocess.run(["gh", "auth", "login"], check=False).returncode
 
 
+def _gh_refresh_interactive() -> int:
+    """Run `gh auth refresh` to add the delete permission, on the terminal (it prints a code and opens a browser)."""
+    return subprocess.run(["gh", "auth", "refresh", "-h", "github.com", "-s", "delete_repo"],
+                          check=False).returncode
+
+
 def _clone_dir(vault: Path) -> Path:
     return vault / "share" / "rpipe-feed"
 
@@ -3542,6 +3549,8 @@ def _publish_feed(
         raise share_github.GithubError("Sharing isn't set up yet. Run `rpipe share setup`.")
     clone = _clone_dir(ctx.vault)
     _ensure_clone(runner, handle, clone)
+    # commits carry GitHub's private noreply address, never the person's own email (also set for old clones)
+    share_github.set_identity(runner, clone, handle, name)
     return share_publish.publish(
         ctx.conn, clone, runner, display_name=name, topics=profile.topics, active=active,
         now=_now(), handle=handle, reporter=reporter,
@@ -3666,7 +3675,7 @@ def share_status(vault: VaultOption = None) -> None:
 
 
 def _follow_line(f: library_api.FollowView) -> str:
-    bits = [f"{f.display_name} (@{f.handle})"]
+    bits = [f"{clean_text(f.display_name)} (@{clean_text(f.handle)})"]
     if f.waiting:
         bits.append("waiting for the first fetch")
     else:
@@ -3675,7 +3684,7 @@ def _follow_line(f: library_api.FollowView) -> str:
     if f.stopped:
         bits.append("stopped publishing")
     if f.last_error:
-        bits.append(f"last error: {f.last_error}")
+        bits.append(f"last error: {clean_text(f.last_error)}")
     return " · ".join(bits)
 
 
@@ -3739,6 +3748,16 @@ def share_stop(
                                 "Copies already downloaded stay with them."):
                     typer.echo("Nothing was deleted or changed.")
                     return
+                if not share_github.has_delete_scope(runner):
+                    # Interactive (a one-time code, a browser sign-in): run on the terminal, not
+                    # captured, with the vault lock let go of while it waits for you.
+                    typer.echo("GitHub needs your OK to delete repositories. A code is shown below and a "
+                               "browser sign-in may open; follow the steps there.")
+                    with _waiting_for_you():
+                        code = _gh_refresh_interactive()
+                    if code != 0:
+                        raise _fail("Getting permission to delete the repository didn't finish. "
+                                    "Run `rpipe share stop --delete` again.")
                 share_github.delete_repo(runner, handle)
                 shutil.rmtree(_clone_dir(ctx.vault), ignore_errors=True)
             else:
@@ -3770,7 +3789,7 @@ def share_browse(
             _count, errors = share_directory.refresh(ctx.conn, http, reporter)
     for e in errors:
         typer.echo(f"  warning: {e}", err=True)
-    entries = library_api.directory(ctx.conn, profile.topics)
+    entries = library_api.directory(ctx.conn, profile.topics, ctx.config.share_handle)
     if search:
         q = search.strip().lower()
         entries = [e for e in entries if q in e.display_name.lower() or q in e.handle.lower()
@@ -3779,9 +3798,10 @@ def share_browse(
         typer.echo("No feeds found." if search else "No published feeds found yet.")
         return
     for e in entries:
-        line = (f"{e.display_name} · @{e.handle} · {', '.join(e.topics) or 'no topics'} · "
+        topics = ", ".join(clean_text(t) for t in e.topics) or "no topics"
+        line = (f"{clean_text(e.display_name)} · @{clean_text(e.handle)} · {topics} · "
                 f"about {e.posts_per_day:g} papers a day · shares {e.shared_topics} of your topics")
-        typer.echo(line + (" · you follow them" if e.following else ""))
+        typer.echo(line + (" · this is you" if e.is_you else " · you follow them" if e.following else ""))
     typer.echo("Follow one with `rpipe share follow HANDLE`.")
 
 
@@ -3813,7 +3833,7 @@ def share_unfollow(handle: Annotated[str, typer.Argument(help="Their handle, as 
     ctx = _open(vault)
     feed = _follow_by_handle(ctx, handle)
     library_api.unfollow(ctx.conn, feed.feed_id)
-    typer.echo(f"Stopped following {feed.display_name} (@{feed.handle}).")
+    typer.echo(f"Stopped following {clean_text(feed.display_name)} (@{clean_text(feed.handle)}).")
 
 
 @share_app.command("following")
@@ -3849,7 +3869,7 @@ def share_mix_add(handle: Annotated[str, typer.Argument(help="Their handle.")], 
     ctx = _open(vault)
     feed = _follow_by_handle(ctx, handle)
     library_api.set_in_mix(ctx.conn, feed.feed_id, True)
-    typer.echo(f"{feed.display_name} is now in Mix.")
+    typer.echo(f"{clean_text(feed.display_name)} is now in Mix.")
 
 
 @mix_app.command("remove")
@@ -3858,4 +3878,4 @@ def share_mix_remove(handle: Annotated[str, typer.Argument(help="Their handle.")
     ctx = _open(vault)
     feed = _follow_by_handle(ctx, handle)
     library_api.set_in_mix(ctx.conn, feed.feed_id, False)
-    typer.echo(f"{feed.display_name} is no longer in Mix.")
+    typer.echo(f"{clean_text(feed.display_name)} is no longer in Mix.")

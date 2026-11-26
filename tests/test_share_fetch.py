@@ -246,3 +246,74 @@ def test_oversize_archive_fails_the_fetch(conn, http, monkeypatch):
     r = sf.fetch_one(conn, FID, http)
     assert r.error and "too big" in r.error
     assert conn.execute("SELECT COUNT(*) FROM followed_posts").fetchone()[0] == 0
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+@respx.mock
+def test_slow_trickling_download_hits_the_file_deadline(http, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(sf, "_clock", clock)
+
+    class Trickle(httpx.SyncByteStream):
+        def __iter__(self):
+            for _ in range(10):
+                clock.now += 10  # each chunk arrives in time for httpx's per-read timeout
+                yield b"x"
+
+    respx.get(FEED).mock(return_value=httpx.Response(200, stream=Trickle()))
+    with pytest.raises(sf.FetchFailed, match="took too long"):
+        sf.get_limited(http, FEED, 1000, deadline_s=60)
+
+
+@respx.mock
+def test_fetch_all_stops_starting_feeds_after_budget(conn, http, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(sf, "_clock", clock)
+    for n in ("a", "b", "c"):
+        upsert_follow(conn, f"github:{n}/rpipe-feed", f"https://{n}.github.io/rpipe-feed/feed.json", n, n.upper(), [])
+    conn.commit()
+    files = build(days=("2026-11-25",))  # no archives
+    calls = []
+
+    def slow(request):
+        calls.append(str(request.url))
+        clock.now += 40  # one feed uses 40 s of the 60 s budget (inside the per-file deadline)
+        return httpx.Response(200, content=files["feed.json"])
+
+    respx.get(url__regex=r"https://[abc]\.github\.io/rpipe-feed/archive/.*").respond(
+        200, content=next(v for k, v in files.items() if k.startswith("archive/")))
+    respx.get(url__regex=r"https://[abc]\.github\.io/rpipe-feed/feed\.json").mock(side_effect=slow)
+    counts, errors = sf.fetch_all(conn, http, None, budget_s=60)
+    assert len(calls) == 2  # a and b ran (b started at 40 s); c would start at 80 s: skipped
+    assert errors == ["fetch C: skipped, out of time"]
+    assert get_follow(conn, "github:c/rpipe-feed")["failures"] == 0
+
+
+@respx.mock
+def test_unfollow_then_follow_brings_back_all_past_posts(conn, http):
+    from research_pipeline import library_api
+    serve(respx.mock, build())
+    sf.follow(conn, "alex", http, own_handle=None, reporter=None)
+    library_api.unfollow(conn, FID)
+    assert conn.execute("SELECT COUNT(*) FROM followed_posts").fetchone()[0] == 0
+    r = sf.follow(conn, "alex", http, own_handle=None, reporter=None)
+    assert r.new_posts == 3 and conn.execute("SELECT COUNT(*) FROM followed_posts").fetchone()[0] == 3
+
+
+@respx.mock
+def test_hostile_names_are_cleaned_at_store_time(conn, http):
+    files = build(name="Al\x1b[31mex\x07\nM.")
+    serve(respx.mock, files)
+    sf.follow(conn, "alex", http, own_handle=None, reporter=None)
+    assert get_follow(conn, FID)["display_name"] == "Al[31mex M."
+
+
+def test_clean_text():
+    assert ff.clean_text("a\x1b[2Jb\tc‮d e\x7f ") == "a[2Jb cde"

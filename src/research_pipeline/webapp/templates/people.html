@@ -35,7 +35,9 @@
       {% endif %}
     </details>
     {% set mine = follows | selectattr("feed_id", "equalto", d.feed_id) | first %}
-    {% if d.following %}
+    {% if d.is_you %}
+      <button type="button" class="btn" disabled>You</button>
+    {% elif d.following %}
       <button type="button" class="btn" disabled>Following{% if mine and mine.waiting %} · posts arrive tonight{% endif %}</button>
     {% else %}
       <button type="button" class="btn" data-follow="{{ d.handle }}">Follow</button>

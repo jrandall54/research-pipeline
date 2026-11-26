@@ -145,3 +145,13 @@ def test_failed_push_is_retried_when_nothing_changed(tmp_path):
     assert ["git", "push"] in retry.calls and not any(c[1] == "commit" for c in retry.calls)
     clean = FakeRunner({("git", "diff"): done(0), ("git", "rev-list"): done(0, "0\n")})
     assert sp.push(clean, tmp_path, "msg") is False
+
+
+@respx.mock
+def test_wait_live_follows_https_redirect_to_custom_domain():
+    good = ff.build_files([], display_name="A", topics=[], active=True, now=NOW, base_url=None)["feed.json"]
+    respx.get("https://a.github.io/rpipe-feed/feed.json").respond(
+        301, headers={"location": "https://feeds.example.org/rpipe-feed/feed.json"})
+    respx.get("https://feeds.example.org/rpipe-feed/feed.json").respond(200, content=good)
+    with httpx.Client() as http:
+        assert sp.wait_live(http, "https://a.github.io/rpipe-feed/feed.json", None, sleep=lambda s: None)

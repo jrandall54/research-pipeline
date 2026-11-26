@@ -12,6 +12,7 @@ import it. Never published: votes, saves, skips, the shelf, notes; reasons only 
 import hashlib
 import json
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -35,6 +36,22 @@ TITLE_MAX, ABSTRACT_MAX, CLAIM_MAX = 500, 10_000, 2_000
 _ATOM = "http://www.w3.org/2005/Atom"
 Short = Annotated[str, Field(max_length=200)]
 _ARCHIVE_PATH = r"^archive/\d{4}-\d{2}(-\d{1,4})?\.json$"
+
+
+def clean_text(text: str) -> str:
+    """Text from someone else's feed made safe to print: no control characters or ANSI escapes.
+
+    Tabs and newlines become spaces; other control, format (zero-width, bidi override) and
+    line/paragraph-separator characters are dropped. Used when storing downloaded names, topics
+    and titles, and again before printing them in the terminal or the digest.
+    """
+    out = []
+    for c in text:
+        if c in "\t\n\r":
+            out.append(" ")
+        elif unicodedata.category(c) not in ("Cc", "Cf", "Zl", "Zp"):
+            out.append(c)
+    return "".join(out).strip()
 
 
 class FeedError(Exception):

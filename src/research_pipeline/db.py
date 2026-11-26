@@ -411,12 +411,17 @@ def upsert_follow(
     conn: sqlite3.Connection, feed_id: str, feed_url: str, handle: str, display_name: str,
     topics: list[str],
 ) -> None:
-    """Follow a feed, or re-activate one you unfollowed (clears `unfollowed_at`). No commit."""
+    """Follow a feed, or re-activate one you unfollowed (clears `unfollowed_at` and forgets the downloaded archives, so the whole past is fetched again). No commit."""
     conn.execute(
         "INSERT INTO follows (feed_id, feed_url, handle, display_name, topics, followed_at)"
         " VALUES (?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(feed_id) DO UPDATE SET feed_url=excluded.feed_url, handle=excluded.handle,"
-        " display_name=excluded.display_name, topics=excluded.topics, unfollowed_at=NULL",
+        " display_name=excluded.display_name, topics=excluded.topics,"
+        # a re-follow starts from scratch: forget which archives were downloaded, so the whole past comes back
+        " archive_hashes=CASE WHEN follows.unfollowed_at IS NULL THEN follows.archive_hashes ELSE '{}' END,"
+        " failures=CASE WHEN follows.unfollowed_at IS NULL THEN follows.failures ELSE 0 END,"
+        " followed_at=CASE WHEN follows.unfollowed_at IS NULL THEN follows.followed_at ELSE excluded.followed_at END,"
+        " unfollowed_at=NULL",
         (feed_id, feed_url, handle, display_name, json.dumps(topics), _now()),
     )
 
@@ -501,7 +506,10 @@ def replace_followed_posts(conn: sqlite3.Connection, feed_id: str, posts: list[d
 
 def mark_unfollowed(conn: sqlite3.Connection, feed_id: str, keep_paper_ids: set[str]) -> None:
     """Unfollow a feed: stamp `unfollowed_at` and delete its posts except `keep_paper_ids`."""
-    conn.execute("UPDATE follows SET unfollowed_at = ? WHERE feed_id = ?", (_now(), feed_id))
+    conn.execute(
+        "UPDATE follows SET unfollowed_at = ?, archive_hashes = '{}', failures = 0 WHERE feed_id = ?",
+        (_now(), feed_id),
+    )
     for (pid,) in conn.execute(
         "SELECT paper_id FROM followed_posts WHERE feed_id = ?", (feed_id,)
     ).fetchall():

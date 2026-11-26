@@ -15,6 +15,11 @@ TOPIC = "rpipe-feed"
 DESCRIPTION = "My rpipe research feed"
 
 
+def feed_url(handle: str) -> str:
+    """Where a published feed is served (GitHub Pages)."""
+    return f"https://{handle.lower()}.github.io/{REPO}/feed.json"
+
+
 class GithubError(Exception):
     """Something on the GitHub side failed; the message says what and how to fix it."""
 
@@ -24,18 +29,33 @@ class Runner(Protocol):
             input: str | None = None) -> subprocess.CompletedProcess[str]: ...
 
 
+COMMAND_TIMEOUT_S = 120  # network commands (git clone/push, gh api ...) never wait longer than this
+
+
 class SubprocessRunner:
-    """Runs a real command. Never prompts for a password (a prompt would hang a nightly run)."""
+    """Runs a real command. Never prompts for a password and never waits forever.
+
+    A hung ``git push`` (a network stall, a locked keyring asking to be unlocked) would hold the
+    pipeline lock all night, so every command has a time limit and a timeout is a ``GithubError``.
+    """
+
+    def __init__(self, timeout_s: float = COMMAND_TIMEOUT_S) -> None:
+        self.timeout_s = timeout_s
 
     def run(self, args: list[str], cwd: Path | None = None,
             input: str | None = None) -> subprocess.CompletedProcess[str]:
         try:
             return subprocess.run(
                 args, cwd=cwd, input=input, check=False, capture_output=True, text=True,
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=self.timeout_s,
             )
         except FileNotFoundError:
             return subprocess.CompletedProcess(args, 127, "", f"{args[0]}: command not found")
+        except subprocess.TimeoutExpired:
+            raise GithubError(
+                f"`{' '.join(args[:2])}` took longer than {int(self.timeout_s)} seconds and was stopped. "
+                "Check your internet connection (and that your keyring is unlocked), then try again."
+            ) from None
 
 
 _HINTS = {
@@ -100,6 +120,19 @@ def repo_status(runner: Runner, handle: str) -> Literal["missing", "rpipe", "oth
     return "rpipe" if names == {"README.md"} else "other"
 
 
+def set_identity(runner: Runner, clone_dir: Path, handle: str, name: str | None) -> None:
+    """Give the clone its own git identity so commits never carry the person's real email.
+
+    The name is the display name (or the handle); the email is GitHub's private noreply address.
+    Also means machines with no global git identity can still commit.
+    """
+    for key, value in (("user.name", name or handle),
+                       ("user.email", f"{handle}@users.noreply.github.com")):
+        r = runner.run(["git", "config", key, value], cwd=clone_dir)
+        if r.returncode != 0:
+            raise _fail("Setting the git identity of your feed clone", r)
+
+
 def create_repo(runner: Runner, handle: str, clone_dir: Path) -> None:
     """Create the public repository (with a first commit so ``main`` exists) and clone it."""
     r = runner.run(["gh", "repo", "create", f"{handle}/{REPO}", "--public", "--add-readme",
@@ -138,11 +171,14 @@ def setup_git_credentials(runner: Runner) -> None:
         raise _fail("Setting up git credentials", r)
 
 
+def has_delete_scope(runner: Runner) -> bool:
+    """Whether the signed-in token may delete repositories (``gh auth status`` lists its scopes)."""
+    r = runner.run(["gh", "auth", "status"])
+    return "delete_repo" in (r.stdout + r.stderr)
+
+
 def delete_repo(runner: Runner, handle: str) -> None:
-    """Delete ``<handle>/rpipe-feed`` (asks GitHub for the extra permission first)."""
-    r = runner.run(["gh", "auth", "refresh", "-h", "github.com", "-s", "delete_repo"])
-    if r.returncode != 0:
-        raise _fail("Getting permission to delete the repository", r)
+    """Delete ``<handle>/rpipe-feed``. The CLI gets the ``delete_repo`` permission first."""
     r = runner.run(["gh", "repo", "delete", f"{handle}/{REPO}", "--yes"])
     if r.returncode != 0:
         raise _fail("Deleting the repository", r)

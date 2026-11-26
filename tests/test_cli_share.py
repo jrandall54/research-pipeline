@@ -1,4 +1,5 @@
 import json
+from datetime import date
 
 import httpx
 import pytest
@@ -56,6 +57,9 @@ def vault(tmp_path, monkeypatch):
     monkeypatch.setattr(schedule, "default_unit_dir", lambda: tmp_path / "units")
     monkeypatch.setattr(schedule, "system_runner", lambda c: SYSTEMCTL.append(c) or 0)
     SYSTEMCTL.clear()
+    # No test may run the real interactive gh commands (they would wait for a person).
+    monkeypatch.setattr(cli, "_gh_login_interactive", lambda: 0)
+    monkeypatch.setattr(cli, "_gh_refresh_interactive", lambda: 0)
     return path
 
 
@@ -284,3 +288,98 @@ def test_sharing_change_without_installed_app_does_nothing(vault, monkeypatch):
     res = sh(vault, "set-name", "Alex Morgan")
     assert res.exit_code == 0 and "Restarted" not in res.output
     assert SYSTEMCTL == []
+
+
+def test_commits_use_a_noreply_identity_set_before_the_first_commit(vault, monkeypatch):
+    fake = signed_in()
+    use(monkeypatch, fake)
+    assert sh(vault, "setup", input="Alex M.\ny\n").exit_code == 0
+    kinds = [c[1] for c in fake.calls if c[0] == "git"]
+    assert fake.calls.index(["git", "config", "user.email", "alex@users.noreply.github.com"]) < \
+        [i for i, c in enumerate(fake.calls) if c[:2] == ["git", "commit"]][0]
+    assert ["git", "config", "user.name", "Alex M."] in fake.calls and "commit" in kinds
+
+
+def test_setup_runs_gh_sign_in_when_signed_out(vault, monkeypatch):
+    logins = [done(1, "", "not logged in"), done(0, "alex\n")]
+    fake = signed_in({("gh", "api", "user", "--jq", ".login"): logins})
+    use(monkeypatch, fake)
+    ran = []
+    monkeypatch.setattr(cli, "_gh_login_interactive", lambda: ran.append(1) or 0)
+    res = sh(vault, "setup", input="Alex M.\ny\n")
+    assert res.exit_code == 0, res.output
+    assert ran == [1] and "sign in to GitHub first" in res.output
+    ran.clear()
+    monkeypatch.setattr(cli, "_gh_login_interactive", lambda: 1)
+    fake2 = signed_in({("gh", "api", "user", "--jq", ".login"): done(1, "", "not logged in")})
+    use(monkeypatch, fake2)
+    res = sh(vault, "setup", input="Alex M.\ny\n")
+    assert res.exit_code == 1 and "sign-in didn't finish" in res.output
+
+
+def test_stop_delete_refreshes_scope_interactively_outside_the_lock(vault, monkeypatch):
+    enable(vault)
+    fake = signed_in({("gh", "auth", "status"): done(0, "Token scopes: 'repo'")})
+    use(monkeypatch, fake)
+    seen = {}
+
+    def refresh():
+        seen["lock_held"] = cli._held is not None and cli._held.held
+        return 0
+
+    monkeypatch.setattr(cli, "_gh_refresh_interactive", refresh)
+    res = sh(vault, "stop", "--delete", input="y\n")
+    assert res.exit_code == 0, res.output
+    assert seen == {"lock_held": False} and "browser sign-in may open" in res.output
+    assert not any(c[:3] == ["gh", "auth", "refresh"] for c in fake.calls)  # never captured
+    assert any(c[:3] == ["gh", "repo", "delete"] for c in fake.calls)
+
+
+def test_stop_delete_skips_refresh_when_token_already_allows_it(vault, monkeypatch):
+    enable(vault)
+    use(monkeypatch, signed_in({("gh", "auth", "status"): done(0, "Token scopes: 'delete_repo'")}))
+    monkeypatch.setattr(cli, "_gh_refresh_interactive", lambda: pytest.fail("not needed"))
+    assert sh(vault, "stop", "--delete", input="y\n").exit_code == 0
+
+
+def test_stop_delete_failure_paths(vault, monkeypatch):
+    enable(vault)
+    fake = signed_in({("gh", "auth", "status"): done(0, "Token scopes: 'repo'")})
+    use(monkeypatch, fake)
+    monkeypatch.setattr(cli, "_gh_refresh_interactive", lambda: 1)
+    res = sh(vault, "stop", "--delete", input="y\n")
+    assert res.exit_code == 1 and "permission to delete" in res.output
+    assert not any(c[:3] == ["gh", "repo", "delete"] for c in fake.calls)
+    assert load_config(vault / "config.yaml").share_enabled
+    fake = signed_in({("gh", "auth", "status"): done(0, "delete_repo"),
+                      ("gh", "repo", "delete"): done(1, "", "HTTP 403")})
+    use(monkeypatch, fake)
+    res = sh(vault, "stop", "--delete", input="y\n")
+    assert res.exit_code == 1 and "HTTP 403" in res.output
+    assert load_config(vault / "config.yaml").share_enabled
+
+
+def test_browse_marks_your_own_feed(vault, monkeypatch):
+    profile_edit.set_share(vault, enabled=True, display_name="Alex M.", handle="alex")
+    search = json.dumps({"items": [{"name": "rpipe-feed", "owner": {"login": "alex"}}]}).encode()
+    feed = feed_files()["feed.json"]
+
+    def handler(request):
+        url = str(request.url)
+        if url.startswith("https://api.github.com/search"):
+            return httpx.Response(200, content=search)
+        return httpx.Response(200, content=feed) if url == BASE + "feed.json" else httpx.Response(404)
+
+    use(monkeypatch, FakeRunner(), lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    assert "this is you" in sh(vault, "browse").output
+
+
+def test_terminal_output_strips_escape_sequences(vault):
+    from research_pipeline import db
+    conn = db.open_db(vault / "vault.sqlite")
+    db.upsert_follow(conn, "github:bo/rpipe-feed", "https://bo/feed.json", "bo", "Bo\x1b[31m red", [])
+    conn.commit()
+    conn.close()
+    out = sh(vault, "following").output
+    assert "\x1b" not in out and "Bo[31m red" in out
+    assert "\x1b" not in cli.health_line(date(2026, 11, 26), {}, ["fetch Bo\x1b[2J: boom"])

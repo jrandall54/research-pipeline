@@ -97,3 +97,13 @@ def test_nav_has_people_link(vault):
     html = _client(vault).get("/people").text
     assert 'href="/people" aria-current="page"' in html
     assert 'href="/people"' in _client(vault).get("/search").text
+
+
+def test_own_feed_cannot_be_followed_and_shows_you(vault):
+    me = {"handle": "alex", "display_name": "Alex M.", "address": "https://alex.github.io/rpipe-feed/feed.json"}
+    c = _client(vault, share=me)
+    r = c.post("/api/feed/Alex/follow", headers=ORIGIN)
+    assert r.status_code == 400 and "own feed" in r.json()["error"]
+    assert library_api.follows(vault[0]) == []
+    html = c.get("/people").text
+    assert 'data-follow="alex"' not in html and ">You<" in html and 'data-follow="zed"' in html

@@ -171,3 +171,26 @@ def test_follows_stopped_after_repeated_failures(conn):
     conn.commit()
     [f] = library_api.follows(conn)
     assert f.stopped and not f.waiting and f.last_error == "boom"
+
+
+def test_follow_request_refuses_own_handle_and_directory_marks_you(conn):
+    replace_directory(conn, [{
+        "feed_id": "github:me/rpipe-feed", "feed_url": "https://me.github.io/rpipe-feed/feed.json",
+        "handle": "Me", "display_name": "Me M.", "topics": [], "posts_per_day": 1.0, "preview": [],
+        "checked_at": "2026-11-25T00:00:00Z"}])
+    conn.commit()
+    with pytest.raises(ValueError, match="own feed"):
+        library_api.follow_request(conn, "@me", own_handle="ME")
+    assert library_api.follows(conn) == []
+    assert library_api.directory(conn, [], "me")[0].is_you
+    assert not library_api.directory(conn, [])[0].is_you
+
+
+def test_is_feed_copy_only_for_source_feed(conn):
+    _own(conn, "2611.00001", "2026-11-10", 0.5)
+    _follow(conn, "fa", "Alex", [_post("2611.00002")])
+    library_api._copy_in_followed_post(conn, "2611.00002")
+    conn.commit()
+    assert library_api.is_feed_copy(conn, "2611.00002")
+    assert not library_api.is_feed_copy(conn, "2611.00001")
+    assert not library_api.is_feed_copy(conn, "2611.99999")

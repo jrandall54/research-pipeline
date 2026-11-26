@@ -63,8 +63,7 @@ def test_credentials_and_delete():
     sg.setup_git_credentials(runner)
     sg.delete_repo(runner, "a")
     assert runner.calls[0] == ["gh", "auth", "setup-git"]
-    assert runner.calls[1][:3] == ["gh", "auth", "refresh"] and "delete_repo" in runner.calls[1]
-    assert runner.calls[2] == ["gh", "repo", "delete", "a/rpipe-feed", "--yes"]
+    assert runner.calls[1] == ["gh", "repo", "delete", "a/rpipe-feed", "--yes"]
     with pytest.raises(sg.GithubError):
         sg.delete_repo(FakeRunner({("gh", "repo", "delete"): done(1, "", "nope")}), "a")
 
@@ -86,3 +85,31 @@ def test_repo_status_half_made_repo_is_resumable():
     assert sg.repo_status(_half("My rpipe research feed", ["README.md"]), "a") == "rpipe"
     assert sg.repo_status(_half("My rpipe research feed", ["README.md", "app.py"]), "a") == "other"
     assert sg.repo_status(_half("Someone's repo", ["README.md"]), "a") == "other"
+
+
+def test_subprocess_runner_times_out_with_plain_error(monkeypatch):
+    def boom(*a, **k):
+        assert k["timeout"] == 5
+        raise subprocess.TimeoutExpired(a[0], 5)
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(sg.GithubError, match="took longer than 5 seconds"):
+        sg.SubprocessRunner(timeout_s=5).run(["git", "push"])
+    assert sg.SubprocessRunner().timeout_s == 120
+
+
+def test_set_identity_uses_noreply_address(tmp_path):
+    runner = FakeRunner()
+    sg.set_identity(runner, tmp_path, "alex", "Alex M.")
+    assert runner.calls == [["git", "config", "user.name", "Alex M."],
+                            ["git", "config", "user.email", "alex@users.noreply.github.com"]]
+    sg.set_identity(runner, tmp_path, "alex", None)
+    assert runner.calls[2] == ["git", "config", "user.name", "alex"]
+    with pytest.raises(sg.GithubError):
+        sg.set_identity(FakeRunner({("git", "config"): done(1, "", "no")}), tmp_path, "a", None)
+
+
+def test_has_delete_scope():
+    yes = FakeRunner({("gh", "auth", "status"): done(0, "Token scopes: 'delete_repo', 'repo'")})
+    assert sg.has_delete_scope(yes)
+    assert not sg.has_delete_scope(FakeRunner({("gh", "auth", "status"): done(0, "Token scopes: 'repo'")}))

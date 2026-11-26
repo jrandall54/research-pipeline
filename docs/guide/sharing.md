@@ -2,7 +2,7 @@
 
 ## What it does
 
-Lets you publish the papers rpipe picked for you, with their short summaries, so other rpipe users can follow your feed, and lets you follow theirs. Publishing is opt-in: nothing leaves your machine unless sharing is turned on. This page is filled in step by step; this first part describes the files that get published. The commands are described under "How to run / check it"; the browsing screens are added as they are built.
+Lets you publish the papers rpipe picked for you, with their short summaries, so other rpipe users can follow your feed, and lets you follow theirs. Publishing is opt-in: nothing leaves your machine unless sharing is turned on. The files that get published come first, then following, publishing, the commands and the People page in the app (see app.md).
 
 ## What is published
 
@@ -86,7 +86,13 @@ The directory is a list of published feeds you can browse and follow without kno
 
 Worked example: Alex has 41 posts in `archive/2026-10.json`, 12 in `archive/2026-11.json` and 8 in `feed.json`, with some overlap. First fetch: 3 downloads, then every distinct post (at most 61) stored. Next night: Alex adds a post; only `feed.json` and `archive/2026-11.json` changed, so `archive/2026-10.json` is not downloaded again.
 
-**Limits.** Every download is https only (a redirect to `http://` fails the fetch), stops reading once it passes its cap (5 MB for `feed.json`, 20 MB per archive), and has a 20 second timeout. At most 500 archives per feed, and an archive path must look like `archive/YYYY-MM.json` (optionally `-N`), so a feed cannot point rpipe at an arbitrary address. Invalid items (for example a 600-character title) are skipped and counted; the rest are stored.
+**Limits.** Every download is https only (a redirect to `http://` fails the fetch), stops reading once it passes its cap (5 MB for `feed.json`, 20 MB per archive), and has two time limits: 20 seconds for any single network step, and 60 seconds for the whole file, measured while it streams in (a server that trickles bytes cannot hold a download for hours). At most 500 archives per feed, and an archive path must look like `archive/YYYY-MM.json` (optionally `-N`), so a feed cannot point rpipe at an arbitrary address. Invalid items (for example a 600-character title) are skipped and counted; the rest are stored.
+
+**The night's budget.** `fetch_all` starts no new feed once 10 minutes have passed; the feeds it did not reach are listed as "fetch Alex M.: skipped, out of time" and are fetched the next time (this is not counted as a failure of theirs). The directory refresh has its own 5-minute budget and keeps the old list if it runs out. This keeps a slow or hostile host from delaying the digest.
+
+**Unfollow and follow again.** Unfollowing deletes the feed's posts (except ones you saved or voted on) and also forgets which archives were downloaded and the failure count, so following again downloads the whole past again, exactly like the first time.
+
+**Text from other people.** Display names, topics and titles are stripped of control characters (including ANSI escape codes, which could move the cursor or hide text in your terminal) when they are stored, and again before they are printed by `rpipe share` commands, progress lines and the digest's health line (`feed_format.clean_text`). The app already shows everything escaped.
 
 **When a fetch fails.** Nothing new is stored, the reason is kept (`follows.last_error`) and `failures` goes up by one. One feed failing never stops the others: `fetch_all` returns an error line like "fetch Alex M.: the server answered 500" and moves on. A success resets `failures` to 0.
 
@@ -104,9 +110,11 @@ Publishing turns your database into the three kinds of file above and pushes the
 1. Check that `git` and the GitHub command line tool `gh` are installed; if not, say which and how to install it.
 2. Sign in with `gh auth login` if needed, then read your GitHub handle.
 3. Look at `<handle>/rpipe-feed`. Not there: create it (public, with a first commit so the `main` branch exists) and clone it into rpipe's data folder. Already an rpipe feed: reuse it. Something else under that name: stop and ask, never overwrite someone's other repository.
-4. Turn on GitHub Pages for branch `main`, folder `/`. If it is already on, that is fine.
-5. Run `gh auth setup-git` so a plain `git push` uses your GitHub sign-in. Without this the nightly run would wait for a password nobody is there to type.
-6. Optionally add the repository topic `rpipe-feed`, which is how the public directory finds feeds. Turning sharing off removes the topic.
+4. Run `gh auth setup-git` so a plain `git push` uses your GitHub sign-in. Without this the nightly run would wait for a password nobody is there to type.
+5. Publish once (see "Each night"), then add the repository topic `rpipe-feed`, which is how the public directory finds feeds. Turning sharing off removes the topic.
+6. Turn on GitHub Pages for branch `main`, folder `/`. If it is already on, that is fine.
+
+Then setup waits until the address answers and runs a test push before it records that sharing is on.
 
 **Each night** (the `publish` stage, after the digest is written):
 
@@ -114,15 +122,19 @@ Publishing turns your database into the three kinds of file above and pushes the
 2. `feed_format.build_files` builds the files. Papers older than 30 days move into month archives.
 3. `write_site` writes them into the clone and deletes any `archive/*.json` that is no longer built. It reports whether anything changed.
 4. `push` runs `git add -A`; if something is staged it commits ("rpipe feed 2026-11-26") and runs `git push`. If nothing changed, nothing is pushed: because the files are byte-stable, a quiet night makes no commit at all.
-5. The first time only, `wait_live` polls the feed address every 10 seconds (up to 5 minutes) until GitHub Pages serves a valid rpipe feed, so setup can say "your feed is live" and not just "pushed".
+5. The first time only, `wait_live` polls the feed address every 10 seconds (up to 5 minutes, following https redirects, so a custom Pages domain works) until GitHub Pages serves a valid rpipe feed, so setup can say "your feed is live" and not just "pushed".
 
 Worked example: your digest on 2026-11-26 lists 3 papers. `collect_posts` returns 3 posts ranked 1 to 3 (plus all earlier ones). Two of them were picked for "liked similar: 2611.01234"; that reason is dropped, the topic reason stays. The files differ from last night's, so one commit and one push happen, and the progress line reads "Pushing to GitHub".
 
-**Credentials.** rpipe stores no password or token. Pushes use the sign-in that `gh` keeps (set up in step 5). If a push fails (signed out, no network, repository deleted) the stage fails with git's own message, for example "Pushing the feed failed: remote: Permission denied", and the rest of the night's run is unaffected.
+**Your email is never published.** Every commit in your `rpipe-feed` repository is public, and git normally stamps commits with your own name and email. So rpipe sets a git identity inside that clone only: the name is your display name and the email is `<handle>@users.noreply.github.com`, GitHub's private address. It is set before every publish (so clones made earlier are fixed too), and it also means a computer with no git identity configured can still publish. Your global git settings are not touched.
+
+**Time limits.** Every `git` and `gh` command rpipe runs for sharing stops after 120 seconds with a plain message ("`git push` took longer than 120 seconds and was stopped..."), so a hung network or a locked keyring can never hold the nightly run, and its lock, all night.
+
+**Credentials.** rpipe stores no password or token. Pushes use the sign-in that `gh` keeps (set up in step 4). `gh` keeps its token in your system keyring; if the keyring is locked when the nightly run starts (for example before you log in) the push fails and is retried the next night. If a push fails (signed out, no network, repository deleted) the stage fails with git's own message, for example "Pushing the feed failed: remote: Permission denied", and the rest of the night's run is unaffected.
 
 **The app after a sharing change.** `setup`, `set-name` and `stop` finish by restarting the background app (`research-pipeline-app`, see app.md) if it is installed and running, because the People page reads your sharing state when the app starts. It prints "Restarted the app so it shows the change."; if the app is not installed nothing happens, and a failed restart never fails the command.
 
-**Stopping.** Turning sharing off removes the directory topic. If a push fails, the commit stays local and the next night pushes it. Deleting the feed deletes the `rpipe-feed` repository (`gh` first asks GitHub for the extra `delete_repo` permission); followers then see your feed disappear.
+**Stopping.** Turning sharing off removes the directory topic. If a push fails, the commit stays local and the next night pushes it. Deleting the feed deletes the `rpipe-feed` repository; followers then see your feed disappear. Deleting needs an extra GitHub permission (`delete_repo`): `rpipe share stop --delete` checks whether your sign-in already has it and, if not, says so and runs `gh auth refresh` on your terminal (it shows a one-time code and may open a browser). While it waits for you the command lets go of the vault lock (like every question rpipe asks), so a nightly run is never held up by an unanswered prompt.
 
 Every GitHub operation goes through a small `Runner` (it runs one command and returns its output). The real one runs `git` and `gh` with `GIT_TERMINAL_PROMPT=0` so nothing ever waits on a hidden prompt; tests pass a `FakeRunner` that records the commands and plays back scripted replies, so no test touches GitHub.
 ## Why it's built this way
@@ -185,8 +197,8 @@ Tests: `uv run pytest tests/test_cli_share.py tests/test_runs.py tests/test_feed
 
 - `src/research_pipeline/cli.py`: the `share` command group (`share_setup`, `share_status`, `share_publish_now`, `share_set_name`, `share_stop`, `share_browse`, `share_follow`, `share_unfollow`, `share_following`, `share_fetch_now`, `share_mix_add`, `share_mix_remove`), the factories `_share_runner` and `_share_http` that tests replace, `_publish_feed`, and `_share_fetch_stage` (before the digest) and `_share_publish_stage` (after it), the nightly stages.
 - `tests/test_cli_share.py`: the commands.
-- `src/research_pipeline/feed_format.py`: the file shapes, `build_files`, `parse_feed`, `parse_archive`, `parse_reason`, `public_reasons` and `shared_topics`. It is in the shared group (see [architecture.md](architecture.md)), so both the pipeline and the app can use it. It touches no database and no network.
-- `src/research_pipeline/share_publish.py`: `collect_posts`, `write_site`, `push`, `publish`, `wait_live`, `feed_url`. Pipeline group.
-- `src/research_pipeline/share_github.py`: the `Runner` protocol, `SubprocessRunner`, and the setup operations (`check_tools`, `login`, `repo_status`, `create_repo`, `set_topic`, `enable_pages`, `setup_git_credentials`, `delete_repo`). Pipeline group.
-- `src/research_pipeline/share_fetch.py`: `resolve`, `get_limited`, `fetch_one`, `follow`, `fetch_all`, `is_stopped`, `STOPPED_AFTER` (re-exported from `feed_format`). Pipeline group.
+- `src/research_pipeline/feed_format.py`: the file shapes, `build_files`, `parse_feed`, `parse_archive`, `parse_reason`, `public_reasons` and `shared_topics` and `clean_text`. It is in the shared group (see [architecture.md](architecture.md)), so both the pipeline and the app can use it. It touches no database and no network.
+- `src/research_pipeline/share_publish.py`: `collect_posts`, `write_site`, `push`, `publish`, `wait_live`. Pipeline group.
+- `src/research_pipeline/share_github.py`: the `Runner` protocol, `SubprocessRunner`, and the setup operations (`check_tools`, `login`, `repo_status`, `create_repo`, `set_topic`, `enable_pages`, `set_identity`, `setup_git_credentials`, `has_delete_scope`, `delete_repo`, `feed_url`). Pipeline group.
+- `src/research_pipeline/share_fetch.py`: `resolve`, `get_limited`, `fetch_one`, `follow`, `fetch_all`, `is_stopped`, `STOPPED_AFTER`, `FILE_DEADLINE_S`, `FETCH_BUDGET_S` (re-exported from `feed_format`). Pipeline group.
 - `tests/test_share_publish.py`, `tests/test_share_github.py`, `tests/test_share_fetch.py`, and `FakeRunner` in `tests/fakes.py`.

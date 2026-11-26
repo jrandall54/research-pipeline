@@ -170,3 +170,19 @@ def test_feed_json_capped_at_max_items(monkeypatch):
     monkeypatch.setattr(ff, "FEED_MAX_ITEMS", 3)
     feed, _ = ff.parse_feed(build([post(f"2611.{i}", "2026-11-20", rank=i) for i in range(5)])["feed.json"])
     assert [i.id for i in feed.items] == ["2611.0", "2611.1", "2611.2"]
+
+
+def test_build_files_clamps_oversize_inputs():
+    big = post("2611.1", "2026-11-20")
+    # model_construct skips validation, like a database row that is bigger than the feed allows
+    big.paper = PaperBlock.model_construct(
+        id="2611.1", title="t" * 600, abstract="a" * 20_000, authors=[f"Author {i}" for i in range(300)],
+        url="https://arxiv.org/abs/2611.1", published="2026-11-20")
+    files = build([big], topics=[f"topic {i}" for i in range(40)], display_name="n" * 80)
+    feed, dropped = ff.parse_feed(files["feed.json"])
+    assert dropped == 0 and len(feed.items) == 1
+    assert len(feed.items[0].rpipe.paper.authors) == 200
+    assert len(feed.items[0].title) == 500 and len(feed.rpipe.topics) == 30
+    assert len(feed.rpipe.display_name) == 60
+    items, bad = ff.parse_archive(files[feed.rpipe.archives[0].path])
+    assert bad == 0 and len(items) == 1

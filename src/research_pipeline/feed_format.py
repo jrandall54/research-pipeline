@@ -105,7 +105,7 @@ def _claim_texts(summary: PaperSummary) -> list[str]:
     if s.hook:
         claims.append(s.hook)
     texts = [cl.text for cl in claims]
-    texts += [kn.value + kn.label for kn in s.key_numbers]
+    texts += [t for kn in s.key_numbers for t in (kn.value, kn.label)]
     return texts + list(c.questions)
 
 
@@ -190,9 +190,44 @@ def _excerpt(post: Post) -> str:
     return text if len(text) <= 300 else text[:299].rstrip() + "…"
 
 
+def _clip(text: str, limit: int) -> str:
+    """Cut text to ``limit`` characters, ending with an ellipsis when something was cut."""
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _clip_strings(value, limit: int):
+    """Every string inside a dumped summary, cut to ``limit``."""
+    if isinstance(value, str):
+        return _clip(value, limit)
+    if isinstance(value, list):
+        return [_clip_strings(v, limit) for v in value]
+    if isinstance(value, dict):
+        return {k: _clip_strings(v, limit) for k, v in value.items()}
+    return value
+
+
+def _clamped(post: Post) -> Post:
+    """The post with every field cut to the published caps, so publishing never fails on size."""
+    p = post.paper
+    paper = PaperBlock(
+        id=_clip(p.id, 200), title=_clip(p.title, TITLE_MAX), abstract=_clip(p.abstract, ABSTRACT_MAX),
+        authors=[_clip(a, 200) for a in p.authors[:200]], url=p.url[:2000], published=p.published,
+    )
+    summary = post.summary
+    if summary is not None:
+        summary = PaperSummary.model_validate(_clip_strings(summary.model_dump(), CLAIM_MAX))
+        summary.summary.one_line = _clip(summary.summary.one_line, CLAIM_MAX)
+    provenance = post.provenance
+    if provenance is not None and len(json.dumps(provenance)) > 2000:
+        provenance = None
+    return Post(paper=paper, digest_date=post.digest_date, rank=post.rank, summary=summary,
+                reasons=[_clip(r, 300) for r in post.reasons], provenance=provenance)
+
+
 def _item(post: Post) -> Item:
+    post = _clamped(post)
     meta = PostMeta(paper=post.paper, rank=post.rank, summary=post.summary,
-                    reasons=public_reasons(post.reasons), provenance=post.provenance)
+                    reasons=public_reasons(post.reasons)[:50], provenance=post.provenance)
     return Item(id=post.paper.id, url=post.paper.url, title=post.paper.title, summary=_excerpt(post),
                 date_published=f"{post.digest_date}T00:00:00Z", rpipe=meta)
 
@@ -273,6 +308,8 @@ def build_files(posts: list[Post], *, display_name: str, topics: list[str], acti
     ``base_url`` is the public address of the folder holding ``feed.json`` (for example
     ``https://alex.github.io/rpipe-feed/``), or None when not known.
     """
+    display_name = _clip(display_name, 60)
+    topics = [_clip(t, 100) for t in topics[:30]]
     archives = _archive_files(posts)
     cutoff = (date.fromisoformat(now[:10]) - timedelta(days=RECENT_DAYS)).isoformat()
     recent = [p for p in _newest_first(posts) if p.digest_date >= cutoff][:FEED_MAX_ITEMS]

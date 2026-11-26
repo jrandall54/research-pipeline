@@ -25,8 +25,10 @@ _WORD = re.compile(r"[a-z]{3,}")
 
 
 def _stem(word: str) -> str:
-    """Drop a trailing `s`, `ing` or `ed` (and a doubled last letter: planning -> plan)."""
-    if word.endswith("s") and len(word) > 3:
+    """Drop a trailing `s`/`es`, `ing` or `ed` (and a doubled last letter: planning -> plan)."""
+    if word.endswith(("sses", "xes", "ches", "shes")):
+        word = word[:-2]  # processes -> process, boxes -> box, matches -> match
+    elif word.endswith("s") and not word.endswith("ss") and len(word) > 3:
         word = word[:-1]
     for ending in ("ing", "ed"):
         if word.endswith(ending) and len(word) - len(ending) >= 3:

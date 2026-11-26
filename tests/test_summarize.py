@@ -897,7 +897,13 @@ def test_bad_hook_citation_triggers_the_one_retry():
 
 # ---- the diagram call (Phase 9, Task 6) ----
 from research_pipeline.db import get_diagram  # noqa: E402
-from research_pipeline.summary_models import Diagram, DiagramAnswer, DiagramEdge, DiagramNode  # noqa: E402
+from research_pipeline.summarize import LIMIT_STOPPED, TIMEOUT_STOPPED  # noqa: E402
+from research_pipeline.summary_models import (  # noqa: E402
+    Diagram,
+    DiagramAnswer,
+    DiagramEdge,
+    DiagramNode,
+)
 
 
 def a_diagram():
@@ -946,3 +952,19 @@ def test_diagram_call_failure_keeps_summary(conn):
     assert counts["summarized"] == 1 and counts["summary_failed"] == 0 and errors == []
     assert "diagram: the model call failed" in get_summary(conn, "2501.00001").checks
     assert get_diagram(conn, "2501.00001") is None
+
+
+@pytest.mark.parametrize("exc,stopped", [(LlmLimitReached("limit"), LIMIT_STOPPED),
+                                         (LlmTimeout("slow"), TIMEOUT_STOPPED)])
+def test_diagram_limit_or_timeout_keeps_summary_then_stops(conn, exc, stopped):
+    add_triaged(conn, "2501.00001")
+    add_triaged(conn, "2501.00002")
+    llm = FakeLLM([summary(), critique(), exc])
+    counts, errors = run_summarize(conn, llm, lambda pid: SECTIONS, 32768, diagrams=True)
+    assert counts["summarized"] == 1 and counts["summary_failed"] == 0
+    assert stopped in errors
+    assert len(llm.calls) == 3  # the second paper was never started
+    first = get_paper(conn, "2501.00001")
+    assert first["status"] == "summarized" and first["retry_count"] == 0
+    assert get_summary(conn, "2501.00001") is not None
+    assert get_paper(conn, "2501.00002")["status"] == "triaged"

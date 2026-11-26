@@ -264,3 +264,22 @@ def test_drain_requests_passes_diagrams(conn):
     llm = WithDiagram([])
     _drain(conn, llm)
     assert len(llm.calls) == 2 and get_diagram(conn, B) is None
+
+
+@pytest.mark.parametrize("exc,stopped", [(LlmLimitReached("limit"), LIMIT_STOPPED),
+                                         (LlmTimeout("slow"), TIMEOUT_STOPPED)])
+def test_drain_stops_after_diagram_limit_or_timeout(conn, exc, stopped):
+    class Stops(AlwaysSummary):
+        def generate(self, system, user, schema):
+            if schema.__name__ == "DiagramAnswer":
+                self.calls.append((system, user))
+                raise exc
+            return super().generate(system, user, schema)
+
+    ra = insert_request(conn, "summarize", {"paper_id": A})
+    rb = insert_request(conn, "summarize", {"paper_id": B})
+    llm = Stops([])
+    counts, errors = _drain(conn, llm, diagrams=True)
+    assert _row(conn, ra)["status"] == "done" and _row(conn, rb)["status"] == "pending"
+    assert stopped in errors and len(llm.calls) == 3
+    assert counts["requests_done"] == 1 and counts["requests_waiting"] == 1

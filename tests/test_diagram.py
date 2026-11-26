@@ -95,3 +95,14 @@ def test_make_diagram_abstract_only():
     got, probs = make_diagram(llm, "T", None, "We study X.", 32768)
     assert got == d and probs == []
     assert "only the abstract" in llm.calls[0][1]
+
+
+def test_check_diagram_es_plurals_match():
+    secs = [Section(title="2 Method", text="Each process fills a class and a box and a match.")]
+    d = Diagram(shape="steps", nodes=[node("a", "Processes classes"), node("b", "Boxes matches")],
+                edges=[DiagramEdge(source="a", target="b")], caption="c")
+    assert check_diagram(d, secs, "") == []
+    secs2 = [Section(title="2 Method", text="Many processes and classes, boxes, matches.")]
+    d2 = Diagram(shape="steps", nodes=[node("a", "Process class"), node("b", "Box match")],
+                 edges=[DiagramEdge(source="a", target="b")], caption="c")
+    assert check_diagram(d2, secs2, "") == []

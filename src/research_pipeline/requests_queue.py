@@ -130,6 +130,8 @@ def drain_requests(
                     mark_request(conn, rid, "done", result={"summarized": True})
                     counts["requests_done"] += 1
                     handle.step(pid, current=i, outcome="done")
+                    if LIMIT_STOPPED in errs or TIMEOUT_STOPPED in errs:
+                        break  # the diagram call hit the limit or hung: the paper is fine, stop here
                     continue
                 if LIMIT_STOPPED in errs:
                     mark_request(conn, rid, "pending", error=row["error"], undo_try=True)

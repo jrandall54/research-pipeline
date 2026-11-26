@@ -326,7 +326,7 @@ Worked example (the ACAP paper). Section 5.1 says "ACAP cut latency by 28%".
    - every arrow starts and ends at a real node;
    - every label has at most 4 words;
    - every node cites a section the paper has (the same lookup the hook check uses, `citations.section_texts`; "Abstract" always counts);
-   - every content word of every label appears somewhere in the paper's text. Case is ignored; words under 3 letters and small words (the, and, with, ...) are skipped; a trailing `s`, `ing` or `ed` is stripped on both sides, so "agents" matches "agent" and "planning" matches "plan".
+   - every content word of every label appears somewhere in the paper's text. Case is ignored; words under 3 letters and small words (the, and, with, ...) are skipped; a trailing `s` (or `es` after ss, x, ch, sh), `ing` or `ed` is stripped on both sides, so "agents" matches "agent", "planning" matches "plan" and "processes" matches "process".
 4. If a check fails, the model gets one more try (progress note `retrying citations for <id>`) with the problems listed and the real section titles. If it fails again, the diagram is dropped and one line goes into the summary's `checks`, for example `diagram: label 'Coordinator' uses words the paper never uses: coordinator`. If the model call itself fails, the summary is still saved and `checks` says `diagram: the model call failed`.
 5. A kept diagram is saved as a `summaries` row with `kind = 'diagram'` (no schema change, see [data-model.md](data-model.md)), so it can be added or dropped without touching the summary. With `diagrams` off, no call is made and any stored diagram is left alone. `rpipe summarize` and the nightly run count the drawn ones as `diagrams=N` (shown only when diagrams are on).
 

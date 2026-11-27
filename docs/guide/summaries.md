@@ -292,7 +292,7 @@ Split passes the pass rule (`evaluation.md`: facts covered did not drop, contrad
 
 ### Hook and key numbers: how they are checked
 
-**What it does.** The model writes a hook and up to three key numbers, but it can invent a figure. Before they are saved, code checks each against the paper's own text. A hook or key number that fails is dropped (the card shows the one-line summary instead), and the reason is kept in the summary's `checks` list so you can see what was removed and why.
+**What it does.** The model writes a hook and up to three key numbers, but it can invent a figure. Before they are saved, code checks each against the paper's own text. A hook or key number that fails is dropped, and the reason is kept in the summary's `checks` list so you can see what was removed and why.
 
 **How it works.**
 

@@ -240,7 +240,6 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .actions .status { font-size: 14px; }
 
 /* ---- Hook, key numbers and diagram (Phase 9) ---- */
-.hook { font-weight: 500; }
 .key-numbers { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0 0 8px; padding: 0; }
 .key-numbers li { background: var(--accent-soft); border-radius: 999px; padding: 4px 12px; font-size: 14px; color: var(--ink); }
 .key-numbers strong { color: var(--accent); font-weight: 600; }

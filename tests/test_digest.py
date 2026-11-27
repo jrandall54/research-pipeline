@@ -147,7 +147,7 @@ def test_digest_shows_hook_line(conn, tmp_path):
     with_summary(conn, "2501.00001", hook=Claim(text="Cuts memory use by 28%.", sections=["5.1 Efficiency"]))
     text = write_digest(conn, tmp_path, DAY, HEALTH).read_text()
     assert "**Hook:** Cuts memory use by 28%. [§ 5.1 Efficiency]\n\n" in text
-    assert text.index("**Hook:**") < text.index("**Summary:**")
+    assert text.index("**Summary:**") < text.index("**Hook:**")  # Phase 9.4: what it is about comes first
 
 
 def test_digest_without_hook_unchanged(conn, tmp_path):

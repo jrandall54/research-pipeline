@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_field.html" import field, headline %}
+{% from "_field.html" import field, headline, key_numbers %}
 {% block title %}{{ d.card.title }} - Research Feed{% endblock %}
 {% block content %}
 {% set c = d.card %}
@@ -28,6 +28,7 @@
       {% for label, f in [("The problem", c.problem), ("What they did", c.approach), ("What they found", c.results)] %}
         {{ field(label, f) }}
       {% endfor %}
+      {{ key_numbers(c) }}
       {% if d.strengths or d.weaknesses or d.questions %}<h2>How solid is it?</h2>{% endif %}
       {% if d.strengths %}
         <h3>Strong points</h3>

@@ -189,9 +189,16 @@ def _add_hook_and_diagram(conn, pid):
 def test_paper_page_how_it_works_section(client, vault):
     _add_hook_and_diagram(vault[0], "2611.25005")
     html = client.get("/paper/2611.25005").text
-    assert "Robots finish 28% sooner" in html and "the one line" not in html
-    assert "<strong>28%</strong> less time" in html
     assert html.index("<h2>How it works</h2>") < html.index('<figure class="diagram') < html.index("The problem")
+
+
+def test_paper_page_leads_with_one_line_numbers_after_findings(client, vault):
+    # Phase 9.4: one-line summary under the title; key numbers only after "What they found"; no hook.
+    _add_hook_and_diagram(vault[0], "2611.25005")
+    html = client.get("/paper/2611.25005").text
+    assert "Robots finish 28% sooner" not in html
+    assert html.index("the one line") < html.index("The problem")
+    assert html.index("What they found") < html.index("<strong>28%</strong> less time") < html.index("How solid is it?")
 
 
 def test_no_diagram_no_heading(client):

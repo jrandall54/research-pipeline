@@ -2,11 +2,12 @@
 
 Current state and next steps only. Read `ROADMAP.md` for the full list of phases; history is in git, each phase's files and `archive/`.
 
-## State (2026-11-26)
+## State (2026-11-27)
 
 - Phases 1 to 10.3 merged to `main` and pushed (Phase 10 = sharing; 10.1 = every `rpipe init` step explained, categories as a numbered menu; 10.2 = one terminal look for every command via `term.py`; 10.3 = People cards show topics as short tags, your own card from your live profile, topic changes republish; all 2026-11-26). `uv run pytest -q`: 1973 passing, ruff clean.
 - Phase 10 lets the owner publish their picked papers and summaries as a public feed (`rpipe share setup`), browse and follow other people's feeds (`rpipe share browse`, `follow`, or the People page in the app), and see Mine, Following and Mix in the feed. Nothing leaves the machine until sharing is turned on; with no follows the feed looks as before apart from a People link.
-- Diagrams are off (Phase 9.3 owner ruling: `rpipe model set-diagrams off`). Summaries and the app's look stay as they are (owner ruling 2026-11-26; Phase 10.3's People topic tags were the owner's own request); don't bring the old redesign back unless asked.
+- Diagrams are off (Phase 9.3 owner ruling: `rpipe model set-diagrams off`).
+- Phase 9.4 (2026-11-27, owner request): every card and paper screen leads with the one-line summary (what the paper is about); the hook is no longer shown in the app; key numbers show only on the paper screen after "What they found". Display only: stored summaries are unchanged. Otherwise summaries and the app's look stay as they are unless the owner asks.
 
 ## Next
 

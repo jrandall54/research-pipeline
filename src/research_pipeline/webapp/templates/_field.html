@@ -13,14 +13,15 @@
 {% endif %}
 {%- endmacro %}
 
-{# The headline of a summarized paper: the hook (with its section tag) when there is one, else the one-liner,
-   then the key numbers as chips (Phase 9). `cls` is "one-line" on cards and "one-line lead" on the paper screen. #}
+{# The headline of a summarized paper: the one-line summary, saying what the paper is about, so a reader
+   can decide from the card alone whether to open it (Phase 9.4). The hook and key numbers are left out here:
+   right under the title, a figure means nothing yet. `cls` is "one-line" on cards and "one-line lead" on the paper screen. #}
 {% macro headline(c, cls) -%}
-{% if c.hook %}
-<p class="{{ cls }} hook">{{ c.hook[0] }}{% if c.hook[1] %} <span class="tag mono">{{ c.hook[1] }}</span>{% endif %}</p>
-{% else %}
 <p class="{{ cls }}">{{ c.one_line }}</p>
-{% endif %}
+{%- endmacro %}
+
+{# The key numbers as chips, on the paper screen only, right after "What they found" (Phase 9.4). #}
+{% macro key_numbers(c) -%}
 {% if c.key_numbers %}
 <ul class="key-numbers">{% for value, label, _ in c.key_numbers %}<li><strong>{{ value }}</strong> {{ label }}</li>{% endfor %}</ul>
 {% endif %}

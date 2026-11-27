@@ -1,6 +1,6 @@
 # Roadmap
 
-The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-26 (Phases 10 to 10.3 merged).
+The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-27 (Phase 9.4 merged).
 
 **Next up:** check the first nightly run with sharing (setup done 2026-11-26), then the AI club pilot (members follow the owner's feed). Summaries and the app's look stay as they are (owner ruling 2026-11-26).
 
@@ -40,6 +40,7 @@ The single list of all work on rpipe: what is done, what is next, and where each
 | 9.1 | Stricter diagrams: no diagram by default, generic ones dropped, boxes must come from the method | merged | (owner request after the Phase 9 eval) | [plan](plans/phase-09.1-stricter-diagrams.md) |
 | 9.2 | Diagrams on the paper screen only, not in the feed | merged | (owner's choice after the 9.1 measurements) | [plan](plans/phase-09.2-diagram-on-paper-page.md) |
 | 9.3 | Diagrams off: the setting also hides diagrams already drawn | merged | (owner ruling 2026-11-26: diagrams from summaries are pointless) | [plan](plans/phase-09.3-diagrams-off.md) |
+| 9.4 | Lead with what the paper is about: the one-line summary under every title; key numbers only after the findings on the paper screen; hook only in the digest | merged | (owner request 2026-11-27) | [plan](plans/phase-09.4-lead-with-summary.md) |
 | 10 | Sharing: publish your feed, a directory, follow others, custom mixes | merged | [design](specs/phase-10-sharing-design.md) | [plan](plans/phase-10-sharing.md) |
 | 10.1 | Clearer first-time setup: every rpipe init step explains what it needs and why; categories as a numbered menu | merged | (owner request 2026-11-26) | [plan](plans/phase-10.1-clearer-setup.md) |
 | 10.2 | A cleaner terminal look: one style for every rpipe command (headers, hints, ✓/!/✗ marks) | merged | [design](specs/phase-10.2-terminal-style-design.md) | [plan](plans/phase-10.2-terminal-style.md) |

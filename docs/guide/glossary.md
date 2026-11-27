@@ -366,11 +366,11 @@
 
 **Section tag** — the small `§5.1` next to a line in a summary, saying which section of the paper that claim came from. A range (`§5.1–5.2`) means the claim draws on several consecutive sections; no tag means the stored sections had no number (for example "Abstract"). See "The feed" in `app.md`.
 
-**Skim / Read** — the two levels of detail on the feed. Skim shows title, the hook (or the one-line summary when there is no hook), key numbers and why it was picked; Read adds the problem, what they did and what they found. Diagrams are shown only when you open a paper. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.
+**Skim / Read** — the two levels of detail on the feed. Skim shows title, the one-line summary and why it was picked; Read adds the problem, what they did and what they found. Diagrams are shown only when you open a paper. The choice is remembered per device in the browser's own storage (not in the database). See "Skim and Read" in `app.md`.
 
 **Day list** — the compact list of one digest day shown beside the reader on a wide screen (1100 px or more) so you can jump between that day's papers. Hidden on phones. See "Reading a paper" in `app.md`.
 
-**Hook** — one line (at most 90 characters) that states a paper's main finding as a plain fact, with the paper's own numbers. It is not clickbait: no question, no teaser, no held-back answer; it makes the real finding easy to take in. Asked for by the summary prompt and checked by code against the paper. See `summaries.md`.
+**Hook** — one line (at most 90 characters) that states a paper's main finding as a plain fact, with the paper's own numbers. It is not clickbait: no question, no teaser, no held-back answer; it makes the real finding easy to take in. Asked for by the summary prompt and checked by code against the paper. Shown in the digest after the one-line summary; not shown in the app (Phase 9.4). See `summaries.md`.
 
 **Key number** — one of up to three numbers a paper reports that matter most, shown as a value written exactly as the paper writes it (for example "28%"), a short label for what it measures and the sections it comes from. See `summaries.md`.
 

@@ -138,24 +138,17 @@ def _with_hook(conn, pid, hook=True):
     conn.commit()
 
 
-def test_card_shows_hook_instead_of_one_line(client, vault):
+def test_card_leads_with_one_line_not_hook(client, vault):
+    # Phase 9.4: the card says what the paper is about; the hook and number chips stay off the feed.
     _with_hook(vault[0], "2611.25002")
     html = client.get("/").text
-    assert "Robots finish 28% sooner" in html and "§5.1" in html
-    assert "the one line" not in html
+    assert "the one line" in html
+    assert "Robots finish 28% sooner" not in html and "key-numbers" not in html
 
 
-def test_card_falls_back_to_one_line(client):
+def test_card_without_hook_shows_one_line(client):
     html = client.get("/").text
-    assert "the one line" in html and 'class="one-line hook"' not in html and "key-numbers" not in html
-
-
-def test_key_numbers_visible_outside_read_more(client, vault):
-    _with_hook(vault[0], "2611.25002")
-    html = client.get("/").text
-    chips = html.index('<ul class="key-numbers">')
-    assert "<strong>28%</strong> less time" in html
-    assert chips < html.index('class="read-more"')
+    assert "the one line" in html and "key-numbers" not in html
 
 
 def test_card_has_no_diagram_paper_page_does(client, vault):

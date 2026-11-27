@@ -32,6 +32,25 @@ class FakeEmbedder:
         return out
 
 
+@pytest.fixture(autouse=True)
+def _no_real_services(request, tmp_path, monkeypatch):
+    """No test may touch the owner's real systemd units (the app service, the nightly timer).
+
+    Commands such as `rpipe profile add-topic` restart the background app when it is installed;
+    without this, running the tests restarted the real app until systemd gave up. Tests that
+    check service handling set their own unit dir and runner on top of this.
+    """
+    from research_pipeline import schedule
+
+    monkeypatch.setattr(schedule, "default_unit_dir", lambda: tmp_path / "no-real-units")
+
+    def refuse(cmd: list[str]) -> int:
+        raise AssertionError(f"a test tried to run a real system command: {cmd}")
+
+    if "real_system_runner" not in request.keywords:  # a test of system_runner itself fakes subprocess instead
+        monkeypatch.setattr(schedule, "system_runner", refuse)
+
+
 @pytest.fixture
 def embedder() -> FakeEmbedder:
     return FakeEmbedder()

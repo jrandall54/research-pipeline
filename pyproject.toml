@@ -37,6 +37,7 @@ packages = ["src/research_pipeline"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["real_system_runner: run schedule.system_runner itself (subprocess must be faked)"]
 
 [tool.ruff]
 target-version = "py312"

@@ -61,6 +61,7 @@ def test_failing_probe_writes_nothing(tmp_path):
     assert not (tmp_path / "u").exists()
 
 
+@pytest.mark.real_system_runner
 def test_system_runner_missing_systemctl_raises_schedule_error(monkeypatch):
     def boom(cmd, check, **kwargs):
         raise FileNotFoundError("systemctl")

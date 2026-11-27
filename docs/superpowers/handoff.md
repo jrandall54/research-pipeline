@@ -22,7 +22,3 @@ Current state and next steps only. Read `ROADMAP.md` for the full list of phases
 - **Phase 7:** `requests list` shows a request whose third try was cut short as pending until the next nightly run; `_current_vote` duplicates `current_votes`; search rank order is untested; only `vote` has a CLI test for id spellings.
 - **Phase 6.6:** the map-reduce fallback gives no progress note when all notes are unusable; a hung model load can wait up to 600 s.
 - **Phase 10 sharing:** `set_topic` replaces other repository topics; `follow()` downloads `feed.json` twice; no block on https redirects to private or loopback hosts; dropped archive items are not retried; `_load_profile` runs before the lock in setup, publish and stop; `browse` has no pagination; followed posts show no publisher provenance; the feed content flashes before the saved-view redirect; Back on your own paper loses Mix; no test for an unknown `?view=` while following; `git clone` shares the 120 s limit (re-run setup if it times out); the cleaner drops zero-width joiners (emoji in names may split); the app cannot block self-follow when you are not publishing (harmless); URL-form follows have no Mix tick in the app. (The People nav link showing with no follows is as planned; owner confirmed.)
-
-## Open owner question
-
-- Add "Pipeline code and app code are separate groups; see docs/guide/architecture.md." to `CLAUDE.md`? Not answered yet; don't add without a yes.

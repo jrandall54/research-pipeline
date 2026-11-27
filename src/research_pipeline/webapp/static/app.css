@@ -271,7 +271,13 @@ h2.people-h:not(:first-child) { margin-top: 24px; }
 .person-main { flex: 1 1 200px; min-width: 0; }
 .person-main summary { cursor: pointer; list-style: none; }
 .person-name { display: block; font-weight: 600; }
-.person-topics, .person-meta { display: block; font-size: 14px; }
+.person-meta { display: block; font-size: 14px; }
+.person-topics { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip, .chip-more { font-size: 13px; line-height: 1.3; padding: 3px 10px; border-radius: 999px; }
+.chip { border: 1px solid var(--line); color: var(--muted); }
+.chip-shared { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.chip-more { color: var(--accent); }
+.person-all-topics { margin-top: 12px; }
 .person-preview { margin-top: 12px; font-size: 14px; }
 .mix-tick { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; min-height: 40px; }
 .showing { display: none; }

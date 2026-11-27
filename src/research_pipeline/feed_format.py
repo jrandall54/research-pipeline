@@ -101,6 +101,13 @@ def shared_topics(theirs: list[str], mine: list[str]) -> int:
     return len({_norm_topic(t) for t in theirs} & {_norm_topic(t) for t in mine})
 
 
+def topics_shared_first(theirs: list[str], mine: list[str]) -> list[tuple[str, bool]]:
+    """Their topics as ``(topic, shared with you)``, the shared ones first; order is otherwise kept."""
+    my_set = {_norm_topic(t) for t in mine}
+    tagged = [(t, _norm_topic(t) in my_set) for t in theirs]
+    return [p for p in tagged if p[1]] + [p for p in tagged if not p[1]]
+
+
 # ---- the shapes of the files ----
 
 

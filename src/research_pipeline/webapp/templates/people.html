@@ -22,9 +22,18 @@
     <details class="person-main">
       <summary>
         <span class="person-name">{{ d.display_name }}</span>
-        <span class="muted person-topics">{{ d.topics | join(" · ") }}</span>
-        <span class="muted person-meta">About {{ d.posts_per_day }} papers a day · shares {{ d.shared_topics }} of your topics</span>
+        <span class="person-topics">
+          {%- for t, shared in d.topic_tags[:topics_shown] %}<span class="chip{% if shared %} chip-shared{% endif %}">{{ t }}</span>{% endfor -%}
+          {%- if d.topic_tags | length > topics_shown %}<span class="chip-more">+{{ d.topic_tags | length - topics_shown }} more</span>{% endif -%}
+        </span>
+        <span class="muted person-meta">About {{ d.posts_per_day }} papers a day{% if not d.is_you %} · shares {{ d.shared_topics }} of your topics{% endif %}</span>
       </summary>
+      {% if d.topic_tags | length > topics_shown %}
+      <div class="person-all-topics">
+        <p class="field-label">All topics</p>
+        <span class="person-topics">{% for t, shared in d.topic_tags %}<span class="chip{% if shared %} chip-shared{% endif %}">{{ t }}</span>{% endfor %}</span>
+      </div>
+      {% endif %}
       {% if d.preview %}
       <div class="person-preview">
         <p class="field-label">Recently in {{ d.display_name }}'s feed</p>

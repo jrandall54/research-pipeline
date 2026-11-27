@@ -107,3 +107,25 @@ def test_own_feed_cannot_be_followed_and_shows_you(vault):
     assert library_api.follows(vault[0]) == []
     html = c.get("/people").text
     assert 'data-follow="alex"' not in html and ">You<" in html and 'data-follow="zed"' in html
+
+
+def test_topics_are_tags_shared_first_with_a_more_count(vault):
+    c, _ = vault
+    many = ["robotics", "java", "LLM", "agents", "compilers", "vision", "security"]
+    replace_directory(c, [_entry("alex", "Alex M.", many)])
+    c.commit()
+    html = _client(vault, my_topics=["agents", "security"]).get("/people").text
+    summary = html.split("<summary>")[1].split("</summary>")[0]
+    assert summary.index('chip chip-shared">agents') < summary.index('chip">robotics')
+    assert 'chip chip-shared">security' in summary and "+3 more" in summary
+    assert "vision" not in summary and "All topics" in html and 'chip">vision' in html
+
+
+def test_own_card_shows_live_profile_topics_not_the_published_ones(vault):
+    c, _ = vault
+    replace_directory(c, [_entry("me", "Me M.", ["agentic and LLM sexurity", "agents"])])
+    c.commit()
+    share = {"handle": "me", "display_name": "Me M.", "address": "https://me.github.io/rpipe-feed/feed.json"}
+    html = _client(vault, my_topics=["agents", "local models"], share=share).get("/people").text
+    assert "sexurity" not in html and 'chip">local models' in html
+    assert "chip-shared" not in html and "of your topics" not in html

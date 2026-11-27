@@ -4,13 +4,13 @@ Current state and next steps only. Read `ROADMAP.md` for the full list of phases
 
 ## State (2026-11-26)
 
-- Phases 1 to 10.2 merged to `main` and pushed (Phase 10 = sharing; 10.1 = every `rpipe init` step explained, categories as a numbered menu; 10.2 = one terminal look for every command via `term.py`; all 2026-11-26). `uv run pytest -q`: 1967 passing, ruff clean.
+- Phases 1 to 10.3 merged to `main` and pushed (Phase 10 = sharing; 10.1 = every `rpipe init` step explained, categories as a numbered menu; 10.2 = one terminal look for every command via `term.py`; 10.3 = People cards show topics as short tags, your own card from your live profile, topic changes republish; all 2026-11-26). `uv run pytest -q`: 1973 passing, ruff clean.
 - Phase 10 lets the owner publish their picked papers and summaries as a public feed (`rpipe share setup`), browse and follow other people's feeds (`rpipe share browse`, `follow`, or the People page in the app), and see Mine, Following and Mix in the feed. Nothing leaves the machine until sharing is turned on; with no follows the feed looks as before apart from a People link.
-- Diagrams are off (Phase 9.3 owner ruling: `rpipe model set-diagrams off`). Summaries and the app's look stay as they are (owner ruling 2026-11-26); don't bring the old redesign back unless asked.
+- Diagrams are off (Phase 9.3 owner ruling: `rpipe model set-diagrams off`). Summaries and the app's look stay as they are (owner ruling 2026-11-26; Phase 10.3's People topic tags were the owner's own request); don't bring the old redesign back unless asked.
 
 ## Next
 
-1. Check the first nightly run with sharing (owner ran `rpipe share setup` on 2026-11-26: publishing as "James Randall" at https://jrandall54.github.io/rpipe-feed/; topics trimmed from 18 to 14 the same day) (the fetch stage before the digest, the publish stage after; `rpipe share status`).
+1. Check the first nightly run with sharing (owner ran `rpipe share setup` on 2026-11-26: publishing as "James Randall" at https://jrandall54.github.io/rpipe-feed/; topics trimmed to 14 the same day; the published feed still had the old 19 until Phase 10.3's republish) (the fetch stage before the digest, the publish stage after; `rpipe share status`).
 2. AI club members can follow the owner's feed with `rpipe share follow HANDLE`.
 3. Owner setup still open: seed papers (none yet).
 4. Later: diagrams from the paper's own figures and tables (owner's idea, 2026-11-26).

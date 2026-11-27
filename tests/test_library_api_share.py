@@ -194,3 +194,14 @@ def test_is_feed_copy_only_for_source_feed(conn):
     assert library_api.is_feed_copy(conn, "2611.00002")
     assert not library_api.is_feed_copy(conn, "2611.00001")
     assert not library_api.is_feed_copy(conn, "2611.99999")
+
+
+def test_directory_topic_tags_and_own_entry_uses_live_topics(conn):
+    rows = [{"feed_id": f"github:{h}/rpipe-feed", "feed_url": "u", "handle": h, "display_name": h,
+             "topics": t, "posts_per_day": 1.0, "preview": [], "checked_at": "2026-11-25T00:00:00Z"}
+            for h, t in [("me", ["old typo"]), ("bo", ["cooking", "Agents"])]]
+    replace_directory(conn, rows)
+    conn.commit()
+    by = {v.handle: v for v in library_api.directory(conn, ["agents"], "me")}
+    assert by["me"].topics == ["agents"] and by["me"].topic_tags == [("agents", False)]
+    assert by["bo"].topic_tags == [("Agents", True), ("cooking", False)]

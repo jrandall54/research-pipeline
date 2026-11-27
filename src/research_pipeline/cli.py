@@ -1153,6 +1153,8 @@ def _add_command(kind: str, add: Callable[[Path, str], bool]) -> None:
         shown = profile_edit.normalise_text(text)
         if changed:
             term.ok(f"Added {kind}: {shown}")
+            if kind == "topic":
+                _topics_changed(ctx)
         else:
             typer.echo(f'"{shown}" is already in your profile ({kind}s).')
 
@@ -1170,6 +1172,8 @@ def _remove_command(kind: str, remove: Callable[[Path, str], bool]) -> None:
             changed = remove(ctx.vault, text_or_number)
         if changed:
             term.ok(f"Removed {kind}: {text_or_number.strip()}")
+            if kind == "topic":
+                _topics_changed(ctx)
         else:
             typer.echo(f'"{text_or_number.strip()}" is not in your profile ({kind}s). Nothing was changed.')
 
@@ -1379,10 +1383,13 @@ def profile_suggest(
         _require_model(ctx.config)
         if description is None:
             description = _prompt("Describe your research in a few sentences")
+        before = _load_profile(ctx).topics
         try:
             _suggest_flow(ctx.vault, ctx.config, description, yes)
         except (ValueError, ConfigError) as exc:
             raise _fail(str(exc)) from exc
+        if _load_profile(ctx).topics != before:
+            _topics_changed(ctx, locked=True)
 
 
 @profile_app.command("set-top-n")
@@ -3426,6 +3433,34 @@ def _app_settings(ctx: _Context) -> tuple[list[str], dict | None]:
         share = {"handle": handle, "display_name": ctx.config.share_display_name or handle,
                  "address": share_publish.feed_url(handle)}
     return topics, share
+
+
+def _topics_changed(ctx: _Context, *, locked: bool = False) -> None:
+    """After your topics change: republish your feed (when sharing is on) and restart the app.
+
+    Followers and the directory then see your new topics now, not after tonight's run. A failed
+    push only warns: the topic change is saved and the nightly run publishes it anyway.
+    """
+    if ctx.config.share_enabled and ctx.config.share_handle:
+        lock = None if locked else VaultLock(ctx.vault, "rpipe profile")
+        try:
+            if lock is not None:
+                lock.acquire()
+            with _reporter() as reporter:
+                result = _publish_feed(ctx, _load_profile(ctx), _share_runner(), reporter,
+                                       handle=ctx.config.share_handle, name=ctx.config.share_display_name)
+            if result == "pushed":
+                term.ok("Published your feed with the new topics.")
+        except RunLocked:
+            term.warn("Your topics are saved. Another rpipe command is running, so your feed is "
+                      "published with them tonight (or run `rpipe share publish` later).")
+        except Exception as exc:  # noqa: BLE001 - the topic change is saved; only the push failed
+            reason = " ".join(str(exc).split()) or type(exc).__name__
+            term.warn(f"Your topics are saved, but publishing failed (tonight's run will retry): {reason}")
+        finally:
+            if lock is not None:
+                lock.release()
+    _restart_app_if_installed()
 
 
 def _restart_app_if_installed() -> None:

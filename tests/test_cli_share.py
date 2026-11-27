@@ -395,3 +395,36 @@ def test_browse_entry_shows_three_topics_shared_first():
     out = cli._browse_entry(e, {"agents"})
     assert out.splitlines()[2] == "  Agents, robotics, java, +3 more"
     assert "1 topic in common" in out and len(out.splitlines()) == 3
+
+
+def prof(vault, *args):
+    return runner.invoke(cli.app, ["profile", *args, "--vault", str(vault)])
+
+
+def test_topic_change_republishes_when_sharing(vault, monkeypatch):
+    enable(vault)
+    fake = signed_in()
+    use(monkeypatch, fake)
+    res = prof(vault, "add-topic", "local models")
+    assert res.exit_code == 0, res.output
+    assert ["git", "push"] in fake.calls and "Published your feed with the new topics." in res.output
+    fake.calls.clear()
+    res = prof(vault, "remove-topic", "local models")
+    assert res.exit_code == 0 and ["git", "push"] in fake.calls
+
+
+def test_topic_change_does_not_publish_when_private(vault, monkeypatch):
+    fake = signed_in()
+    use(monkeypatch, fake)
+    res = prof(vault, "add-topic", "local models")
+    assert res.exit_code == 0 and fake.calls == []
+
+
+def test_topic_change_keeps_the_edit_when_the_push_fails(vault, monkeypatch):
+    enable(vault)
+    fake = signed_in({("git", "push"): done(1, "", "network down")})
+    use(monkeypatch, fake)
+    res = prof(vault, "add-topic", "local models")
+    assert res.exit_code == 0, res.output
+    assert "Your topics are saved, but publishing failed" in res.output
+    assert "local models" in prof(vault, "show").output

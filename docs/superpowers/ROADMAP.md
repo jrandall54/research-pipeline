@@ -1,6 +1,6 @@
 # Roadmap
 
-The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-26 (Phases 10 to 10.2 merged).
+The single list of all work on rpipe: what is done, what is next, and where each piece's design and plan live. Updated in the same commit as the work it describes. Last updated 2026-11-26 (Phases 10 to 10.3 merged).
 
 **Next up:** check the first nightly run with sharing (setup done 2026-11-26), then the AI club pilot (members follow the owner's feed). Summaries and the app's look stay as they are (owner ruling 2026-11-26).
 
@@ -43,6 +43,7 @@ The single list of all work on rpipe: what is done, what is next, and where each
 | 10 | Sharing: publish your feed, a directory, follow others, custom mixes | merged | [design](specs/phase-10-sharing-design.md) | [plan](plans/phase-10-sharing.md) |
 | 10.1 | Clearer first-time setup: every rpipe init step explains what it needs and why; categories as a numbered menu | merged | (owner request 2026-11-26) | [plan](plans/phase-10.1-clearer-setup.md) |
 | 10.2 | A cleaner terminal look: one style for every rpipe command (headers, hints, ✓/!/✗ marks) | merged | [design](specs/phase-10.2-terminal-style-design.md) | [plan](plans/phase-10.2-terminal-style.md) |
+| 10.3 | Tidy People cards: topics as short tags (shared ones first, "+N more"), your own card from your live profile, topic changes republish your feed | merged | [design](specs/phase-10.3-people-topics-design.md) | [plan](plans/phase-10.3-people-topics.md) |
 | 11 | Notes and link capture; the shelf grows into one library (overlap alerts, archive connections, weekly synthesis page) | idea | | |
 | 12 | Narrated video explainers | idea | | |
 | 13 | Study material: concept map linked to coursework, quizzes, the teacher's layered templates | idea | | |

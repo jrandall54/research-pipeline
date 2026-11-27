@@ -111,7 +111,7 @@ Every command takes `--vault PATH` (same resolution as `init`). Messages are pla
 | --- | --- |
 | `rpipe profile suggest [DESCRIPTION] [--yes]` | Describe your research in a few sentences; the local model proposes topics and seed papers and you approve each (see "Guided suggestions"). |
 | `rpipe profile show` | Print everything: numbered topics, numbered seeds with titles, authors, keywords, top N, categories. |
-| `rpipe profile add-topic TEXT` / `remove-topic TEXT_OR_NUMBER` | Change topics. |
+| `rpipe profile add-topic TEXT` / `remove-topic TEXT_OR_NUMBER` | Change topics. When sharing is on, your feed is republished right away so others see the new topics (see sharing.md, "When you change your topics"). |
 | `rpipe profile add-author NAME` / `rpipe profile remove-author NAME_OR_NUMBER` | Change followed authors. |
 | `rpipe profile add-keyword WORD` / `rpipe profile remove-keyword WORD_OR_NUMBER` | Change keywords. |
 | `rpipe profile add-seed INPUT [--yes]` | Add a seed from an arXiv link, id or title (see "Adding a seed"). `--yes` skips the question and takes the only (or first) match. |

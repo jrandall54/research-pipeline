@@ -116,6 +116,8 @@ Publishing turns your database into the three kinds of file above and pushes the
 
 Then setup waits until the address answers and runs a test push before it records that sharing is on.
 
+**When you change your topics** (Phase 10.3). `rpipe profile add-topic`, `remove-topic` and `suggest` (when it added topics) republish your feed straight away if sharing is on, with the usual progress lines, and print "Published your feed with the new topics." Followers and the directory then see the change the next time they look, not after tonight's run. Without this a removed topic (the owner's typo "sexurity") stayed in the public `feed.json` and on the People page until the night. The topic edit is saved first; if the push fails, or another rpipe command holds the vault lock, you get a warning ("Your topics are saved, but publishing failed (tonight's run will retry): ...") and the command still succeeds. It then restarts the background app, if installed, so People shows the new topics. `rpipe init` does not republish: sharing is set up after it. Code: `cli._topics_changed`.
+
 **Each night** (the `publish` stage, after the digest is written):
 
 1. `collect_posts` reads every paper that has appeared in a digest, ranked within its day by triage score (ties by paper id), with its summary and provenance. Reasons pass through `public_reasons`, and diagrams are never read.
@@ -169,7 +171,7 @@ You need `git` and the GitHub command line tool `gh` only to *publish*; followin
 | --- | --- |
 | `rpipe share setup` | Guided first-time publishing; run it again to repair things |
 | `rpipe share status` | Publishing on/off, your address, last push and its result, then each followed feed |
-| `rpipe share publish` | Rebuild and push now (the nightly run does this on its own) |
+| `rpipe share publish` | Rebuild and push now (the nightly run does this on its own; changing your topics also does it, see below) |
 | `rpipe share set-name NAME` | Change your display name (republishes) |
 | `rpipe share stop [--delete]` | Stop publishing and leave the directory; `--delete` also deletes the repository (asks first) |
 | `rpipe share browse [SEARCH]` | Refresh the directory and list it, optionally filtered. Each person is a short block: name and handle, papers a day and topics in common, then at most 3 topics (the ones you share first, the rest counted as "+N more"); SEARCH still matches every topic |

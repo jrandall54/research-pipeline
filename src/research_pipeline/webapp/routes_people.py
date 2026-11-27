@@ -12,6 +12,7 @@ from research_pipeline.webapp.routes_actions import Body, _error
 
 router = APIRouter()
 Conn = Annotated[sqlite3.Connection, Depends(get_conn)]
+TOPICS_SHOWN = 4  # topic tags on a closed card; the rest are counted ("+10 more") and listed when it opens
 
 
 def _own_handle(request: Request) -> str | None:
@@ -25,7 +26,7 @@ def people(request: Request, conn: Conn):
     ctx = {
         "nav": "people", "share": state.share,
         "directory": library_api.directory(conn, state.my_topics, _own_handle(request)),
-        "follows": library_api.follows(conn),
+        "follows": library_api.follows(conn), "topics_shown": TOPICS_SHOWN,
     }
     return templates.TemplateResponse(request, "people.html", ctx)
 
